@@ -32,8 +32,8 @@ void DragAndReleaseToolRequest::Apply(ToolRequestVisitorFunctor& f) const {
   f.Apply(*this);
 }
 
-std::string DragAndReleaseToolRequest::JournalEvent() const {
-  return "DragAndRelease";
+std::string_view DragAndReleaseToolRequest::Name() const {
+  return kName;
 }
 
 mojom::ToolActionPtr DragAndReleaseToolRequest::ToMojoToolAction(

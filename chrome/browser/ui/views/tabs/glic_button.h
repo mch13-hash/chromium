@@ -18,6 +18,7 @@
 #include "chrome/browser/glic/fre/glic_fre.mojom.h"
 #endif  // BUILDFLAG(ENABLE_GLIC)
 
+class BrowserWindowInterface;
 class PrefService;
 
 namespace glic {
@@ -36,13 +37,20 @@ class GlicButton : public TabStripNudgeButton,
                       PressedCallback close_pressed_callback,
                       base::RepeatingClosure hovered_callback,
                       base::RepeatingClosure mouse_down_callback,
+                      base::RepeatingClosure expansion_animation_done_callback,
                       const std::u16string& tooltip);
   GlicButton(const GlicButton&) = delete;
   GlicButton& operator=(const GlicButton&) = delete;
   ~GlicButton() override;
 
+  static GlicButton* FromBrowser(BrowserWindowInterface* browser);
+
   void SetNudgeLabel(std::string label);
   void RestoreDefaultLabel();
+  void SetGlicPanelIsOpen(bool open);
+
+  // Update button for glic attachment state.
+  void SetGlicDetached(bool detached);
 
   // TabStripNudgeButton:
   void SetIsShowingNudge(bool is_showing) override;
@@ -58,6 +66,7 @@ class GlicButton : public TabStripNudgeButton,
   gfx::Size CalculatePreferredSize(
       const views::SizeBounds& available_size) const override;
   void StateChanged(ButtonState old_state) override;
+  void AddedToWidget() override;
 
   // views::ContextMenuController:
   void ShowContextMenuForViewImpl(
@@ -75,17 +84,19 @@ class GlicButton : public TabStripNudgeButton,
 
   // gfx::AnimationDelegate:
   void AnimationProgressed(const gfx::Animation* animation) override;
+  void AnimationEnded(const gfx::Animation* animation) override;
+  void AnimationCanceled(const gfx::Animation* animation) override;
 
   bool IsContextMenuShowingForTest();
 
   // Sets the button back to its default colors.
   void SetDefaultColors();
 
-  // Sets the button to its highlighted state.
-  void HighlightGlicButton();
-
   // Called when the slide animation finishes.
   void OnAnimationEnded();
+
+  gfx::SlideAnimation* GetExpansionAnimationForTesting() override;
+  bool GetLabelEnabledForTesting() const;
 
  private:
   // views::LabelButton:
@@ -163,6 +174,9 @@ class GlicButton : public TabStripNudgeButton,
   // (i.e., the user is very likely to interact with it soon).
   base::RepeatingClosure mouse_down_callback_;
 
+  // Invoked when the button hide animation finishes.
+  base::RepeatingClosure expansion_animation_done_callback_;
+
   // Cached widths for animating label changes.
   int initial_width_ = 0;
   int expanded_width_ = 0;
@@ -183,6 +197,8 @@ class GlicButton : public TabStripNudgeButton,
 
   const ui::ImageModel normal_icon_;
   const ui::ImageModel icon_for_highlight_;
+
+  bool glic_panel_is_open_ = false;
 
   base::WeakPtrFactory<GlicButton> weak_ptr_factory_{this};
 };

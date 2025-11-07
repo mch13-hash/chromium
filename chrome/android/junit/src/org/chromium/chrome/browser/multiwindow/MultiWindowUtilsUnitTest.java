@@ -16,8 +16,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import static org.chromium.chrome.browser.multiwindow.MultiWindowUtils.HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX;
-import static org.chromium.chrome.browser.multiwindow.MultiWindowUtils.HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX;
 import static org.chromium.chrome.browser.multiwindow.MultiWindowUtils.HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW;
 import static org.chromium.chrome.browser.multiwindow.MultiWindowUtils.HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW;
 import static org.chromium.chrome.browser.multiwindow.MultiWindowUtils.INVALID_TASK_ID;
@@ -60,7 +58,6 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.homepage.HomepageManager;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils.InstanceAllocationType;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtilsUnitTest.ShadowMultiInstanceManagerApi31;
-import org.chromium.chrome.browser.multiwindow.MultiWindowUtilsUnitTest.ShadowSysUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.tab.Tab;
@@ -82,15 +79,15 @@ import org.chromium.url.GURL;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
 /** Unit tests for {@link MultiWindowUtils}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(
-        manifest = Config.NONE,
-        shadows = {ShadowMultiInstanceManagerApi31.class, ShadowSysUtils.class})
+@Config(manifest = Config.NONE, shadows = ShadowMultiInstanceManagerApi31.class)
+@EnableFeatures(ChromeFeatureList.ROBUST_WINDOW_MANAGEMENT)
 public class MultiWindowUtilsUnitTest {
     /** Shadows {@link MultiInstanceManagerApi31} class for testing. */
     @Implements(MultiInstanceManagerApi31.class)
@@ -126,21 +123,6 @@ public class MultiWindowUtilsUnitTest {
         @Implementation
         public static int getRunningTabbedActivityCount() {
             return sRunningTabbedActivityCount;
-        }
-    }
-
-    /** Shadows {@link SysUtils} class for testing. */
-    @Implements(SysUtils.class)
-    public static class ShadowSysUtils {
-        private static int sMemoryInMB;
-
-        public static void setMemoryInMB(int memoryInMB) {
-            sMemoryInMB = memoryInMB;
-        }
-
-        @Implementation
-        public static int amountOfPhysicalMemoryKB() {
-            return sMemoryInMB * ConversionUtils.KILOBYTES_PER_MEGABYTE;
         }
     }
 
@@ -229,7 +211,7 @@ public class MultiWindowUtilsUnitTest {
                 };
 
         when(mHomepageManager.isHomepageEnabled()).thenReturn(true);
-        when(mHomepageManager.getHomepageGurl()).thenReturn(NTP_GURL);
+        when(mHomepageManager.getHomepageGurl(/* isIncognito= */ false)).thenReturn(NTP_GURL);
         HomepageManager.setInstanceForTesting(mHomepageManager);
 
         when(mDesktopWindowStateManager.getAppHeaderState()).thenReturn(mAppHeaderState);
@@ -237,7 +219,8 @@ public class MultiWindowUtilsUnitTest {
         when(mTabModelSelector.getCurrentTabModelSupplier()).thenReturn(mTabModelSupplier);
         when(mTabModelSupplier.get()).thenReturn(mNormalTabModel);
 
-        ShadowSysUtils.setMemoryInMB(7000);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                7000 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
     }
 
     @After
@@ -404,7 +387,7 @@ public class MultiWindowUtilsUnitTest {
     @Test
     public void
             testIsMoveOtherWindowSupported_HasOneTabWithHomePageEnabledAsCustomUrl_ReturnsFalse() {
-        when(mHomepageManager.getHomepageGurl()).thenReturn(TEST_GURL);
+        when(mHomepageManager.getHomepageGurl(/* isIncognito= */ false)).thenReturn(TEST_GURL);
         when(mHomepageManager.isHomepageEnabled()).thenReturn(true);
         when(mTabModelSelector.getTotalTabCount()).thenReturn(1);
         assertFalse(
@@ -534,6 +517,44 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
+    public void testGetInstanceCountWithFallback() {
+        when(mTabModelSelector.getModel(false)).thenReturn(mNormalTabModel);
+        when(mTabModelSelector.getModel(true)).thenReturn(mIncognitoTabModel);
+        when(mTabModelSelector.isTabStateInitialized()).thenReturn(true);
+
+        // Create 2 active instances.
+        writeInstanceInfo(
+                INSTANCE_ID_0, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 2, TASK_ID_5);
+        writeInstanceInfo(
+                INSTANCE_ID_1, URL_2, /* tabCount= */ 1, /* incognitoTabCount= */ 0, TASK_ID_6);
+
+        // Create 1 inactive instance. This instance is restorable because it has tabs, but it is
+        // not active because it does not have a valid task ID.
+        writeInstanceInfo(
+                INSTANCE_ID_2,
+                URL_3,
+                /* tabCount= */ 5,
+                /* incognitoTabCount= */ 0,
+                MultiWindowUtils.INVALID_TASK_ID);
+
+        // Mock that the tasks for the 2 active instances are running.
+        MultiInstanceManagerApi31.setAppTaskIdsForTesting(
+                new HashSet<>(Arrays.asList(TASK_ID_5, TASK_ID_6)));
+
+        assertEquals(
+                "getInstanceCountWithFallback should only count active instances.",
+                2,
+                MultiWindowUtils.getInstanceCountWithFallback(
+                        MultiInstanceManagerApi31.PersistedInstanceType.ACTIVE));
+
+        assertEquals(
+                "getInstanceCountWithFallback should count all instances.",
+                3,
+                MultiWindowUtils.getInstanceCountWithFallback(
+                        MultiInstanceManagerApi31.PersistedInstanceType.ANY));
+    }
+
+    @Test
     public void getInstanceCount_ExceedsLimit() {
         when(mTabModelSelector.getModel(false)).thenReturn(mNormalTabModel);
         when(mTabModelSelector.getModel(true)).thenReturn(mIncognitoTabModel);
@@ -571,15 +592,7 @@ public class MultiWindowUtilsUnitTest {
             writeInstanceInfo(i, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 0, i);
         }
 
-        // New instance preferred.
-        int instanceId = MultiWindowUtils.getInstanceIdForViewIntent(true);
-        assertEquals(
-                "The default instance ID should be returned when a new instance is preferred.",
-                TabWindowManager.INVALID_WINDOW_ID,
-                instanceId);
-
-        // Existing instance preferred.
-        instanceId = MultiWindowUtils.getInstanceIdForViewIntent(false);
+        int instanceId = MultiWindowUtils.getInstanceIdForViewIntent();
         assertEquals(
                 "The last accessed instance ID should be returned when an existing instance is"
                         + " preferred.",
@@ -606,7 +619,7 @@ public class MultiWindowUtilsUnitTest {
         // Simulate last access of instance ID 0.
         writeInstanceInfo(0, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 0, 0);
 
-        int instanceId = MultiWindowUtils.getInstanceIdForViewIntent(true);
+        int instanceId = MultiWindowUtils.getInstanceIdForViewIntent();
         assertEquals("The last accessed instance ID should be returned.", 0, instanceId);
     }
 
@@ -630,7 +643,7 @@ public class MultiWindowUtilsUnitTest {
         // Simulate destruction of the activity represented by instance ID 0.
         ShadowMultiInstanceManagerApi31.updateWindowIdsOfRunningTabbedActivities(0, true);
 
-        int instanceId = MultiWindowUtils.getInstanceIdForViewIntent(true);
+        int instanceId = MultiWindowUtils.getInstanceIdForViewIntent();
         assertEquals(
                 "The instance ID of a running activity that was last accessed should be returned.",
                 maxInstances - 1,
@@ -639,8 +652,7 @@ public class MultiWindowUtilsUnitTest {
 
     @Test
     @Config(sdk = 31)
-    @DisabledTest(message = "https://crbug.com/423920653")
-    public void testGetInstanceIdForLinkIntent_LessThanMaxInstancesOpen() {
+    public void testGetInstanceIdForLinkIntent_OnlyConsidersActiveInstances() {
         MultiWindowTestUtils.enableMultiInstance();
         when(mTabModelSelector.getModel(false)).thenReturn(mNormalTabModel);
         when(mTabModelSelector.getModel(true)).thenReturn(mIncognitoTabModel);
@@ -649,14 +661,29 @@ public class MultiWindowUtilsUnitTest {
         // Simulate opening of 1 less than the max number of instances. #writeInstanceInfo will
         // update the access time for IDs 0 -> |maxInstances - 2| in increasing order of recency.
         for (int i = 0; i < maxInstances - 1; i++) {
+            writeInstanceInfo(i, URL_1, /* tabCount= */ 1, /* incognitoTabCount= */ 0, i);
             ShadowMultiInstanceManagerApi31.updateWindowIdsOfRunningTabbedActivities(i, false);
-            writeInstanceInfo(i, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 0, i);
         }
 
+        // Create inactive instances to exceed max instances.
+        writeInstanceInfo(
+                maxInstances - 1,
+                URL_2,
+                /* tabCount= */ 1,
+                /* incognitoTabCount= */ 0,
+                MultiWindowUtils.INVALID_TASK_ID);
+        writeInstanceInfo(
+                maxInstances,
+                URL_3,
+                /* tabCount= */ 1,
+                /* incognitoTabCount= */ 0,
+                MultiWindowUtils.INVALID_TASK_ID);
+
+        // Total instances is maxInstances + 1. Active instances is maxInstances - 1. Returns
+        // INVALID_WINDOW_ID to allow for new window creation.
         int instanceId = MultiWindowUtils.getInstanceIdForLinkIntent(mock(Activity.class));
         assertEquals(
-                "Instance ID for link intent should be INVALID_WINDOW_ID when fewer than the max"
-                        + " number of instances are open.",
+                "Should return INVALID_WINDOW_ID to allow for new window creation.",
                 TabWindowManager.INVALID_WINDOW_ID,
                 instanceId);
     }
@@ -699,7 +726,7 @@ public class MultiWindowUtilsUnitTest {
 
     @Test
     @Config(sdk = 31)
-    public void testRecordDesktopWindowCount_ColdStartOfExistingInstance() {
+    public void testRecordDesktopWindowCount_ColdStartOfInstance() {
         when(mAppHeaderState.isInDesktopWindow()).thenReturn(true);
 
         // Simulate persistence of 2 instances, running of 1.
@@ -715,79 +742,19 @@ public class MultiWindowUtilsUnitTest {
                     InstanceAllocationType.DEFAULT,
                     InstanceAllocationType.EXISTING_INSTANCE_MAPPED_TASK,
                     InstanceAllocationType.EXISTING_INSTANCE_UNMAPPED_TASK,
-                    InstanceAllocationType.EXISTING_INSTANCE_NEW_TASK
-                };
-
-        // Assume that the histograms are attempted to be recorded on a cold start of an existing
-        // instance, for different instance allocation types.
-        for (int type : instanceAllocationTypes) {
-            var watcher =
-                    HistogramWatcher.newBuilder()
-                            .expectIntRecord(
-                                    HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW, runningActivityCount)
-                            .expectIntRecord(
-                                    HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX,
-                                    runningActivityCount)
-                            .expectNoRecords(
-                                    HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX)
-                            .expectIntRecord(HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW, 2)
-                            .expectIntRecord(
-                                    HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX,
-                                    2)
-                            .expectNoRecords(
-                                    HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX)
-                            .build();
-            MultiWindowUtils.maybeRecordDesktopWindowCountHistograms(
-                    mDesktopWindowStateManager, type, /* isColdStart= */ true);
-            watcher.assertExpected();
-        }
-    }
-
-    @Test
-    @Config(sdk = 31)
-    public void testRecordDesktopWindowCount_ColdStartOfNewInstance() {
-        when(mAppHeaderState.isInDesktopWindow()).thenReturn(true);
-
-        // Simulate persistence of 2 instances, running of 1.
-        writeInstanceInfo(
-                INSTANCE_ID_0, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 2, TASK_ID_5);
-        writeInstanceInfo(
-                INSTANCE_ID_1, URL_2, /* tabCount= */ 0, /* incognitoTabCount= */ 0, TASK_ID_6);
-        int runningActivityCount = 1;
-        ShadowMultiInstanceManagerApi31.updateRunningTabbedActivityCount(runningActivityCount);
-
-        int[] instanceAllocationTypes =
-                new int[] {
+                    InstanceAllocationType.EXISTING_INSTANCE_NEW_TASK,
                     InstanceAllocationType.NEW_INSTANCE_NEW_TASK,
                     InstanceAllocationType.PREFER_NEW_INSTANCE_NEW_TASK
                 };
 
-        // Assume that the histograms are attempted to be recorded on a cold start of a new
-        // instance, for different instance allocation types.
+        // Assume that the histograms are attempted to be recorded on a cold start of an instance,
+        // for different instance allocation types.
         for (int type : instanceAllocationTypes) {
             var watcher =
                     HistogramWatcher.newBuilder()
                             .expectIntRecord(
                                     HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW, runningActivityCount)
-                            .expectIntRecord(
-                                    HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX,
-                                    runningActivityCount)
-                            .expectNoRecords(
-                                    HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX)
                             .expectIntRecord(HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW, 2)
-                            .expectIntRecord(
-                                    HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX,
-                                    2)
-                            .expectNoRecords(
-                                    HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW
-                                            + HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX)
                             .build();
             MultiWindowUtils.maybeRecordDesktopWindowCountHistograms(
                     mDesktopWindowStateManager, type, /* isColdStart= */ true);
@@ -801,19 +768,7 @@ public class MultiWindowUtilsUnitTest {
         var watcher =
                 HistogramWatcher.newBuilder()
                         .expectNoRecords(HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW)
-                        .expectNoRecords(
-                                HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW
-                                        + HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX)
-                        .expectNoRecords(
-                                HISTOGRAM_NUM_ACTIVITIES_DESKTOP_WINDOW
-                                        + HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX)
                         .expectNoRecords(HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW)
-                        .expectNoRecords(
-                                HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW
-                                        + HISTOGRAM_DESKTOP_WINDOW_COUNT_EXISTING_INSTANCE_SUFFIX)
-                        .expectNoRecords(
-                                HISTOGRAM_NUM_INSTANCES_DESKTOP_WINDOW
-                                        + HISTOGRAM_DESKTOP_WINDOW_COUNT_NEW_INSTANCE_SUFFIX)
                         .build();
 
         // Assume that the histograms are attempted to be recorded on a cold start of the app, not
@@ -870,6 +825,7 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
+    @DisableFeatures(ChromeFeatureList.ROBUST_WINDOW_MANAGEMENT)
     public void testInstanceRestorationMessage() {
         MultiWindowUtils.setInstanceCountForTesting(5);
         MultiWindowUtils.setMaxInstancesForTesting(3);
@@ -923,6 +879,7 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
+    @DisableFeatures(ChromeFeatureList.ROBUST_WINDOW_MANAGEMENT)
     public void testInstanceRestorationMessage_InstanceCountWithinLimit() {
         MultiWindowUtils.setInstanceCountForTesting(2);
         MultiWindowUtils.setMaxInstancesForTesting(3);
@@ -944,6 +901,7 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
+    @DisableFeatures(ChromeFeatureList.ROBUST_WINDOW_MANAGEMENT)
     public void testInstanceRestorationMessage_ShownExactlyOnce() {
         MultiWindowUtils.setInstanceCountForTesting(5);
         MultiWindowUtils.setMaxInstancesForTesting(3);
@@ -1039,14 +997,16 @@ public class MultiWindowUtilsUnitTest {
         MultiWindowUtils.setMultiInstanceApi31EnabledForTesting(true);
 
         // Verify default instance limit for low-memory device, using default memory threshold.
-        ShadowSysUtils.setMemoryInMB(4000);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                4000 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         assertEquals(
                 "Instance limit on low-memory device is incorrect.",
                 5,
                 MultiWindowUtils.getMaxInstances());
 
         // Verify default instance limit for high-memory device, using default memory threshold.
-        ShadowSysUtils.setMemoryInMB(7000);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                7000 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         assertEquals(
                 "Instance limit on high-memory device is incorrect.",
                 20,
@@ -1071,7 +1031,8 @@ public class MultiWindowUtilsUnitTest {
     @EnableFeatures(ChromeFeatureList.DISABLE_INSTANCE_LIMIT)
     public void testMaxInstances_CustomInstanceLimit_LowMemoryDevice() {
         MultiWindowUtils.setMultiInstanceApi31EnabledForTesting(true);
-        ShadowSysUtils.setMemoryInMB(4000);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                4000 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         Map<String, Integer> featureParams = new HashMap<>();
         featureParams.put("max_instance_limit", 50);
         updateFeatureParams(ChromeFeatureList.DISABLE_INSTANCE_LIMIT, featureParams);
@@ -1086,7 +1047,8 @@ public class MultiWindowUtilsUnitTest {
     @EnableFeatures(ChromeFeatureList.DISABLE_INSTANCE_LIMIT)
     public void testMaxInstances_CustomMemoryThreshold_HighMemoryDevice() {
         MultiWindowUtils.setMultiInstanceApi31EnabledForTesting(true);
-        ShadowSysUtils.setMemoryInMB(8500);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                8500 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         Map<String, Integer> featureParams = new HashMap<>();
         featureParams.put("max_instance_limit_memory_threshold_mb", 8000);
         updateFeatureParams(ChromeFeatureList.DISABLE_INSTANCE_LIMIT, featureParams);
@@ -1101,7 +1063,8 @@ public class MultiWindowUtilsUnitTest {
     @EnableFeatures(ChromeFeatureList.DISABLE_INSTANCE_LIMIT)
     public void testMaxInstances_CustomMemoryThreshold_LowMemoryDevice() {
         MultiWindowUtils.setMultiInstanceApi31EnabledForTesting(true);
-        ShadowSysUtils.setMemoryInMB(7500);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                7500 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         Map<String, Integer> featureParams = new HashMap<>();
         featureParams.put("max_instance_limit_memory_threshold_mb", 8000);
         updateFeatureParams(ChromeFeatureList.DISABLE_INSTANCE_LIMIT, featureParams);
@@ -1116,7 +1079,8 @@ public class MultiWindowUtilsUnitTest {
     @EnableFeatures(ChromeFeatureList.DISABLE_INSTANCE_LIMIT)
     public void testMaxInstances_CustomInstanceLimit_CustomMemoryThreshold_HighMemoryDevice() {
         MultiWindowUtils.setMultiInstanceApi31EnabledForTesting(true);
-        ShadowSysUtils.setMemoryInMB(8500);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                8500 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         Map<String, Integer> featureParams = new HashMap<>();
         featureParams.put("max_instance_limit", 50);
         featureParams.put("max_instance_limit_memory_threshold_mb", 8000);
@@ -1132,7 +1096,8 @@ public class MultiWindowUtilsUnitTest {
     @EnableFeatures(ChromeFeatureList.DISABLE_INSTANCE_LIMIT)
     public void testMaxInstances_CustomInstanceLimit_CustomMemoryThreshold_LowMemoryDevice() {
         MultiWindowUtils.setMultiInstanceApi31EnabledForTesting(true);
-        ShadowSysUtils.setMemoryInMB(7500);
+        SysUtils.setAmountOfPhysicalMemoryKbForTesting(
+                7500 * ConversionUtils.KILOBYTES_PER_MEGABYTE);
         Map<String, Integer> featureParams = new HashMap<>();
         featureParams.put("max_instance_limit", 50);
         featureParams.put("max_instance_limit_memory_threshold_mb", 8000);

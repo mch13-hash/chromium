@@ -26,124 +26,89 @@ enum class FlushReason {
   // again.
   kClear = 3,
 
-  // The canvas content is being swapped-out because its tab is hidden.
-  // Should not happen while printing.
-  kHibernating = 4,
-
-  // Obsolete.
-  kOffscreenCanvasCommit_OBSOLETE = 5,
-
   // `OffscreenCanvas` dispatched a frame to the compositor as part of the
   // regular animation frame presentation flow.
   // Should not happen while printing.
-  kOffscreenCanvasPushFrame = 6,
+  kOffscreenCanvasPushFrame = 4,
 
   // createImageBitmap() was called with the canvas as its argument.
   // Should not happen while printing.
-  kCreateImageBitmap = 7,
+  kCreateImageBitmap = 5,
 
   // The `getImageData` API method was called on the canvas's 2d context.
   // This inhibits vector printing.
-  kGetImageData = 8,
+  kGetImageData = 6,
 
   // A paint op was recorded that referenced a volatile source image and
   // therefore the recording needed to be flush immediately before the
   // source image contents could be overwritten. For example, a video frame.
   // This inhibits vector printing.
-  kVolatileSourceImage = 9,
+  kVolatileSourceImage = 7,
 
   // The canvas element dispatched a frame to the compositor
   // This inhibits vector printing.
-  kCanvasPushFrame = 10,
+  kCanvasPushFrame = 8,
 
   // The canvas element dispatched a frame to the compositor while printing
   // was in progress.
   // This does not prevent vector printing as long as the current frame is
   // clear.
-  kCanvasPushFrameWhilePrinting = 11,
-
-  // Direct write access to the pixel buffer (e.g. `putImageData`)
-  // This inhibits vector printing.
-  kWritePixels = 12,
+  kCanvasPushFrameWhilePrinting = 9,
 
   // To blob was called on the canvas.
   // This inhibits vector printing.
-  kToBlob = 13,
+  kToBlob = 10,
 
   // A `VideoFrame` object was created with the canvas as an image source
   // This inhibits vector printing.
-  kCreateVideoFrame = 14,
+  kCreateVideoFrame = 11,
 
   // The canvas was used as a source image in a call to
   // `CanvasRenderingContext2D.drawImage`.
   // This inhibits vector printing.
-  kDrawImage = 15,
+  kDrawImage = 12,
 
   // The canvas is observed by a `CanvasDrawListener`. This typically means
   // that canvas contents are being streamed to a WebRTC video stream.
   // This inhibits vector printing.
-  kDrawListener = 16,
+  kDrawListener = 13,
 
   // The canvas contents were painted to its parent content layer, this
   // is the non-composited presentation code path.
   // This should never happen while printing.
-  kPaint = 17,
+  kPaint = 14,
 
   // Canvas contents were transferred to an `ImageBitmap`. This does not
   // inhibit vector printing since it effectively clears the canvas.
-  kTransfer = 18,
+  kTransfer = 15,
 
   // The canvas is being printed.
-  kPrinting = 19,
+  kPrinting = 16,
 
   // The canvas was loaded as a WebGPU external image.
   // This inhibits vector printing.
-  kWebGPUExternalImage = 20,
+  kWebGPUExternalImage = 17,
 
   // The canvas contents were copied to an SkBitmap.
   // This inhibits vector printing.
-  kCopyToSkBitmap = 21,
+  kCopyToSkBitmap = 18,
 
   // The canvas was uploaded to a WebGL texture.
   // This inhibits vector printing.
-  kWebGLTexImage = 22,
+  kWebGLTexImage = 19,
 
   // The canvas was used as a source in a call to
   // `CanvasRenderingContext2D.createPattern`.
   // This inhibits vector printing.
-  kCreatePattern = 23,
-
-  // The canvas contents were copied to the clipboard.
-  // This inhibits vector printing.
-  kClipboard = 24,
-
-  // The canvas's recorded ops had a reference to an image whose contents
-  // were about to change.
-  // This inhibits vector printing.
-  kSourceImageWillChange = 25,
+  kCreatePattern = 20,
 
   // The canvas was uploade to a WebGPU texture.
   // This inhibits vector printing.
-  kWebGPUTexture = 26,
+  kWebGPUTexture = 21,
 
-  // The HTMLCanvasElement.toDataURL method was called on the canvas.
-  kToDataURL = 27,
+  kOther = 22,
 
-  // The canvas's layer bridge was replaced. This happens when switching
-  // between GPU and CPU rendering.
-  // This inhibits vector printing.
-  kReplaceLayerBridge = 28,
-
-  // The auto-flush heuristic kicked-in. Should not happen while
-  // printing.
-  kRecordingLimitExceeded = 29,
-
-  // The canvas was used as a source image in a call to
-  // `CanvasRenderingContext2D.drawMesh`.
-  // This inhibits vector printing.
-  kDrawMesh = 30,
-
-  kMaxValue = kDrawMesh,
+  kMaxValue = kOther,
 };
 
 }  // namespace blink

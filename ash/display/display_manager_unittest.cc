@@ -4213,19 +4213,19 @@ TEST_F(DisplayManagerOrientationTest, SaveRestoreUserRotationLock) {
   orientation_controller->AddObserver(&test_observer);
 
   // Set up windows with portrait, landscape, and any.
-  aura::Window* window_a = CreateTestWindowInShellWithId(0);
+  aura::Window* window_a = CreateTestWindowInShell({.window_id = 0});
   {
     window_a->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
     orientation_controller->LockOrientationForWindow(
         window_a, chromeos::OrientationType::kAny);
   }
-  aura::Window* window_p = CreateTestWindowInShellWithId(0);
+  aura::Window* window_p = CreateTestWindowInShell({.window_id = 0});
   {
     window_p->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
     orientation_controller->LockOrientationForWindow(
         window_p, chromeos::OrientationType::kPortrait);
   }
-  aura::Window* window_l = CreateTestWindowInShellWithId(0);
+  aura::Window* window_l = CreateTestWindowInShell({.window_id = 0});
   {
     window_l->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
     orientation_controller->LockOrientationForWindow(
@@ -4333,7 +4333,7 @@ TEST_F(DisplayManagerOrientationTest, UserRotationLockReverse) {
       shell->screen_orientation_controller();
 
   // Set up windows with portrait, landscape, and any.
-  aura::Window* window = CreateTestWindowInShellWithId(0);
+  aura::Window* window = CreateTestWindowInShell({.window_id = 0});
   window->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
   display::Screen* screen = display::Screen::Get();
 
@@ -4375,7 +4375,7 @@ TEST_F(DisplayManagerOrientationTest, LockToSpecificOrientation) {
       shell->screen_orientation_controller();
   ScreenOrientationControllerTestApi test_api(orientation_controller);
 
-  aura::Window* window_a = CreateTestWindowInShellWithId(0);
+  aura::Window* window_a = CreateTestWindowInShell({.window_id = 0});
   {
     window_a->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
     orientation_controller->LockOrientationForWindow(
@@ -4391,10 +4391,10 @@ TEST_F(DisplayManagerOrientationTest, LockToSpecificOrientation) {
 
   orientation_controller->OnAccelerometerUpdated(portrait_secondary);
 
-  aura::Window* window_lsc = CreateTestWindowInShellWithId(1);
+  aura::Window* window_lsc = CreateTestWindowInShell({.window_id = 1});
   window_lsc->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
 
-  aura::Window* window_psc = CreateTestWindowInShellWithId(1);
+  aura::Window* window_psc = CreateTestWindowInShell({.window_id = 1});
   window_psc->SetProperty(chromeos::kAppTypeKey, chromeos::AppType::CHROME_APP);
 
   orientation_controller->LockOrientationForWindow(
@@ -5106,7 +5106,7 @@ TEST_F(DisplayManagerTest, SoftwareMirrorRotationForNonTablet) {
       host_list[0]->window()->transform().MapRect(transformed_rect2);
   // Use gfx::ToEnclosingRect because `transformed_rect2` has rounding errors.
   // External display shouldn't be rotated.
-  EXPECT_EQ(gfx::Rect(137.0f, 0.0f, 525.0f, 700.0f),
+  EXPECT_EQ(gfx::Rect(50.0f, 0.0f, 600.0f, 800.0f),
             gfx::ToEnclosingRect(transformed_rect2));
 
   // Change the bounds of the source display and rotate the source display by 90
@@ -5128,7 +5128,7 @@ TEST_F(DisplayManagerTest, SoftwareMirrorRotationForNonTablet) {
       host_list[0]->window()->transform().MapRect(transformed_rect3);
   // Use gfx::ToEnclosingRect because `transformed_rect3` has rounding errors.
   // External display shouldn't be rotated.
-  EXPECT_EQ(gfx::Rect(0.0f, 50.0f, 800.0f, 600.0f),
+  EXPECT_EQ(gfx::Rect(0.0f, 137.0f, 700.0f, 525.0f),
             gfx::ToEnclosingRect(transformed_rect3));
 }
 

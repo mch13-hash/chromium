@@ -15,6 +15,8 @@
 #import "ios/web/public/lazy_web_state_user_data.h"
 #import "url/gurl.h"
 
+@protocol SnackbarCommands;
+
 namespace web {
 class WebState;
 }
@@ -44,8 +46,17 @@ class DataControlsTabHelper
   // Determines if sharing should be allowed.
   void ShouldAllowShare(base::OnceCallback<void(bool)> callback);
 
+  // Determines if sharing should be allowed.
+  bool ShouldAllowShare();
+
   // Sets the command handler for Data Controls.
   void SetDataControlsCommandsHandler(id<DataControlsCommands> handler);
+
+  // Sets the snackbar handler.
+  void SetSnackbarHandler(id<SnackbarCommands> snackbar_handler);
+
+  // Called after the clipboard has been read from.
+  void DidFinishClipboardRead();
 
  private:
   friend class web::LazyWebStateUserData<DataControlsTabHelper>;
@@ -56,12 +67,24 @@ class DataControlsTabHelper
 
   // Finalizes the copy action invoking the callback.
   void FinishCopy(const GURL& source_url,
+                  base::WeakPtr<ProfileIOS> source_profile,
+                  const ui::ClipboardMetadata& metadata,
                   CopyPolicyVerdicts verdicts,
                   base::OnceCallback<void(bool)> callback,
                   bool bypassed);
 
   // Finalizes the paste action invoking the callback.
   void FinishPaste(const GURL& destination_url,
+                   const GURL& source_url,
+                   base::WeakPtr<ProfileIOS> destination_profile,
+                   base::WeakPtr<ProfileIOS> source_profile,
+                   const ui::ClipboardMetadata& metadata,
+                   Verdict verdict,
+                   base::OnceCallback<void(bool)> callback,
+                   bool bypassed);
+
+  // Finalizes the share action invoking the callback.
+  void FinishShare(const GURL& source_url,
                    Verdict verdict,
                    base::OnceCallback<void(bool)> callback,
                    bool bypassed);
@@ -69,14 +92,24 @@ class DataControlsTabHelper
   // Displays a warning dialog associated with a user's action (e.g., copy,
   // paste, share).
   void ShowWarningDialog(DataControlsDialog::Type dialog_type,
+                         std::string_view org_domain,
                          base::OnceCallback<void(bool)> on_bypassed_callback);
+
+  // Shows a snackbar to inform the user that an action was blocked by policy.
+  void ShowRestrictSnackbar(std::string_view org_domain);
+
+  // Returns the management domain for the given `profile`.
+  std::string GetManagementDomain(ProfileIOS* profile);
 
   // Unowned pointer to the WebState owning `this`. `web_state_` will always
   // outlive `this`.
   raw_ptr<web::WebState> web_state_;
 
-  // The command handler.
+  // The data controller command handler.
   __weak id<DataControlsCommands> commands_handler_ = nil;
+
+  // The snackbar command handler.
+  __weak id<SnackbarCommands> snackbar_handler_ = nil;
 
   base::WeakPtrFactory<DataControlsTabHelper> weak_factory_{this};
 };

@@ -90,6 +90,12 @@ const char* const kCommonSwitches[] = {
     "allow-pre-commit-input",
     // https://crbug.com/445332809.
     "disable-features=IgnoreDuplicateNavs",
+    // https://crbug.com/431928370.
+    "disable-features=Prewarm",
+    // https://github.com/GoogleChromeLabs/chromium-bidi/issues/3894.
+    "disable-background-networking",
+    "disable-background-timer-throttling",
+    "disable-backgrounding-occluded-windows",
 };
 
 const char* const kDesktopSwitches[] = {
@@ -106,14 +112,6 @@ const char* const kDesktopSwitches[] = {
     "test-type=webdriver",
     "no-service-autorun",
 };
-
-#if BUILDFLAG(IS_WIN)
-
-const char* const kWindowsDesktopSwitches[] = {
-    "disable-backgrounding-occluded-windows",
-};
-
-#endif
 
 const char* const kAndroidSwitches[] = {
     "disable-fre", "enable-remote-debugging",
@@ -992,11 +990,6 @@ Switches GetDesktopSwitches() {
   for (auto* desktop_switch : kDesktopSwitches) {
     switches.SetUnparsedSwitch(desktop_switch);
   }
-#if BUILDFLAG(IS_WIN)
-  for (auto* win_desktop_switch : kWindowsDesktopSwitches) {
-    switches.SetUnparsedSwitch(win_desktop_switch);
-  }
-#endif
   return switches;
 }
 
@@ -1050,7 +1043,7 @@ void ConvertHexadecimalToIDAlphabet(std::string& id) {
 std::string GenerateExtensionId(std::string_view input) {
   auto hash = crypto::hash::Sha256(input);
   auto hash_first16 = base::span<uint8_t>(hash).first<16>();
-  std::string output = base::ToLowerASCII(base::HexEncode(hash_first16));
+  std::string output = base::HexEncodeLower(hash_first16);
   ConvertHexadecimalToIDAlphabet(output);
   return output;
 }

@@ -2333,6 +2333,32 @@ TEST_F(NetworkContextTest, MultipleClearHttpCacheCalls) {
   // If all the callbacks were invoked, we should terminate.
 }
 
+#if BUILDFLAG(IS_WIN)
+// Verifies that the simple backend is always used when encrypting the cache.
+TEST_F(NetworkContextTest, EncryptedHttpCacheForcesSimpleBackend) {
+  mojom::NetworkContextParamsPtr context_params =
+      CreateNetworkContextParamsForTesting();
+  context_params->file_paths = mojom::NetworkContextFilePaths::New();
+  context_params->http_cache_enabled = true;
+
+  // Enable the encryption flag.
+  context_params->enable_encrypted_http_cache = true;
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  context_params->file_paths->http_cache_directory = temp_dir.GetPath();
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(std::move(context_params));
+
+  disk_cache::Backend* backend = WaitForCacheBackend(*network_context);
+  ASSERT_TRUE(backend);
+
+  EXPECT_EQ(net::URLRequestContextBuilder::HttpCacheParams::DISK_SIMPLE,
+            GetBackendType(backend));
+}
+#endif  // BUILDFLAG(IS_WIN)
+
 TEST_F(NetworkContextTest, NotifyExternalCacheHit) {
   const std::vector<GURL> kUrls = {
       GURL("http://www.google.com/"),
@@ -2519,7 +2545,7 @@ TEST_F(NetworkContextTest, ClearCorsPreflightCache) {
     for (auto entry : kCacheEntries) {
       preflight_cache.AppendEntry(
           url::Origin::Create(GURL(entry.origin)), GURL(entry.url),
-          net::NetworkIsolationKey(), mojom::IPAddressSpace::kUnknown,
+          net::NetworkIsolationKey(),
           cors::PreflightResult::Create(mojom::CredentialsMode::kInclude,
                                         std::string("POST"), std::nullopt,
                                         std::string("5"), nullptr));
@@ -2556,8 +2582,7 @@ TEST_F(NetworkContextTest, ClearCorsPreflightCache) {
       EXPECT_EQ(expect_entry_cached,
                 preflight_cache.DoesEntryExistForTesting(
                     url::Origin::Create(GURL(kCacheEntries[i].origin)),
-                    kCacheEntries[i].url, net::NetworkIsolationKey(),
-                    mojom::IPAddressSpace::kUnknown));
+                    kCacheEntries[i].url, net::NetworkIsolationKey()));
       if (expect_entry_cached) {
         ++cached_entries;
       }
@@ -6753,10 +6778,13 @@ class TestURLLoaderHeaderClient : public mojom::TrustedURLLoaderHeaderClient {
 
     void OnHeadersReceived(const std::string& headers,
                            const net::IPEndPoint& endpoint,
+                           const std::optional<net::SSLInfo>& ssl_info,
                            OnHeadersReceivedCallback callback) override {
       auto new_headers =
           base::MakeRefCounted<net::HttpResponseHeaders>(headers);
       new_headers->SetHeader("baz", "qux");
+
+      on_headers_received_ssl_info_ = ssl_info;
       std::move(callback).Run(on_headers_received_result_,
                               new_headers->raw_headers(), GURL());
     }
@@ -6773,6 +6801,10 @@ class TestURLLoaderHeaderClient : public mojom::TrustedURLLoaderHeaderClient {
       request_headers_to_set_.emplace_back(std::move(name), std::move(value));
     }
 
+    std::optional<net::SSLInfo> get_on_headers_received_ssl_info() {
+      return on_headers_received_ssl_info_;
+    }
+
     void Bind(
         mojo::PendingReceiver<network::mojom::TrustedHeaderClient> receiver) {
       receiver_.reset();
@@ -6784,6 +6816,7 @@ class TestURLLoaderHeaderClient : public mojom::TrustedURLLoaderHeaderClient {
         {"foo", "bar"}};
     int on_before_send_headers_result_ = net::OK;
     int on_headers_received_result_ = net::OK;
+    std::optional<net::SSLInfo> on_headers_received_ssl_info_;
     mojo::Receiver<mojom::TrustedHeaderClient> receiver_{this};
   };
 
@@ -6814,6 +6847,10 @@ class TestURLLoaderHeaderClient : public mojom::TrustedURLLoaderHeaderClient {
 
   void set_on_headers_received_result(int result) {
     header_client_.set_on_headers_received_result(result);
+  }
+
+  std::optional<net::SSLInfo> get_on_headers_received_ssl_info() {
+    return header_client_.get_on_headers_received_ssl_info();
   }
 
   void AddRequestHeaderToSet(std::string name, std::string value) {
@@ -6891,6 +6928,79 @@ TEST_F(NetworkContextTest, HeaderClientModifiesHeaders) {
   }
 }
 
+TEST_F(NetworkContextTest, HeaderClientReceivesSslInfo) {
+  net::EmbeddedTestServer test_server(
+      net::test_server::EmbeddedTestServer::Type::TYPE_HTTPS);
+  test_server.SetSSLConfig(net::EmbeddedTestServer::CERT_OK);
+  net::test_server::RegisterDefaultHandlers(&test_server);
+  ASSERT_TRUE(test_server.Start());
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(CreateNetworkContextParamsForTesting());
+
+  ResourceRequest request;
+  request.url = test_server.GetURL("/echo");
+
+  // First, do a request with kURLLoadOptionUseHeaderClient set. ssl_info must
+  // be passed to headers client.
+  {
+    mojo::Remote<mojom::URLLoaderFactory> loader_factory;
+    mojom::URLLoaderFactoryParamsPtr params =
+        mojom::URLLoaderFactoryParams::New();
+    params->process_id = mojom::kBrowserProcessId;
+    params->is_orb_enabled = false;
+    TestURLLoaderHeaderClient header_client(
+        params->header_client.InitWithNewPipeAndPassReceiver());
+    network_context->CreateURLLoaderFactory(
+        loader_factory.BindNewPipeAndPassReceiver(), std::move(params));
+
+    mojo::PendingRemote<mojom::URLLoader> loader;
+    TestURLLoaderClient client;
+    loader_factory->CreateLoaderAndStart(
+        loader.InitWithNewPipeAndPassReceiver(), 0 /* request_id */,
+        mojom::kURLLoadOptionUseHeaderClient, request, client.CreateRemote(),
+        net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
+
+    client.RunUntilComplete();
+
+    // Make sure that ssl info is present.
+    std::optional<net::SSLInfo> ssl_info =
+        header_client.get_on_headers_received_ssl_info();
+
+    ASSERT_TRUE(ssl_info.has_value());
+    ASSERT_TRUE(ssl_info->is_valid());
+    ASSERT_FALSE(net::IsCertStatusError(ssl_info->cert_status));
+  }
+  // Do a request without kURLLoadOptionUseHeaderClient set, ssl_info must not
+  // be present.
+  {
+    mojo::Remote<mojom::URLLoaderFactory> loader_factory;
+    mojom::URLLoaderFactoryParamsPtr params =
+        mojom::URLLoaderFactoryParams::New();
+    params->process_id = mojom::kBrowserProcessId;
+    params->is_orb_enabled = false;
+    TestURLLoaderHeaderClient header_client(
+        params->header_client.InitWithNewPipeAndPassReceiver());
+    network_context->CreateURLLoaderFactory(
+        loader_factory.BindNewPipeAndPassReceiver(), std::move(params));
+
+    mojo::PendingRemote<mojom::URLLoader> loader;
+    TestURLLoaderClient client;
+    loader_factory->CreateLoaderAndStart(
+        loader.InitWithNewPipeAndPassReceiver(), 0 /* request_id */,
+        0 /* options */, request, client.CreateRemote(),
+        net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
+
+    client.RunUntilComplete();
+
+    // Make sure that ssl info is not present.
+    std::optional<net::SSLInfo> ssl_info =
+        header_client.get_on_headers_received_ssl_info();
+
+    ASSERT_FALSE(ssl_info.has_value());
+  }
+}
+
 TEST_F(NetworkContextTest, HeaderClientFailsRequest) {
   net::EmbeddedTestServer test_server;
   net::test_server::RegisterDefaultHandlers(&test_server);
@@ -6962,6 +7072,7 @@ class HangingTestURLLoaderHeaderClient
 
     void OnHeadersReceived(const std::string& headers,
                            const net::IPEndPoint& endpoint,
+                           const std::optional<::net::SSLInfo>& ssl_info,
                            OnHeadersReceivedCallback callback) override {
       saved_received_headers_ = headers;
       saved_on_headers_received_callback_ = std::move(callback);
@@ -11979,6 +12090,38 @@ TEST_F(NetworkContextTest, EnableDurableMessageCollector) {
   EXPECT_EQ(
       0u,
       network_context->num_devtools_durable_message_collectors_for_testing());
+}
+
+TEST_F(NetworkContextTest, AddQuicHints) {
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(CreateNetworkContextParamsForTesting());
+
+  url::SchemeHostPort google("https", "www.google.com", 443);
+  url::SchemeHostPort example("https", "www.example.com", 443);
+  std::vector<url::SchemeHostPort> origins = {google, example};
+
+  net::NetworkAnonymizationKey key = net::NetworkAnonymizationKey();
+  network_context->AddQuicHints(origins, key);
+
+  net::AlternativeServiceInfoVector google_infos =
+      network_context->url_request_context()
+          ->http_server_properties()
+          ->GetAlternativeServiceInfos(google, key);
+  EXPECT_EQ(1u, google_infos.size());
+
+  EXPECT_EQ(443, google_infos[0].GetHostPortPair().port());
+  EXPECT_EQ("www.google.com", google_infos[0].GetHostPortPair().host());
+  EXPECT_EQ(net::NextProto::kProtoQUIC, google_infos[0].protocol());
+
+  net::AlternativeServiceInfoVector example_infos =
+      network_context->url_request_context()
+          ->http_server_properties()
+          ->GetAlternativeServiceInfos(example, key);
+  EXPECT_EQ(1u, example_infos.size());
+
+  EXPECT_EQ(443, example_infos[0].GetHostPortPair().port());
+  EXPECT_EQ("www.example.com", example_infos[0].GetHostPortPair().host());
+  EXPECT_EQ(net::NextProto::kProtoQUIC, example_infos[0].protocol());
 }
 
 }  // namespace

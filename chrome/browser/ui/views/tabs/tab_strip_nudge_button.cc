@@ -144,7 +144,7 @@ void TabStripNudgeButton::SetCloseButton(PressedCallback pressed_callback) {
   views::InkDrop::Get(close_button.get())->SetHighlightOpacity(0.16f);
   views::InkDrop::Get(close_button.get())->SetVisibleOpacity(0.14f);
   views::InkDrop::Get(close_button.get())
-      ->SetBaseColorId(kColorTabSearchButtonCRForegroundFrameActive);
+      ->SetBaseColor(kColorTabSearchButtonCRForegroundFrameActive);
 
   auto ink_drop_highlight_path =
       std::make_unique<views::CircleHighlightPathGenerator>(gfx::Insets());
@@ -177,6 +177,10 @@ void TabStripNudgeButton::SetIsShowingNudge(bool is_showing) {
 void TabStripNudgeButton::SetCloseButtonFocusBehavior(
     views::View::FocusBehavior focus_behavior) {
   close_button_->SetFocusBehavior(focus_behavior);
+}
+
+gfx::SlideAnimation* TabStripNudgeButton::GetExpansionAnimationForTesting() {
+  return nullptr;
 }
 
 BEGIN_METADATA(TabStripNudgeButton)

@@ -52,11 +52,9 @@
 #include "third_party/blink/renderer/platform/scheduler/common/process_state.h"
 #include "third_party/blink/renderer/platform/scheduler/common/task_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/common/throttling/task_queue_throttler.h"
-#include "third_party/blink/renderer/platform/scheduler/common/tracing_helper.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/agent_group_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_impl.h"
-#include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_metrics_helper.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/page_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/pending_user_input.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/task_type_names.h"
@@ -473,11 +471,6 @@ MainThreadSchedulerImpl::AnyThread::AnyThread(
           MakeNamedTrack("Scheduler.WaitingForMeaningfulPaint", this),
           &main_thread_scheduler_impl->tracing_controller_,
           YesNoStateToString),
-      is_any_main_frame_loading(
-          false,
-          MakeNamedTrack("Scheduler.IsAnyMainFrameLoading", this),
-          &main_thread_scheduler_impl->tracing_controller_,
-          YesNoStateToString),
       have_seen_input_since_navigation(
           false,
           MakeNamedTrack("Scheduler.HaveSeenInputSinceNavigation", this),
@@ -536,15 +529,6 @@ bool MainThreadSchedulerImpl::
   for (const PageSchedulerImpl* ps : main_thread_only().page_schedulers) {
     if (ps->IsOrdinary() && ps->IsWaitingForMainFrameMeaningfulPaint())
       return true;
-  }
-  return false;
-}
-
-bool MainThreadSchedulerImpl::IsAnyOrdinaryMainFrameLoading() const {
-  for (const PageSchedulerImpl* ps : main_thread_only().page_schedulers) {
-    if (ps->IsOrdinary() && ps->IsMainFrameLoading()) {
-      return true;
-    }
   }
   return false;
 }
@@ -1286,7 +1270,7 @@ void MainThreadSchedulerImpl::WillHandleInputEventOnMainThread(
 void MainThreadSchedulerImpl::DidHandleInputEventOnMainThread(
     const WebInputEvent& web_input_event,
     WebInputEventResult result,
-    bool frame_requested) {
+    bool is_frame_expected) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"),
                "MainThreadSchedulerImpl::DidHandleInputEventOnMainThread");
   helper_.CheckOnValidThread();
@@ -1308,8 +1292,8 @@ void MainThreadSchedulerImpl::DidHandleInputEventOnMainThread(
 
   if (WebInputEvent::IsWebInteractionEvent(web_input_event.GetType())) {
     main_thread_only().is_current_task_discrete_input = true;
-    main_thread_only().is_frame_requested_after_discrete_input =
-        frame_requested;
+    main_thread_only().is_frame_expected_after_discrete_input =
+        is_frame_expected;
   }
 }
 
@@ -1376,7 +1360,6 @@ void MainThreadSchedulerImpl::EnsureUrgentPolicyUpdatePostedOnMainThread(
     const base::Location& from_here) {
   // TODO(scheduler-dev): Check that this method isn't called from the main
   // thread.
-  any_thread_lock_.AssertAcquired();
   if (!policy_may_need_update_.IsSet()) {
     policy_may_need_update_.SetWhileLocked(true);
     control_task_queue_->GetTaskRunnerWithDefaultTaskType()->PostTask(
@@ -1396,7 +1379,6 @@ void MainThreadSchedulerImpl::ForceUpdatePolicy() {
 
 void MainThreadSchedulerImpl::UpdatePolicyLocked(UpdateType update_type) {
   helper_.CheckOnValidThread();
-  any_thread_lock_.AssertAcquired();
   if (helper_.IsShutdown())
     return;
 
@@ -1657,7 +1639,6 @@ void MainThreadSchedulerImpl::UpdateTaskQueueState(
 UseCase MainThreadSchedulerImpl::ComputeCurrentUseCase(
     base::TimeTicks now,
     base::TimeDelta* expected_use_case_duration) const {
-  any_thread_lock_.AssertAcquired();
 
   // Above all else we want to be responsive to user input.
   *expected_use_case_duration = base::TimeDelta();
@@ -1721,18 +1702,12 @@ UseCase MainThreadSchedulerImpl::ComputeCurrentUseCase(
   // treat the presence of input as an indirect signal that there is meaningful
   // content on the page.
   if (!any_thread().have_seen_input_since_navigation) {
-    if (any_thread().waiting_for_any_main_frame_contentful_paint)
+    if (any_thread().waiting_for_any_main_frame_contentful_paint) {
       return UseCase::kEarlyLoading;
+    }
 
-    if (base::FeatureList::IsEnabled(
-            features::kLoadingPhaseBufferTimeAfterFirstMeaningfulPaint)) {
-      if (any_thread().waiting_for_any_main_frame_meaningful_paint) {
-        return UseCase::kLoading;
-      }
-    } else {
-      if (any_thread().is_any_main_frame_loading) {
-        return UseCase::kLoading;
-      }
+    if (any_thread().waiting_for_any_main_frame_meaningful_paint) {
+      return UseCase::kLoading;
     }
   }
   return UseCase::kNone;
@@ -1828,6 +1803,7 @@ void MainThreadSchedulerImpl::CreateTraceEventObjectSnapshotLocked() const {
   TRACE_EVENT_OBJECT_SNAPSHOT_WITH_ID(
       TRACE_DISABLED_BY_DEFAULT("renderer.scheduler.debug"),
       "MainThreadScheduler", this, [&](perfetto::TracedValue context) {
+        any_thread_lock_.AssertAcquired();
         WriteIntoTraceLocked(std::move(context), helper_.NowTicks());
       });
 }
@@ -1836,7 +1812,6 @@ void MainThreadSchedulerImpl::WriteIntoTraceLocked(
     perfetto::TracedValue context,
     base::TimeTicks optional_now) const {
   helper_.CheckOnValidThread();
-  any_thread_lock_.AssertAcquired();
 
   auto dict = std::move(context).WriteDictionary();
 
@@ -1854,7 +1829,6 @@ void MainThreadSchedulerImpl::WriteIntoTraceLocked(
            any_thread().waiting_for_any_main_frame_contentful_paint);
   dict.Add("waiting_for_any_main_frame_meaningful_paint",
            any_thread().waiting_for_any_main_frame_meaningful_paint);
-  dict.Add("is_any_main_frame_loading", any_thread().is_any_main_frame_loading);
   dict.Add("have_seen_input_since_navigation",
            any_thread().have_seen_input_since_navigation);
   dict.Add("renderer_backgrounded", main_thread_only().renderer_backgrounded);
@@ -2045,7 +2019,6 @@ void MainThreadSchedulerImpl::OnMainFramePaint() {
       IsAnyOrdinaryMainFrameWaitingForFirstContentfulPaint();
   any_thread().waiting_for_any_main_frame_meaningful_paint =
       IsAnyOrdinaryMainFrameWaitingForFirstMeaningfulPaint();
-  any_thread().is_any_main_frame_loading = IsAnyOrdinaryMainFrameLoading();
 
   UpdatePolicyLocked(UpdateType::kMayEarlyOutIfPolicyUnchanged);
 }
@@ -2054,14 +2027,12 @@ void MainThreadSchedulerImpl::ResetForNavigationLocked() {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"),
                "MainThreadSchedulerImpl::ResetForNavigationLocked");
   helper_.CheckOnValidThread();
-  any_thread_lock_.AssertAcquired();
   any_thread().user_model.Reset(helper_.NowTicks());
   any_thread().have_seen_a_blocking_gesture = false;
   any_thread().waiting_for_any_main_frame_contentful_paint =
       IsAnyOrdinaryMainFrameWaitingForFirstContentfulPaint();
   any_thread().waiting_for_any_main_frame_meaningful_paint =
       IsAnyOrdinaryMainFrameWaitingForFirstMeaningfulPaint();
-  any_thread().is_any_main_frame_loading = IsAnyOrdinaryMainFrameLoading();
   any_thread().have_seen_input_since_navigation = false;
   main_thread_only().idle_time_estimator.Clear();
   UpdatePolicyLocked(UpdateType::kMayEarlyOutIfPolicyUnchanged);
@@ -2298,7 +2269,6 @@ void MainThreadSchedulerImpl::AddPageScheduler(
       IsAnyOrdinaryMainFrameWaitingForFirstContentfulPaint();
   any_thread().waiting_for_any_main_frame_meaningful_paint =
       IsAnyOrdinaryMainFrameWaitingForFirstMeaningfulPaint();
-  any_thread().is_any_main_frame_loading = IsAnyOrdinaryMainFrameLoading();
   UpdatePolicyLocked(UpdateType::kMayEarlyOutIfPolicyUnchanged);
 }
 
@@ -2325,7 +2295,6 @@ void MainThreadSchedulerImpl::RemovePageScheduler(
       IsAnyOrdinaryMainFrameWaitingForFirstContentfulPaint();
   any_thread().waiting_for_any_main_frame_meaningful_paint =
       IsAnyOrdinaryMainFrameWaitingForFirstMeaningfulPaint();
-  any_thread().is_any_main_frame_loading = IsAnyOrdinaryMainFrameLoading();
   UpdatePolicyLocked(UpdateType::kMayEarlyOutIfPolicyUnchanged);
 }
 
@@ -2630,7 +2599,7 @@ void MainThreadSchedulerImpl::MaybeUpdatePolicyOnTaskCompleted(
         needs_policy_update = true;
       }
     } else if (queue->queue_type() == MainThreadTaskQueue::QueueType::kInput &&
-               main_thread_only().is_frame_requested_after_discrete_input) {
+               main_thread_only().is_frame_expected_after_discrete_input) {
       CHECK(main_thread_only().is_current_task_discrete_input);
       any_thread().awaiting_discrete_input_response = true;
       any_thread().user_model.DidProcessDiscreteInputEvent(
@@ -2644,7 +2613,7 @@ void MainThreadSchedulerImpl::MaybeUpdatePolicyOnTaskCompleted(
   UpdateRenderingPrioritizationStateOnTaskCompleted(queue, task_timing);
 
   main_thread_only().is_current_task_discrete_input = false;
-  main_thread_only().is_frame_requested_after_discrete_input = false;
+  main_thread_only().is_frame_expected_after_discrete_input = false;
   main_thread_only().is_current_task_main_frame = false;
 
   if (needs_policy_update) {

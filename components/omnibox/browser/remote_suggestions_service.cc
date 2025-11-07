@@ -19,6 +19,7 @@
 #include "components/omnibox/browser/base_search_provider.h"
 #include "components/omnibox/browser/document_suggestions_service.h"
 #include "components/omnibox/browser/enterprise_search_aggregator_suggestions_service.h"
+#include "components/omnibox/browser/page_classification_functions.h"
 #include "components/search/search.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/variations/net/variations_http_headers.h"
@@ -170,7 +171,8 @@ GURL AddLensOverlaySuggestInputsDataToEndpointUrl(
   if (search_terms_args.page_classification ==
           metrics::OmniboxEventProto::CONTEXTUAL_SEARCHBOX ||
       search_terms_args.page_classification ==
-          metrics::OmniboxEventProto::NTP_COMPOSEBOX) {
+          metrics::OmniboxEventProto::NTP_REALBOX ||
+      omnibox::IsComposebox(search_terms_args.page_classification)) {
     send_request_and_session_ids =
         lens_overlay_suggest_inputs
             ->send_gsession_vsrid_for_contextual_suggest();
@@ -217,6 +219,20 @@ GURL AddLensOverlaySuggestInputsDataToEndpointUrl(
           modified_url, "gsessionid",
           lens_overlay_suggest_inputs->search_session_id());
     }
+  }
+  return modified_url;
+}
+
+GURL AddAimToolModeToEndpointUrl(
+    TemplateURLRef::SearchTermsArgs search_terms_args,
+    const GURL& url_to_modify) {
+  GURL modified_url = GURL(url_to_modify);
+  if (search_terms_args.aim_tool_mode !=
+      omnibox::ChromeAimToolsAndModels::TOOL_MODE_UNSPECIFIED) {
+    modified_url = net::AppendOrReplaceQueryParameter(
+        url_to_modify, "azm",
+        base::NumberToString(
+            static_cast<int>(search_terms_args.aim_tool_mode)));
   }
   return modified_url;
 }
@@ -282,17 +298,19 @@ GURL RemoteSuggestionsService::EndpointUrl(
                                                "chrome-multimodal");
       break;
     }
-    case metrics::OmniboxEventProto::NTP_COMPOSEBOX: {
+    case metrics::OmniboxEventProto::NTP_REALBOX:
+    case metrics::OmniboxEventProto::NTP_COMPOSEBOX:
+    case metrics::OmniboxEventProto::LENS_SIDE_PANEL_COMPOSEBOX:
       if (search_terms_args.lens_overlay_suggest_inputs.has_value()) {
         url = net::AppendOrReplaceQueryParameter(url, "client",
                                                  "chrome-contextual");
       }
       break;
-    }
     default:
       break;
   }
   url = AddLensOverlaySuggestInputsDataToEndpointUrl(search_terms_args, url);
+  url = AddAimToolModeToEndpointUrl(search_terms_args, url);
 
   return url;
 }
@@ -379,7 +397,8 @@ RemoteSuggestionsService::StartZeroPrefixSuggestionsRequest(
     const TemplateURL* template_url,
     TemplateURLRef::SearchTermsArgs search_terms_args,
     const SearchTermsData& search_terms_data,
-    CompletionCallback completion_callback) {
+    CompletionCallback completion_callback,
+    base::optional_ref<const base::TimeDelta> timeout) {
   DCHECK(template_url);
 
   const GURL suggest_url =
@@ -438,6 +457,9 @@ RemoteSuggestionsService::StartZeroPrefixSuggestionsRequest(
   base::ElapsedTimer request_timer;
   std::unique_ptr<network::SimpleURLLoader> loader =
       network::SimpleURLLoader::Create(std::move(request), traffic_annotation);
+  if (timeout.has_value()) {
+    loader->SetTimeoutDuration(*timeout);
+  }
   loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
       url_loader_factory_.get(),
       base::BindOnce(&RemoteSuggestionsService::OnRequestCompleted,

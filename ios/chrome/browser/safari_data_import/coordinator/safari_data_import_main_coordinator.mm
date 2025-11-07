@@ -15,12 +15,14 @@
 #import "ios/chrome/browser/safari_data_import/coordinator/safari_data_import_child_coordinator_delegate.h"
 #import "ios/chrome/browser/safari_data_import/coordinator/safari_data_import_entry_point_mediator.h"
 #import "ios/chrome/browser/safari_data_import/coordinator/safari_data_import_export_coordinator.h"
+#import "ios/chrome/browser/safari_data_import/model/features.h"
 #import "ios/chrome/browser/safari_data_import/public/metrics.h"
 #import "ios/chrome/browser/safari_data_import/public/safari_data_import_entry_point.h"
 #import "ios/chrome/browser/safari_data_import/public/safari_data_import_ui_handler.h"
 #import "ios/chrome/browser/safari_data_import/ui/safari_data_import_entry_point_view_controller.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
+#import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_action_handler.h"
 
 @interface SafariDataImportMainCoordinator () <
@@ -36,6 +38,8 @@
   SafariDataImportEntryPointMediator* _mediator;
   /// View controller for the entry point of the Ssafari data import workflow.
   SafariDataImportEntryPointViewController* _viewController;
+  /// The navigation controller for the view controller.
+  UINavigationController* _navigationController;
   /// Coordinator that displays the next step in the Safari data importing
   /// process. Its view controller will be presented on top of
   /// `_viewController`.
@@ -56,7 +60,7 @@
   if (!self.profile) {
     return;
   }
-  CHECK(ShouldShowSafariDataImportEntryPoint(self.profile));
+  CHECK(ShouldShowSafariDataImportEntryPoint(self.profile->GetPrefs()));
   _viewController = [[SafariDataImportEntryPointViewController alloc] init];
   _viewController.showReminderButton =
       _entryPoint != SafariDataImportEntryPoint::kSetting;
@@ -70,7 +74,9 @@
        initWithUIBlockerTarget:self.browser->GetSceneState()
                  promosManager:promosManager
       featureEngagementTracker:tracker];
-  [self.baseViewController presentViewController:_viewController
+  _navigationController = [[UINavigationController alloc]
+      initWithRootViewController:_viewController];
+  [self.baseViewController presentViewController:_navigationController
                                         animated:YES
                                       completion:nil];
 }
@@ -82,14 +88,15 @@
     [mediator disconnect];
     [UIHandler safariDataImportDidDismiss];
   };
-  if (_viewController.presentingViewController) {
-    [_viewController.presentingViewController
+  if (_navigationController.presentingViewController) {
+    [_navigationController.presentingViewController
         dismissViewControllerAnimated:YES
                            completion:dismissCompletionHandler];
   } else {
     dismissCompletionHandler();
   }
   _viewController = nil;
+  _navigationController = nil;
   [_exportCoordinator stop];
   self.delegate = nil;
 }
@@ -97,12 +104,14 @@
 #pragma mark - ConfirmationAlertActionHandler
 
 - (void)confirmationAlertPrimaryAction {
+  if (_exportCoordinator) {
+    return;
+  }
   RecordSafariImportActionOnEntryPoint(
       SafariDataImportEntryPointAction::kImport, _entryPoint);
-  CHECK(!_exportCoordinator);
   [_mediator notifyUsedOrDismissed];
   _exportCoordinator = [[SafariDataImportExportCoordinator alloc]
-      initWithBaseViewController:_viewController
+      initWithBaseViewController:_navigationController
                          browser:self.browser];
   _exportCoordinator.delegate = self;
   [_exportCoordinator start];

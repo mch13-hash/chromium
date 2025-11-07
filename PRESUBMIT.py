@@ -153,9 +153,7 @@ _BANNED_JAVA_IMPORTS: Sequence[BanRule] = (
         'import android.annotation.TargetApi;',
         ('Do not use TargetApi, use @androidx.annotation.RequiresApi instead. '
          'RequiresApi ensures that any calls are guarded by the appropriate '
-         'SDK_INT check. See https://crbug.com/1116486.', ),
-        True
-    ),
+         'SDK_INT check. See https://crbug.com/1116486.', ), True),
     BanRule(
         'import androidx.test.rule.ActivityTestRule;',
         ('Do not use ActivityTestRule, use '
@@ -173,7 +171,7 @@ _BANNED_JAVA_IMPORTS: Sequence[BanRule] = (
     BanRule(
         'import java.util.Optional',
         ('Prefer @Nullable over Optional/OptionalInt/OptionalDouble/etc. See '
-         '//styleguide/java/java.md',),
+         '//styleguide/java/java.md', ),
         False,
     ),
 )
@@ -268,20 +266,21 @@ _BANNED_JAVA_FUNCTIONS: Sequence[BanRule] = (
         False,
     ),
     BanRule(
-        pattern=(r'/((DeviceInfo\.isDesktop\()|IS_DESKTOP_ANDROID|PackageManager\.FEATURE_PC)'),
-        explanation=(
-            'Usage of IS_DESKTOP_ANDROID build flag or DeviceInfo.isDesktop() '
-            'is discouraged. Use system affordances to determine feature '
-            'availablility. Refer to https://chromium.googlesource.com/chromium/src/+/HEAD/docs/ui/android/device_form_factor.md for guidelines. '
-            'To request an exception, file a bug at '
-            'https://b.corp.google.com/issues/new?component=1753515&template=2172655'
-            'Once approved, use centralized util DeviceInfo.isDesktop() '
-            'instead of direct build flag or PackageManager.FEATURE_PC checks. '
-            'Allowances may be granted to only the directories below: '
-            '[build/, chrome/, components/, extensions/, infra/, tools/] '
-            'Note: in particular we need to avoid components shared with '
-            'WebView.',
-        ),
+        pattern=
+        (r'/((DeviceInfo\.isDesktop\()|IS_DESKTOP_ANDROID|PackageManager\.FEATURE_PC)'
+         ),
+        explanation=
+        ('Usage of IS_DESKTOP_ANDROID build flag or DeviceInfo.isDesktop() '
+         'is discouraged. Use system affordances to determine feature '
+         'availablility. Refer to https://chromium.googlesource.com/chromium/src/+/HEAD/docs/ui/android/device_form_factor.md for guidelines. '
+         'To request an exception, file a bug at '
+         'https://b.corp.google.com/issues/new?component=1753515&template=2172655'
+         'Once approved, use centralized util DeviceInfo.isDesktop() '
+         'instead of direct build flag or PackageManager.FEATURE_PC checks. '
+         'Allowances may be granted to only the directories below: '
+         '[build/, chrome/, components/, extensions/, infra/, tools/] '
+         'Note: in particular we need to avoid components shared with '
+         'WebView.', ),
         treat_as_error=False,
         surface_as_gerrit_lint=True,
     ),
@@ -694,6 +693,10 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
         ),
         True,
         [
+            # Only used to implement a test HTTP server:
+            # https://crbug.com/438422635#comment8
+            '^third_party/crashpad/crashpad/third_party/'
+            r'cpp-httplib/cpp-httplib/httplib\.h$',
             # Abseil's benchmarks never linked into chrome.
             'third_party/abseil-cpp/.*_benchmark.cc',
         ],
@@ -1080,6 +1083,9 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
             # Required to interop with interfaces from the third-party perfetto
             # library.
             r'components/tracing/common/etw_consumer_win_unittest\.cc',
+            r'components/tracing/common/etw_system_data_source_win\.cc',
+            r'components/tracing/common/etw_consumer_win\.h',
+            r'components/tracing/common/etw_consumer_win\.cc',
             r'services/tracing/public/cpp/perfetto/custom_event_recorder\.cc',
             r'services/tracing/public/cpp/perfetto/perfetto_traced_process\.cc',
             r'services/tracing/public/cpp/perfetto/perfetto_traced_process\.h',
@@ -1299,6 +1305,7 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
             'constant_range',
             # Views
             'subrange',
+            'subrange_kind',
             # Banned: Range factories
             # Banned: Range adaptors
             # Incidentally listed on
@@ -2041,15 +2048,14 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
         treat_as_error=False,
     ),
     BanRule(
-      pattern='TestBrowserWindow',
-      explanation=(
-          'Do not use TestBrowserWindow. See '
-          'docs/chrome_browser_design_principles.md for details. If you want '
-          'to write a test that has a Browser, create a browser_test. If you '
-          'want to write a unit_test, your code should not reference Browser '
-          'or BrowserWindow.',
-      ),
-      treat_as_error=False,
+        pattern='TestBrowserWindow',
+        explanation=
+        ('Do not use TestBrowserWindow. See '
+         'docs/chrome_browser_design_principles.md for details. If you want '
+         'to write a test that has a Browser, create a browser_test. If you '
+         'want to write a unit_test, your code should not reference Browser '
+         'or BrowserWindow.', ),
+        treat_as_error=False,
     ),
     BanRule(
         pattern='RunUntilIdle',
@@ -2140,21 +2146,27 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
     ),
     BanRule(
         pattern=(r'IS_DESKTOP_ANDROID'),
-        explanation=(
-            'Usage of IS_DESKTOP_ANDROID build flag '
-            'is discouraged. Use system affordances to determine feature '
-            'availablility. Refer to https://chromium.googlesource.com/chromium/src/+/HEAD/docs/ui/android/device_form_factor.md for guidelines. '
-            'To request an exception, file a bug at '
-            'https://b.corp.google.com/issues/new?component=1753515&template=2172655'
-            'Once approved, use centralized util DeviceInfo.isDesktop() '
-            'instead of direct build flag or PackageManager.FEATURE_PC checks. '
-            'Allowances may be granted to only the directories below: '
-            '[build/, chrome/, components/, extensions/, infra/, tools/] '
-            'Note: in particular we need to avoid components shared with '
-            'WebView.',
-        ),
+        explanation=
+        ('Usage of IS_DESKTOP_ANDROID build flag '
+         'is discouraged. Use system affordances to determine feature '
+         'availablility. Refer to https://chromium.googlesource.com/chromium/src/+/HEAD/docs/ui/android/device_form_factor.md for guidelines. '
+         'To request an exception, file a bug at '
+         'https://b.corp.google.com/issues/new?component=1753515&template=2172655'
+         'Once approved, use centralized util DeviceInfo.isDesktop() '
+         'instead of direct build flag or PackageManager.FEATURE_PC checks. '
+         'Allowances may be granted to only the directories below: '
+         '[build/, chrome/, components/, extensions/, infra/, tools/] '
+         'Note: in particular we need to avoid components shared with '
+         'WebView.', ),
         treat_as_error=False,
         surface_as_gerrit_lint=True,
+    ),
+    BanRule(
+        pattern='PageActionIconView',
+        explanation=
+        ('PageActionIconView will soon be removed. Use PageActionView instead. '
+         'See chrome/browser/ui/views/page_action/README.md for details.'),
+        treat_as_error=False,
     ),
 )
 
@@ -2273,7 +2285,7 @@ _KNOWN_TEST_DATA_AND_INVALID_JSON_FILE_PATTERNS = [
     r'^tools/vscode/',
 ]
 
-# These are not checked on the public chromium-presubmit trybot.
+# These are not checked on the public linux-presubmit trybot.
 # Add files here that rely on .py files that exists only for target_os="android"
 # checkouts.
 _ANDROID_SPECIFIC_PYDEPS_FILES = [
@@ -2348,6 +2360,7 @@ _GENERIC_PYDEPS_FILES = [
     'chrome/android/monochrome/scripts/monochrome_python_tests.pydeps',
     'chrome/test/chromedriver/log_replay/client_replay_unittest.pydeps',
     'chrome/test/chromedriver/test/run_py_tests.pydeps',
+    'chrome/test/media/performance/videostack_performance_test.pydeps',
     'chrome/test/media_router/performance/openscreen_cast_performance_test.pydeps',
     'chromecast/resource_sizes/chromecast_resource_sizes.pydeps',
     'components/cronet/tools/check_combined_proguard_file.pydeps',
@@ -2395,14 +2408,14 @@ _KNOWN_ROBOTS = set() | set('%s@appspot.gserviceaccount.com' % s for s in (
         ) | set(
             '%s@skia-public.iam.gserviceaccount.com' % s
             for s in ('chromium-autoroll', 'chromium-release-autoroll')) | set(
-            '%s@skia-infra-corp.iam.gserviceaccount.com' % s
-            for s in ('pinpoint-worker',)
+                '%s@skia-infra-corp.iam.gserviceaccount.com' % s
+                for s in ('pinpoint-worker', )
             ) | set(
-                '%s@skia-corp.google.com.iam.gserviceaccount.com' % s
-                for s in ('chromium-internal-autoroll', )
+                '%s@skia-corp.google.com.iam.gserviceaccount.com' % s for s in
+                ('chromium-internal-autoroll', )
             ) | set(
-                '%s@system.gserviceaccount.com' %
-                s for s in ('chrome-screen-ai-releaser', 'crash-eng', 'crash')
+                '%s@system.gserviceaccount.com' % s for s in
+                ('chrome-screen-ai-releaser', 'crash-eng', 'crash')
             ) | set(
                 '%s@owners-cleanup-prod.google.com.iam.gserviceaccount.com' % s
                 for s in ('swarming-tasks', )) | set(
@@ -2414,8 +2427,8 @@ _KNOWN_ROBOTS = set() | set('%s@appspot.gserviceaccount.com' % s for s in (
                     'chops-security-cronjobs-cpesuggest')) | set(
                         '%s@chromeos-release-bot.iam.gserviceaccount.com' % s
                         for s in ('chromeos-ci-release', )) | set(
-                        '%s@chromeos-bot.iam.gserviceaccount.com' % s
-                        for s in ('chromeos-ci-prod', ))
+                            '%s@chromeos-bot.iam.gserviceaccount.com' % s
+                            for s in ('chromeos-ci-prod', ))
 
 _INVALID_GRD_FILE_LINE = [(r'<file lang=.* path=.*',
                            'Path should come before lang in GRD files.')]
@@ -2508,7 +2521,7 @@ def CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
     comment_pattern = input_api.re.compile(r'//.*(%s)' % base_function_pattern)
     allowlist_pattern = input_api.re.compile(r'// IN-TEST$')
     exclusion_pattern = input_api.re.compile(
-        r'::[A-Za-z0-9_]+(%s)|(%s)[^;]+\{' %
+        r'(::[A-Za-z0-9_]+(%s)|(%s))[^;]+\{' %
         (base_function_pattern, base_function_pattern))
     # Avoid a false positive in this case, where the method name, the ::, and
     # the closing { are all on different lines due to line wrapping.
@@ -5355,7 +5368,8 @@ def CheckNoDeprecatedCss(input_api, output_api):
             # The NTP team prefers reserving -webkit-line-clamp for
             # ellipsis effect which can only be used with -webkit-box.
             r"ui/webui/resources/cr_components/most_visited/.*\.css$",
-            r"ui/webui/resources/cr_components/searchbox/searchbox_match.css$"))
+            r"ui/webui/resources/cr_components/searchbox/searchbox_match.css$")
+    )
     file_filter = lambda f: input_api.FilterSourceFile(
         f, files_to_check=file_inclusion_pattern, files_to_skip=files_to_skip)
     for fpath in input_api.AffectedFiles(file_filter=file_filter):
@@ -7137,8 +7151,7 @@ def CheckStableMojomChanges(input_api, output_api):
             return [
                 output_api.PresubmitError(
                     f'If present, No-Stable-Mojom-Checks only accepts the value '
-                    f'"true", but got "{no_stable_mojom_checks}" instead.'
-                )
+                    f'"true", but got "{no_stable_mojom_checks}" instead.')
             ]
 
     def CheckMojomsIfNeeded():
@@ -7377,15 +7390,6 @@ def _IsMiraclePtrDisallowed(input_api, affected_file):
             or "third_party/blink/renderer/platform/fonts/" in path):
         return True
 
-    # The below paths are an explicitly listed subset of Renderer-only code,
-    # because the plan is to Oilpanize it.
-    # TODO(crbug.com/330759291): Remove once Oilpanization is completed or
-    # abandoned.
-    if ("third_party/blink/renderer/core/paint/" in path or
-            "third_party/blink/renderer/platform/graphics/compositing/" in path
-            or "third_party/blink/renderer/platform/graphics/paint/" in path):
-        return True
-
     # We assume that everything else may be used outside of Renderer processes.
     return False
 
@@ -7570,15 +7574,14 @@ def _CheckAndroidNullAwayAnnotatedClasses(input_api, output_api):
     def _FilterFile(affected_file):
         return input_api.FilterSourceFile(
             affected_file,
-            files_to_skip=(
-                _EXCLUDED_PATHS + _TEST_CODE_EXCLUDED_PATHS +
-                input_api.DEFAULT_FILES_TO_SKIP + (
-                    r'.*Test.*\.java',
-                    r'^build/.*',
-                    r'^chromecast/.*',
-                    r'^components/cronet/.*',
-                    r'^tools/.*',
-                )),
+            files_to_skip=(_EXCLUDED_PATHS + _TEST_CODE_EXCLUDED_PATHS +
+                           input_api.DEFAULT_FILES_TO_SKIP + (
+                               r'.*Test.*\.java',
+                               r'^build/.*',
+                               r'^chromecast/.*',
+                               r'^components/cronet/.*',
+                               r'^tools/.*',
+                           )),
             files_to_check=[r'.*\.java$'])
 
     for f in input_api.AffectedSourceFiles(_FilterFile):
@@ -7822,6 +7825,7 @@ def CheckTodoBugReferences(input_api, output_api):
     else:
         return []
 
+
 def CheckNoBrowserStarInUnittests(input_api, output_api):
     """Checks that unit-tests don't contain Browser* variables.
     """
@@ -7831,10 +7835,7 @@ def CheckNoBrowserStarInUnittests(input_api, output_api):
         """Check unit-tests only"""
         return input_api.FilterSourceFile(
             affected_file,
-            files_to_check=(
-              r'.*unittest\.cc$',
-              r'.*unittest\.h$'
-            ),
+            files_to_check=(r'.*unittest\.cc$', r'.*unittest\.h$'),
             files_to_skip=input_api.DEFAULT_FILES_TO_SKIP,
         )
 
@@ -7851,7 +7852,7 @@ def CheckNoBrowserStarInUnittests(input_api, output_api):
     if not problems:
         return []
 
-    WARNING_MSG="""Do not use "Browser*" type in unittest files (e.g.,
+    WARNING_MSG = """Do not use "Browser*" type in unittest files (e.g.,
     "*unittest.cc" or "*unittest.h"). Unit tests should generally
     not depend on the full Browser class or related components. Consider
     refactoring to mock dependencies, use test-specific fakes,
@@ -7871,7 +7872,10 @@ def CheckBaseFeatureMacro(input_api, output_api):
             continue
 
         # Create a set of changed line numbers.
-        changed_line_numbers = {line_num for line_num, _ in f.ChangedContents()}
+        changed_line_numbers = {
+            line_num
+            for line_num, _ in f.ChangedContents()
+        }
         if not changed_line_numbers:
             continue
 

@@ -151,7 +151,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.DecodeLCPCandidateImage.{DecodeMethod}"
-    enum="Boolean" expires_after="2026-02-22">
+    enum="Boolean" expires_after="2026-04-26">
   <owner>mmocny@chromium.org</owner>
   <owner>paint-dev@chromium.org</owner>
   <summary>
@@ -197,7 +197,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.DirectRenderer.PartialSwap.ExtraDamage" units="%"
-    expires_after="2026-02-22">
+    expires_after="2026-04-26">
   <owner>vasilyt@chromium.org</owner>
   <owner>petermcneeley@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -233,7 +233,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.DirectRenderer.PartialSwap.RootDamage" units="%"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>vasilyt@chromium.org</owner>
   <owner>petermcneeley@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -246,7 +246,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.DirectRenderer.PartialSwap.TotalDamage" units="%"
-    expires_after="2026-02-22">
+    expires_after="2026-04-26">
   <owner>vasilyt@chromium.org</owner>
   <owner>petermcneeley@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -261,7 +261,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.DirectRenderer.RenderPassDrawnRectMatch"
-    enum="Boolean" expires_after="2026-02-22">
+    enum="Boolean" expires_after="2026-04-26">
   <owner>petermcneeley@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -271,7 +271,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.DirectRenderer.{FocusType}" units="pixels"
-    expires_after="2026-02-22">
+    expires_after="2026-04-26">
   <owner>petermcneeley@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -301,7 +301,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.Display.Draw.AverageOverdraw2" units="units"
-    expires_after="2026-02-15">
+    expires_after="2026-04-19">
   <owner>zoraiznaeem@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -320,17 +320,6 @@ chromium-metrics-reviews@google.com.
     This is logged once per n frames, when the frame is drawn and feature is
     enabled. The total number of quads in the last render passes in the
     CompositorFrame that is produced by surface aggregation.
-  </summary>
-</histogram>
-
-<histogram name="Compositing.Display.Draw.LastPass.Quads.BufferFormat"
-    enum="BufferFormat" expires_after="2025-05-13">
-  <owner>berlu@chromium.org</owner>
-  <owner>chromeos-gfx-compositor@google.com</owner>
-  <summary>
-    This is logged once per n frames, when the frame is drawn and feature is
-    enabled. The buffer format underlying each quads in the last render pass in
-    the CompositorFrame that is produced by surface aggregation.
   </summary>
 </histogram>
 
@@ -406,7 +395,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.Display.Draw.Quads" units="quads"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>vmiura@chromium.org</owner>
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -852,7 +841,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.TileManager.RasterTasksDuration"
-    units="microseconds" expires_after="2026-02-15">
+    units="microseconds" expires_after="2026-04-19">
   <owner>lizeb@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -873,7 +862,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Compositing.{Process}.CompositorFrame.Quads" units="quads"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>vmiura@chromium.org</owner>
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -889,7 +878,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CompositorLatency.IpcThread.{LatencyType}"
-    units="microseconds" expires_after="2026-03-01">
+    units="microseconds" expires_after="2026-05-03">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -922,7 +911,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="CompositorLatency2{InteractionType}.{StageType}"
-    units="microseconds" expires_after="2026-02-22">
+    units="microseconds" expires_after="2026-04-26">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -1000,9 +989,9 @@ chromium-metrics-reviews@google.com.
     <variant
         name="SubmitUpdateDisplayTreeToPresentationCompositorFrame.ReceivedCompositorFrameToStartDraw"/>
     <variant
-        name="SubmitUpdateDisplayTreeToPresentationCompositorFrame.RecieveUpdateDisplayTreeToStartPrepareToDraw"/>
+        name="SubmitUpdateDisplayTreeToPresentationCompositorFrame.ReceiveUpdateDisplayTreeToStartPrepareToDraw"/>
     <variant
-        name="SubmitUpdateDisplayTreeToPresentationCompositorFrame.SendUpdateDisplayTreeToRecieveUpdateDisplayTree"/>
+        name="SubmitUpdateDisplayTreeToPresentationCompositorFrame.SendUpdateDisplayTreeToReceiveUpdateDisplayTree"/>
     <variant
         name="SubmitUpdateDisplayTreeToPresentationCompositorFrame.StartDrawLayersToSubmitCompositorFrame"/>
     <variant
@@ -1022,7 +1011,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Paint.UI.NormalizedInvalidatedArea" units="%"
-    expires_after="2026-02-22">
+    expires_after="2026-04-26">
   <owner>zoraiznaeem@chromium.org</owner>
   <owner>cros-sw-perf@google.com</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -1062,7 +1051,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.CheckerboardingNeedRaster4.AllSequences"
-    units="%" expires_after="2026-02-22">
+    units="%" expires_after="2026-04-26">
   <owner>wangxianzhu@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -1086,7 +1075,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.CheckerboardingNeedRecord4.AllSequences"
-    units="%" expires_after="2026-02-09">
+    units="%" expires_after="2026-04-12">
   <owner>wangxianzhu@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -1110,7 +1099,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.Checkerboarding{Version}.AllSequences"
-    units="%" expires_after="2026-02-22">
+    units="%" expires_after="2026-04-26">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -1134,7 +1123,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.Checkerboarding{Version}.{Sequence}"
-    units="%" expires_after="2026-02-09">
+    units="%" expires_after="2026-04-12">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -1158,7 +1147,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Graphics.Smoothness.Checkerboarding{Version}.{Thread}{Sequence}"
-    units="%" expires_after="2026-02-15">
+    units="%" expires_after="2026-04-19">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <summary>
@@ -1182,7 +1171,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.Jank3.AllSequences" units="%"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>jonross@chromium.org</owner>
   <owner>mjzhang@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -1206,7 +1195,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.Jank3.{Sequence}" units="%"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>jonross@chromium.org</owner>
   <owner>mjzhang@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -1229,7 +1218,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.Jank3.{Thread}{Sequence}" units="%"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>jonross@chromium.org</owner>
   <owner>mjzhang@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -1288,7 +1277,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.PercentDroppedFrames3.{Sequence}"
-    units="%" expires_after="2026-02-09">
+    units="%" expires_after="2026-04-12">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <improvement direction="LOWER_IS_BETTER"/>
@@ -1315,7 +1304,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Graphics.Smoothness.PercentDroppedFrames3.{Sequence}.1MinAfterResume"
-    units="%" expires_after="2026-02-22">
+    units="%" expires_after="2026-04-26">
   <owner>kawasin@google.com</owner>
   <owner>baseos-perf@google.com</owner>
   <improvement direction="LOWER_IS_BETTER"/>
@@ -1342,7 +1331,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.PercentDroppedFrames3.{Thread}{Sequence}"
-    units="%" expires_after="2026-02-09">
+    units="%" expires_after="2026-04-12">
   <owner>jonross@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
   <improvement direction="LOWER_IS_BETTER"/>
@@ -1369,7 +1358,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.PercentDroppedFrames4.AllSequences"
-    units="%" expires_after="2026-02-22">
+    units="%" expires_after="2026-04-26">
   <owner>jonross@chromium.org</owner>
   <owner>gaiko@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -1405,7 +1394,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.PercentDroppedFrames4.{Sequence}"
-    units="%" expires_after="2026-02-22">
+    units="%" expires_after="2026-04-26">
   <owner>jonross@chromium.org</owner>
   <owner>gaiko@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>
@@ -1435,7 +1424,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Graphics.Smoothness.PercentDroppedFrames4.{Thread}{Sequence}"
-    units="%" expires_after="2026-02-22">
+    units="%" expires_after="2026-04-26">
   <owner>jonross@chromium.org</owner>
   <owner>gaiko@chromium.org</owner>
   <owner>chrome-gpu-metric-alerts@chromium.org</owner>

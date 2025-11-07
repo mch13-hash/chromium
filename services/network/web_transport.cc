@@ -631,11 +631,11 @@ void WebTransport::OnLocalNetworkAccessCheck(
               std::move(callback).Run(
                   permission_granted
                       ? net::OK
-                      : net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS);
+                      : net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS);
             },
             weak_factory_.GetWeakPtr(), std::move(callback)));
   } else {
-    std::move(callback).Run(net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS);
+    std::move(callback).Run(net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS);
   }
 }
 
@@ -861,6 +861,12 @@ void WebTransport::TearDown() {
 }
 
 void WebTransport::Dispose() {
+  // For tab close scenario: Send explicit connection close
+  // frame to ensure proper termination before cleanup.
+  if (transport_ && !torn_down_ && transport_->session()) {
+    transport_->Close(std::nullopt);
+  }
+
   receiver_.reset();
 
   context_->Remove(this);

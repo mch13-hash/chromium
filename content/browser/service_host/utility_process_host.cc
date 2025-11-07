@@ -56,10 +56,6 @@
 #include "services/network/public/mojom/network_service.mojom.h"
 #endif
 
-#if BUILDFLAG(IS_MAC)
-#include "components/os_crypt/sync/os_crypt_switches.h"
-#endif
-
 #if BUILDFLAG(IS_OZONE)
 #include "ui/ozone/public/ozone_switches.h"
 #endif
@@ -394,7 +390,6 @@ bool UtilityProcessHost::StartProcess() {
       network::switches::kIgnoreCertificateErrorsSPKIList,
       network::switches::kTestThirdPartyCookiePhaseout,
       network::switches::kDisableSharedDictionaryStorageCleanupForTesting,
-      network::switches::kStoreProbabilisticRevealTokens,
       sandbox::policy::switches::kNoSandbox,
       sandbox::policy::switches::kDisableLandlockSandbox,
       sandbox::policy::switches::kDisableSeccompFilterSandbox,

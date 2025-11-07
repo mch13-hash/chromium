@@ -5,10 +5,12 @@
 #include "chrome/browser/glic/glic_profile_manager.h"
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
+#include "chrome/browser/glic/host/host.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/glic/widget/glic_window_controller.h"
@@ -28,8 +30,7 @@
 
 namespace {
 std::optional<Profile*> g_forced_profile_for_launch_;
-std::optional<base::MemoryPressureMonitor::MemoryPressureLevel>
-    g_forced_memory_pressure_level_;
+std::optional<base::MemoryPressureLevel> g_forced_memory_pressure_level_;
 std::optional<network::mojom::ConnectionType> g_forced_connection_type_;
 }  // namespace
 
@@ -80,9 +81,15 @@ Profile* GlicProfileManager::GetProfileForLaunch() const {
     return *g_forced_profile_for_launch_;
   }
 
-  // If the glic window is currently showing detached use that profile.
-  if (last_active_glic_ && last_active_glic_->IsWindowDetached()) {
+  // If the glic window is currently showing detached use that profile. When
+  // GlicMultiInstance is enabled, this profile is the one where a detached
+  // instance was most recently used.
+  if (!GlicEnabling::IsMultiInstanceEnabledByFlags() && last_active_glic_ &&
+      last_active_glic_->IsWindowDetached()) {
     return last_active_glic_->profile();
+  } else if (GlicEnabling::IsMultiInstanceEnabledByFlags() &&
+             current_detached_glic_) {
+    return current_detached_glic_->profile();
   }
 
   // Look for a profile to based on most recently used browser windows
@@ -119,6 +126,8 @@ Profile* GlicProfileManager::GetProfileForLaunch() const {
 void GlicProfileManager::SetActiveGlic(GlicKeyedService* glic) {
   if (last_active_glic_ && last_active_glic_.get() != glic &&
       last_active_glic_->IsWindowShowing()) {
+    // This is only relevant to single-instance glic, as IsWindowShowing remains
+    // unimplemented in multi-instance.
     last_active_glic_->window_controller().Close();
   }
   Profile* last_active_glic_profile = nullptr;
@@ -130,6 +139,17 @@ void GlicProfileManager::SetActiveGlic(GlicKeyedService* glic) {
   }
   observers_.Notify(&Observer::OnLastActiveGlicProfileChanged,
                     last_active_glic_profile);
+}
+
+void GlicProfileManager::SetCurrentDetachedGlic(Profile* profile) {
+  if (!profile) {
+    current_detached_glic_.reset();
+    return;
+  }
+  if (current_detached_glic_ && current_detached_glic_->profile() != profile) {
+    current_detached_glic_->window_controller().Close();
+  }
+  current_detached_glic_ = GlicKeyedService::Get(profile)->GetWeakPtr();
 }
 
 void GlicProfileManager::OnServiceShutdown(GlicKeyedService* glic) {
@@ -147,8 +167,9 @@ void GlicProfileManager::OnLoadingClientForService(GlicKeyedService* glic) {
     return;
   }
 
-  if (last_loaded_glic_ && last_loaded_glic_.get() != glic) {
-    last_loaded_glic_->CloseUI();
+  if (last_loaded_glic_ && last_loaded_glic_.get() != glic &&
+      !GlicEnabling::IsMultiInstanceEnabledByFlags()) {
+    last_loaded_glic_->CloseAndShutdown();
   }
 
   if (glic) {
@@ -167,17 +188,24 @@ void GlicProfileManager::OnUnloadingClientForService(GlicKeyedService* glic) {
 void GlicProfileManager::ShouldPreloadForProfile(
     Profile* profile,
     ShouldPreloadCallback callback) {
+  if (!base::FeatureList::IsEnabled(features::kGlicWarming)) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(std::move(callback),
+                       GlicPrewarmingChecksResult::kWarmingDisabled));
+    return;
+  }
   if (!profile || IsProfileDirectoryMarkedForDeletion(profile->GetPath())) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback),
                                   GlicPrewarmingChecksResult::kProfileGone));
     return;
   }
-  if (!base::FeatureList::IsEnabled(features::kGlicWarming)) {
+  if (profile->ShutdownStarted()) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(std::move(callback),
-                       GlicPrewarmingChecksResult::kWarmingDisabled));
+                       GlicPrewarmingChecksResult::kBrowserShuttingDown));
     return;
   }
   GlicPrewarmingChecksResult result;
@@ -304,7 +332,7 @@ void GlicProfileManager::ForceProfileForLaunchForTesting(
 
 // static
 void GlicProfileManager::ForceMemoryPressureForTesting(
-    std::optional<base::MemoryPressureMonitor::MemoryPressureLevel> level) {
+    std::optional<base::MemoryPressureLevel> level) {
   g_forced_memory_pressure_level_ = level;
 }
 
@@ -316,16 +344,14 @@ void GlicProfileManager::ForceConnectionTypeForTesting(
 
 bool GlicProfileManager::IsUnderMemoryPressure() const {
   // TODO(crbug.com/390719004): Look at discarding when pressure increases.
-  base::MemoryPressureMonitor::MemoryPressureLevel memory_pressure = base::
-      MemoryPressureMonitor::MemoryPressureLevel::MEMORY_PRESSURE_LEVEL_NONE;
+  base::MemoryPressureLevel memory_pressure = base::MEMORY_PRESSURE_LEVEL_NONE;
   if (g_forced_memory_pressure_level_) {
     memory_pressure = *g_forced_memory_pressure_level_;
   } else if (const auto* memory_monitor = base::MemoryPressureMonitor::Get()) {
     memory_pressure = memory_monitor->GetCurrentPressureLevel(
         base::MemoryPressureMonitorTag::kGlicProfileManager);
   }
-  return memory_pressure >= base::MemoryPressureMonitor::MemoryPressureLevel::
-                                MEMORY_PRESSURE_LEVEL_MODERATE;
+  return memory_pressure >= base::MEMORY_PRESSURE_LEVEL_MODERATE;
 }
 
 void GlicProfileManager::CanPreloadForProfile(Profile* profile,
@@ -338,6 +364,9 @@ void GlicProfileManager::CanPreloadForProfile(Profile* profile,
   };
   if (!profile || profile->ShutdownStarted()) {
     return produce_result(GlicPrewarmingChecksResult::kProfileGone);
+  }
+  if (profile->ShutdownStarted()) {
+    return produce_result(GlicPrewarmingChecksResult::kBrowserShuttingDown);
   }
   auto enablement = GlicEnabling::EnablementForProfile(profile);
   if (!enablement.IsProfileEligible()) {

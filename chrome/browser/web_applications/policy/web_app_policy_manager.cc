@@ -748,8 +748,8 @@ void WebAppPolicyManager::RefreshPolicySettingsForTesting() {
 void WebAppPolicyManager::OverrideManifest(
     const GURL& custom_values_key,
     blink::mojom::ManifestPtr& manifest) const {
-  const CustomManifestValues& custom_values =
-      custom_manifest_values_by_url_.at(custom_values_key);
+  const CustomManifestValues& custom_values = CHECK_DEREF(
+      base::FindOrNull(custom_manifest_values_by_url_, custom_values_key));
   if (custom_values.name) {
     manifest->name = custom_values.name.value();
   }
@@ -1034,6 +1034,7 @@ void WebAppPolicyManager::PopulateDisabledWebAppsIdsLists() {
         break;
       case policy::SystemFeature::kGoogleChat:
         disabled_web_apps_.insert(ash::kGoogleChatAppId);
+        disabled_web_apps_.insert(ash::kOldGoogleChatAppId);
         break;
       case policy::SystemFeature::kYoutube:
         disabled_web_apps_.insert(ash::kYoutubeAppId);
@@ -1043,6 +1044,9 @@ void WebAppPolicyManager::PopulateDisabledWebAppsIdsLists() {
         break;
       case policy::SystemFeature::kCalculator:
         disabled_web_apps_.insert(ash::kCalculatorAppId);
+        break;
+      case policy::SystemFeature::kVids:
+        disabled_web_apps_.insert(ash::kVidsAppId);
         break;
       case policy::SystemFeature::kUnknownSystemFeature:
       case policy::SystemFeature::kBrowserSettings:

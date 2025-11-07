@@ -11,6 +11,7 @@
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/local_tab_group_listener.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -37,18 +38,22 @@ SavedTabGroupModelListener::SavedTabGroupModelListener(
   CHECK(service);
   CHECK(profile);
 
-  for (Browser* browser : *BrowserList::GetInstance()) {
-    OnBrowserAdded(browser);
-  }
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [this](BrowserWindowInterface* browser) {
+        OnBrowserAdded(browser->GetBrowserForMigrationOnly());
+        return true;
+      });
 
   BrowserList::GetInstance()->AddObserver(this);
 }
 
 SavedTabGroupModelListener::~SavedTabGroupModelListener() {
   BrowserList::GetInstance()->RemoveObserver(this);
-  for (Browser* browser : *BrowserList::GetInstance()) {
-    OnBrowserRemoved(browser);
-  }
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [this](BrowserWindowInterface* browser) {
+        OnBrowserRemoved(browser->GetBrowserForMigrationOnly());
+        return true;
+      });
 }
 
 void SavedTabGroupModelListener::OnTabGroupAdded(
@@ -354,8 +359,8 @@ SavedTabGroupModelListener::CreateSavedTabGroupAndTabMapping(
 
   const gfx::Range tab_range = tab_group->ListTabs();
   std::map<tabs::TabInterface*, base::Uuid> tab_guid_mapping;
-  for (auto i = tab_range.start(); i < tab_range.end(); ++i) {
-    tabs::TabInterface* tab = tab_strip_model->GetTabAtIndex(i);
+  for (tabs::TabInterface* tab :
+       tab_strip_model->GetTabsAtIndices(tab_range.ToIntVector())) {
     CHECK(tab);
 
     tab_groups::SavedTabGroupTab saved_tab_group_tab =

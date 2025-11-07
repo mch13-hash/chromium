@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/extensions/extension_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
-#include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
+#include "chrome/browser/ui/views/extensions/extension_action_platform_delegate_views.h"
 #include "chrome/browser/ui/webui/util/image_util.h"
 #include "chrome/browser/ui/webui_browser/webui_browser_ui.h"
 #include "chrome/browser/ui/webui_browser/webui_browser_window.h"
@@ -36,7 +36,7 @@ GURL GetDataUrlForImageModel(ui::ImageModel icon_model,
 }  // namespace
 
 class WebUIBrowserExtensionsContainer::ActionInfo
-    : public ToolbarActionViewDelegateViews {
+    : public ToolbarActionViewDelegate {
  public:
   ActionInfo(WebUIBrowserExtensionsContainer& extensions_container,
              Browser& browser,
@@ -48,26 +48,8 @@ class WebUIBrowserExtensionsContainer::ActionInfo
   }
 
   // ToolbarActionViewDelegate:
-  content::WebContents* GetCurrentWebContents() const override {
-    return browser_->tab_strip_model()->GetActiveWebContents();
-  }
-
   void UpdateState() override {
     extensions_container_->NotifyOfOneAction(controller_->GetId());
-  }
-
-  void ShowContextMenuAsFallback() override {
-    extensions_container_->ShowContextMenu(ui::mojom::MenuSourceType::kNone,
-                                           controller()->GetId());
-  }
-
-  // ToolbarActionViewDelegateViews:
-  views::FocusManager* GetFocusManagerForAccelerator() override {
-    return extensions_container_->window_->widget()->GetFocusManager();
-  }
-
-  views::BubbleAnchor GetReferenceButtonForPopup() override {
-    return GetAnchor();
   }
 
   ui::TrackedElement* GetAnchor() {
@@ -80,7 +62,8 @@ class WebUIBrowserExtensionsContainer::ActionInfo
 
   extensions_bar::mojom::ExtensionActionInfoPtr ToMojo(
       WebUIBrowserWindow& window) const {
-    content::WebContents* web_contents = GetCurrentWebContents();
+    content::WebContents* web_contents =
+        browser_->tab_strip_model()->GetActiveWebContents();
     auto result = extensions_bar::mojom::ExtensionActionInfo::New();
     result->id = controller_->GetId();
     result->accessible_name =
@@ -127,7 +110,8 @@ class WebUIBrowserExtensionsContainer::ContextMenu {
       return nullptr;
     }
 
-    return base::WrapUnique(new ContextMenu(action_id, *it->second, model));
+    return base::WrapUnique(
+        new ContextMenu(action_id, *it->second, model, extensions_container));
   }
 
   // This is in two steps so that `context_menu_` in the container gets
@@ -140,9 +124,7 @@ class WebUIBrowserExtensionsContainer::ContextMenu {
     menu_runner_ =
         std::make_unique<views::MenuRunner>(std::move(menu), run_types);
 
-    action_info_->controller()->OnContextMenuShown(
-        extensions::ExtensionContextMenuModel::ContextMenuSource::
-            kToolbarAction);
+    extensions_container_->OnContextMenuShownFromToolbar(action_id_);
 
     menu_runner_->RunMenuAt(main_widget, nullptr,
                             action_info_->GetAnchor()->GetScreenBounds(),
@@ -154,8 +136,11 @@ class WebUIBrowserExtensionsContainer::ContextMenu {
  private:
   ContextMenu(const std::string& action_id,
               ActionInfo& action_info,
-              ui::MenuModel* model)
-      : action_id_(action_id), action_info_(action_info) {
+              ui::MenuModel* model,
+              WebUIBrowserExtensionsContainer& extensions_container)
+      : action_id_(action_id),
+        action_info_(action_info),
+        extensions_container_(extensions_container) {
     menu_adapter_ = std::make_unique<views::MenuModelAdapter>(
         model, base::BindRepeating(&ContextMenu::OnMenuClosed,
                                    weak_ptr_factory_.GetWeakPtr()));
@@ -166,13 +151,12 @@ class WebUIBrowserExtensionsContainer::ContextMenu {
     menu_adapter_.reset();
 
     // This will delete us.
-    action_info_->controller()->OnContextMenuClosed(
-        extensions::ExtensionContextMenuModel::ContextMenuSource::
-            kToolbarAction);
+    extensions_container_->OnContextMenuClosedFromToolbar();
   }
 
   std::string action_id_;
   const raw_ref<ActionInfo> action_info_;
+  const raw_ref<WebUIBrowserExtensionsContainer> extensions_container_;
   std::unique_ptr<views::MenuModelAdapter> menu_adapter_;
   std::unique_ptr<views::MenuRunner> menu_runner_;
 
@@ -284,10 +268,28 @@ bool WebUIBrowserExtensionsContainer::HasAnyExtensions() const {
   return !actions_.empty();
 }
 
-void WebUIBrowserExtensionsContainer::UpdateToolbarActionHoverCard(
-    ToolbarActionView* action_view,
-    ToolbarActionHoverCardUpdateType update_type) {
-  NOTIMPLEMENTED();
+void WebUIBrowserExtensionsContainer::ShowContextMenuAsFallback(
+    const extensions::ExtensionId& action_id) {
+  ShowContextMenu(ui::mojom::MenuSourceType::kNone, action_id);
+}
+
+void WebUIBrowserExtensionsContainer::OnPopupShown(
+    const extensions::ExtensionId& action_id,
+    bool by_user) {}
+
+void WebUIBrowserExtensionsContainer::OnPopupClosed(
+    const extensions::ExtensionId& action_id) {}
+
+views::FocusManager*
+WebUIBrowserExtensionsContainer::GetFocusManagerForAccelerator() {
+  return window_->widget()->GetFocusManager();
+}
+
+views::BubbleAnchor WebUIBrowserExtensionsContainer::GetReferenceButtonForPopup(
+    const extensions::ExtensionId& action_id) {
+  auto it = actions_.find(action_id);
+  CHECK(it != actions_.end());
+  return it->second->GetAnchor();
 }
 
 void WebUIBrowserExtensionsContainer::CollapseConfirmation() {
@@ -417,7 +419,10 @@ void WebUIBrowserExtensionsContainer::CreateActionForId(
     const ToolbarActionsModel::ActionId& action_id) {
   auto action_info = std::make_unique<ActionInfo>(
       *this, browser_.get(),
-      ExtensionActionViewController::Create(action_id, &browser_.get(), this));
+      ExtensionActionViewController::Create(
+          action_id, &browser_.get(),
+          std::make_unique<ExtensionActionPlatformDelegateViews>(
+              &browser_.get(), this)));
   action_info->controller()->RegisterCommand();
   actions_[action_id] = std::move(action_info);
 }

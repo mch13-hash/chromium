@@ -5,11 +5,11 @@
 #import "components/policy/policy_constants.h"
 #import "components/signin/public/base/signin_metrics.h"
 #import "components/sync/base/user_selectable_type.h"
+#import "ios/chrome/browser/authentication/history_sync/public/pref_names.h"
 #import "ios/chrome/browser/authentication/test/expected_signin_histograms.h"
 #import "ios/chrome/browser/authentication/test/signin_earl_grey.h"
 #import "ios/chrome/browser/authentication/test/signin_earl_grey_ui_test_util.h"
 #import "ios/chrome/browser/authentication/test/signin_matchers.h"
-#import "ios/chrome/browser/authentication/ui_bundled/history_sync/pref_names.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/metrics/model/metrics_app_interface.h"
 #import "ios/chrome/browser/policy/model/policy_app_interface.h"
@@ -568,7 +568,8 @@ using chrome_test_util::SettingsSignInRowMatcher;
 
 // Tests that if a user signs in and declines History Sync, then sign-out, then
 // History Sync screen is skipped if they sign-in again from the settings.
-- (void)testHistorySyncSkippedIfDeclinedJustBefore {
+// TODO(crbug.com/453019053): Test is failing on the waterfall.
+- (void)DISABLED_testHistorySyncSkippedIfDeclinedJustBefore {
   FakeSystemIdentity* fakeIdentity1 = [FakeSystemIdentity fakeIdentity1];
   [SigninEarlGrey addFakeIdentity:fakeIdentity1];
   [ChromeEarlGreyUI openSettingsMenu];

@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CONTAINER_SELECTOR_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/media_query_exp.h"
+#include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/core/layout/geometry/axis.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
@@ -16,6 +16,7 @@
 namespace blink {
 
 class Element;
+class ConditionalExpNode;
 
 // Not to be confused with regular selectors. This refers to container
 // selection by e.g. a given name, or by implicit container selection
@@ -47,7 +48,23 @@ class CORE_EXPORT ContainerSelector {
         has_scrollable_query_(scroll_state),
         has_scrolled_query_(scroll_state),
         has_anchored_query_(anchored_query) {}
-  ContainerSelector(AtomicString name, const MediaQueryExpNode&);
+  ContainerSelector(AtomicString name, const ConditionalExpNode&);
+
+  enum FeatureFlag {
+    kFeatureUnknown = 1 << 1,
+    kFeatureWidth = 1 << 2,
+    kFeatureHeight = 1 << 3,
+    kFeatureInlineSize = 1 << 4,
+    kFeatureBlockSize = 1 << 5,
+    kFeatureStyle = 1 << 6,
+    kFeatureSticky = 1 << 7,
+    kFeatureSnap = 1 << 8,
+    kFeatureScrollable = 1 << 9,
+    kFeatureScrolled = 1 << 10,
+    kFeatureAnchored = 1 << 11,
+  };
+  using FeatureFlags = unsigned;
+  static FeatureFlags CollectFeatureFlags(const ConditionalExpNode& root);
 
   bool IsHashTableDeletedValue() const {
     return HashTraits<AtomicString>::IsDeletedValue(name_);

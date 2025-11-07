@@ -183,16 +183,14 @@ MATCHER_P(InkStrokeBrushSizeEq, expected_size, "") {
 
 // Matcher for ink::Stroke objects against an expected drawing brush type.
 // A pen is opaque while a highlighter has transparency, so a drawing
-// brush type can be deduced from the ink::Stroke's brush coat.
+// brush type can be deduced from the ink::Stroke's brush.
 MATCHER_P(InkStrokeDrawingBrushTypeEq, expected_type, "") {
-  const ink::Brush& ink_brush = arg.GetBrush();
-  const ink::BrushCoat& coat = ink_brush.GetCoats()[0];
-  float opacity = coat.tip.opacity_multiplier;
+  const float opacity = GetOpacityMultiplierFromBrush(arg.GetBrush());
   if (expected_type == PdfInkBrush::Type::kPen) {
     return opacity == 1.0f;
   }
 
-  CHECK(expected_type == PdfInkBrush::Type::kHighlighter);
+  CHECK_EQ(expected_type, PdfInkBrush::Type::kHighlighter);
   return opacity == 0.4f;
 }
 
@@ -642,7 +640,7 @@ TEST_P(PdfInkModuleTest, HandleSetAnnotationBrushMessagePen) {
   ASSERT_EQ(1u, ink_brush.CoatCount());
   const ink::BrushCoat& coat = ink_brush.GetCoats()[0];
   EXPECT_EQ(1.0f, coat.tip.corner_rounding);
-  EXPECT_EQ(1.0f, coat.tip.opacity_multiplier);
+  EXPECT_EQ(1.0f, GetOpacityMultiplierFromBrush(ink_brush));
 }
 
 // Verify that a set highlighter message sets the annotation brush to a
@@ -666,7 +664,7 @@ TEST_P(PdfInkModuleTest, HandleSetAnnotationBrushMessageHighlighter) {
   ASSERT_EQ(1u, ink_brush.CoatCount());
   const ink::BrushCoat& coat = ink_brush.GetCoats()[0];
   EXPECT_EQ(0.0f, coat.tip.corner_rounding);
-  EXPECT_EQ(0.4f, coat.tip.opacity_multiplier);
+  EXPECT_EQ(0.4f, GetOpacityMultiplierFromBrush(ink_brush));
 }
 
 // Verify that brushes with zero color values can be set as the annotation
@@ -690,7 +688,7 @@ TEST_P(PdfInkModuleTest, HandleSetAnnotationBrushMessageColorZero) {
   ASSERT_EQ(1u, ink_brush.CoatCount());
   const ink::BrushCoat& coat = ink_brush.GetCoats()[0];
   EXPECT_EQ(1.0f, coat.tip.corner_rounding);
-  EXPECT_EQ(1.0f, coat.tip.opacity_multiplier);
+  EXPECT_EQ(1.0f, GetOpacityMultiplierFromBrush(ink_brush));
 }
 
 TEST_P(PdfInkModuleTest, HandleSetAnnotationModeMessage) {
@@ -1305,8 +1303,7 @@ class PdfInkModuleStrokeTest : public PdfInkModuleTest {
         const ink::StrokeInputBatch& input_batch = stroke.stroke.GetInputs();
         StrokeInputPoints stroke_points;
         stroke_points.reserve(input_batch.Size());
-        for (size_t i = 0; i < input_batch.Size(); ++i) {
-          ink::StrokeInput stroke_input = input_batch.Get(i);
+        for (ink::StrokeInput stroke_input : input_batch) {
           stroke_points.emplace_back(stroke_input.position.x,
                                      stroke_input.position.y);
         }
@@ -3502,12 +3499,10 @@ class PdfInkModuleTextHighlightTest : public PdfInkModuleUndoRedoTest {
     const PdfInkBrush* brush = ink_module().GetPdfInkBrushForTesting();
     ASSERT_TRUE(brush);
     const ink::Brush& ink_brush = brush->ink_brush();
-    ASSERT_EQ(1u, ink_brush.CoatCount());
-    const ink::BrushCoat& coat = ink_brush.GetCoats()[0];
 
     EXPECT_EQ(kOrangeColor, GetSkColorFromInkBrush(ink_brush));
     EXPECT_EQ(6.0f, ink_brush.GetSize());
-    EXPECT_EQ(0.4f, coat.tip.opacity_multiplier);
+    EXPECT_EQ(0.4f, GetOpacityMultiplierFromBrush(ink_brush));
   }
 
   void ClickTextAtPoint(const gfx::PointF& point, int click_count) {
@@ -4026,10 +4021,7 @@ TEST_P(PdfInkModuleTextHighlightTest,
   SetSelectionRectsOnFirstPage(base::span_from_ref(gfx::Rect(9, 14, 5, 10)));
   EXPECT_CALL(client(), IsSelectableTextOrLinkArea(_))
       .WillRepeatedly(Return(true));
-
-  // There should not be any text selection extension after the miss, as the
-  // initial text selection has been terminated.
-  EXPECT_CALL(client(), ExtendSelectionByPoint(_)).Times(0);
+  EXPECT_CALL(client(), ExtendSelectionByPoint(kMouseUpPoint));
 
   RunStrokeMissedEndEventThenMouseMoveTest();
 }
@@ -4309,6 +4301,76 @@ TEST_P(PdfInkModuleTextHighlightTest, IgnoreVerySmallTextSelection) {
   EXPECT_EQ(0, client().unmodified_stroke_finished_count());
   EXPECT_TRUE(updated_ink_thumbnail_page_indices().empty());
   EXPECT_TRUE(CollectVisibleStrokes().empty());
+}
+
+TEST_P(PdfInkModuleTextHighlightTest,
+       TextHighlightMissedEndEventThenMouseDown) {
+  EnableDrawAnnotationMode();
+  InitializeSimpleSinglePageBasicLayout();
+
+  SelectBrushTool(PdfInkBrush::Type::kHighlighter, kOrangeBrushParams);
+
+  SetSelectionRectsOnFirstPage(base::span_from_ref(kHorizontalSelection));
+  SetTextAreaPoints(base::span_from_ref(kStartPointInsidePage0));
+
+  EXPECT_CALL(client(), OnTextOrLinkAreaClick(kStartPointInsidePage0,
+                                              /*click_count=*/1))
+      .Times(2);
+  EXPECT_CALL(client(), ExtendSelectionByPoint(kEndPointInsidePage0));
+
+  blink::WebMouseEvent mouse_down_event =
+      MouseEventBuilder()
+          .CreateLeftClickAtPosition(kStartPointInsidePage0)
+          .Build();
+  EXPECT_TRUE(ink_module().HandleInputEvent(mouse_down_event));
+
+  blink::WebMouseEvent mouse_move_event =
+      CreateMouseMoveWithLeftButtonEventAtPoint(kEndPointInsidePage0);
+  EXPECT_TRUE(ink_module().HandleInputEvent(mouse_move_event));
+
+  // If the mouse up event went missing during stroking, the next mouse down
+  // event should not cause a crash.
+  EXPECT_TRUE(ink_module().HandleInputEvent(mouse_down_event));
+
+  EXPECT_EQ(2, client().stroke_started_count());
+  EXPECT_EQ(1, client().modified_stroke_finished_count());
+  EXPECT_EQ(0, client().unmodified_stroke_finished_count());
+}
+
+TEST_P(PdfInkModuleTextHighlightTest,
+       TextHighlightWithNoEndEventThenTouchStart) {
+  EnableDrawAnnotationMode();
+  InitializeSimpleSinglePageBasicLayout();
+
+  SelectBrushTool(PdfInkBrush::Type::kHighlighter, kOrangeBrushParams);
+
+  SetSelectionRectsOnFirstPage(base::span_from_ref(kHorizontalSelection));
+  SetTextAreaPoints(base::span_from_ref(kStartPointInsidePage0));
+
+  EXPECT_CALL(client(), OnTextOrLinkAreaClick(kStartPointInsidePage0,
+                                              /*click_count=*/1))
+      .Times(2);
+  EXPECT_CALL(client(), ExtendSelectionByPoint(kEndPointInsidePage0));
+
+  blink::WebMouseEvent mouse_down_event =
+      MouseEventBuilder()
+          .CreateLeftClickAtPosition(kStartPointInsidePage0)
+          .Build();
+  EXPECT_TRUE(ink_module().HandleInputEvent(mouse_down_event));
+
+  blink::WebMouseEvent mouse_move_event =
+      CreateMouseMoveWithLeftButtonEventAtPoint(kEndPointInsidePage0);
+  EXPECT_TRUE(ink_module().HandleInputEvent(mouse_move_event));
+
+  // If the mouse up event has yet to happen, the next touch start event
+  // should not cause a crash.
+  EXPECT_TRUE(ink_module().HandleInputEvent(
+      CreateTouchEvent(blink::WebInputEvent::Type::kTouchStart,
+                       base::span_from_ref(kStartPointInsidePage0))));
+
+  EXPECT_EQ(2, client().stroke_started_count());
+  EXPECT_EQ(1, client().modified_stroke_finished_count());
+  EXPECT_EQ(0, client().unmodified_stroke_finished_count());
 }
 
 class PdfInkModuleTextHighlightMetricsTest

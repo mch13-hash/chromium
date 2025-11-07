@@ -14,14 +14,17 @@ import androidx.annotation.Px;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.content_public.browser.SelectionMenuItem;
+import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController;
+import org.chromium.ui.listmenu.ListMenuItemProperties;
 import org.chromium.ui.modelutil.MVCListAdapter;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /**
- * Interface that provides dropdown text selection context menu functionality.
- * Each content embedder will need to provide an implementation of this to enable
- * the behavior when showing the context menu for mouse & trackpad.
+ * Interface that provides dropdown text selection context menu functionality. Each content embedder
+ * will need to provide an implementation of this to enable the behavior when showing the context
+ * menu for mouse & trackpad.
  */
 @NullMarked
 public interface SelectionDropdownMenuDelegate {
@@ -33,13 +36,16 @@ public interface SelectionDropdownMenuDelegate {
     }
 
     /**
-     * Attempts to show the dropdown anchored by its top-left corner at the passed in
-     * x and y offset if there is room. Otherwise it will pick another corner to
-     * ensure the entire dropdown fits on the screen.
-     * @param context the context needed to show the dropdown menu.
-     * @param rootView the root view of the dropdown menu.
-     * @param items the items that will be shown inside the dropdown menu.
-     * @param clickListener the click listener for the items in the dropdown menu.
+     * Attempts to show the dropdown anchored by its top-left corner at the passed in x and y offset
+     * if there is room. Otherwise it will pick another corner to ensure the entire dropdown fits on
+     * the screen.
+     *
+     * @param context The context needed to show the dropdown menu.
+     * @param rootView The root view of the dropdown menu.
+     * @param items The items that will be shown inside the dropdown menu.
+     * @param clickListener The click listener for the items in the dropdown menu.
+     * @param hierarchicalMenuController The {@code HierarchicalMenuController} to use to display
+     *     nested menus.
      * @param x The x offset of the dropdown menu relative to the container View.
      * @param y The y offset of the dropdown menu relative to the container View.
      */
@@ -48,29 +54,35 @@ public interface SelectionDropdownMenuDelegate {
             View rootView,
             MVCListAdapter.ModelList items,
             ItemClickListener clickListener,
+            HierarchicalMenuController hierarchicalMenuController,
             @Px int x,
             @Px int y);
 
     /** Dismisses the dropdown menu. */
     void dismiss();
 
-    /** Returns the group id for an item if it's present. Otherwise returns 0. */
-    @IdRes
-    int getGroupId(PropertyModel itemModel);
-
-    /** Returns the id for an item if it's present. Otherwise returns 0. */
-    @IdRes
-    int getItemId(PropertyModel itemModel);
-
-    /** Returns the intent for an item if it's present. Otherwise null is returned. */
-    @Nullable
-    Intent getItemIntent(PropertyModel itemModel);
-
     /**
-     * Returns the {@link android.view.View.OnClickListener} for an item if there is
-     * one. Otherwise returns null.
+     * Return a minimal SelectionMenuItem with only the following fields set (add to this list if
+     * you add more): Title, Id, GroupId, Order, Intent, ClickListener.
      */
-    View.@Nullable OnClickListener getClickListener(PropertyModel itemModel);
+    default SelectionMenuItem getMinimalMenuItem(PropertyModel itemModel) {
+        return new SelectionMenuItem.Builder(
+                        PropertyModel.getFromModelOrDefault(
+                                itemModel, ListMenuItemProperties.TITLE, ""))
+                .setId(
+                        PropertyModel.getFromModelOrDefault(
+                                itemModel, ListMenuItemProperties.MENU_ITEM_ID, 0))
+                .setGroupId(
+                        PropertyModel.getFromModelOrDefault(
+                                itemModel, ListMenuItemProperties.GROUP_ID, 0))
+                .setOrder(
+                        PropertyModel.getFromModelOrDefault(
+                                itemModel, ListMenuItemProperties.ORDER, -1))
+                .setIntent(
+                        PropertyModel.getFromModelOrDefault(
+                                itemModel, ListMenuItemProperties.INTENT, null))
+                .build();
+    }
 
     /** Returns a divider menu item to be shown in the dropdown menu. */
     ListItem getDivider();
@@ -87,7 +99,6 @@ public interface SelectionDropdownMenuDelegate {
      * @param isIconTintable True if the icon can be tinted.
      * @param groupContainsIcon True if this or any other item in group has an icon.
      * @param enabled Whether or not this menu item should be enabled.
-     * @param clickListener Optional click listener for the menu item.
      * @param intent Optional intent for the menu item.
      * @return ListItem with text and optionally an icon.
      */
@@ -100,8 +111,8 @@ public interface SelectionDropdownMenuDelegate {
             boolean isIconTintable,
             boolean groupContainsIcon,
             boolean enabled,
-            View.@Nullable OnClickListener clickListener,
-            @Nullable Intent intent);
+            @Nullable Intent intent,
+            int order);
 
     /** Returns a pointer to a native SelectionPopupDelegate. */
     default long getNativeDelegate() {

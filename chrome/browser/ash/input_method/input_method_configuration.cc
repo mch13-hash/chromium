@@ -11,7 +11,6 @@
 #include "chrome/browser/ash/input_method/component_extension_ime_manager_delegate_impl.h"
 #include "chrome/browser/ash/input_method/input_method_delegate_impl.h"
 #include "chrome/browser/ash/input_method/input_method_manager_impl.h"
-#include "chrome/browser/ash/input_method/input_method_persistence.h"
 #include "components/application_locale_storage/application_locale_storage.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/ime/ash/fake_ime_keyboard.h"
@@ -26,7 +25,6 @@ namespace {
 
 bool g_disable_extension_loading = false;
 Accessibility* g_accessibility = nullptr;
-InputMethodPersistence* g_input_method_persistence = nullptr;
 
 }  // namespace
 
@@ -42,7 +40,7 @@ void Initialize(PrefService* local_state,
 
   auto* impl = new InputMethodManagerImpl(
       local_state, application_locale_storage,
-      std::make_unique<InputMethodDelegateImpl>(),
+      std::make_unique<InputMethodDelegateImpl>(local_state),
       std::make_unique<ComponentExtensionIMEManagerDelegateImpl>(),
       !g_disable_extension_loading, std::move(ime_keyboard));
   InputMethodManager::Initialize(impl);
@@ -50,9 +48,6 @@ void Initialize(PrefService* local_state,
 
   delete g_accessibility;
   g_accessibility = new Accessibility(impl);
-
-  delete g_input_method_persistence;
-  g_input_method_persistence = new InputMethodPersistence(impl);
 }
 
 void InitializeForTesting(InputMethodManager* mock_manager) {
@@ -66,9 +61,6 @@ void DisableExtensionLoading() {
 void Shutdown() {
   delete g_accessibility;
   g_accessibility = nullptr;
-
-  delete g_input_method_persistence;
-  g_input_method_persistence = nullptr;
 
   InputMethodManager::Shutdown();
 }

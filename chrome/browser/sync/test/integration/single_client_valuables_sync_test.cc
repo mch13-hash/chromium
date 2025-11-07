@@ -4,14 +4,17 @@
 
 #include <vector>
 
+#include "base/test/protobuf_matchers.h"
 #include "chrome/browser/autofill/autofill_entity_data_manager_factory.h"
 #include "chrome/browser/autofill/valuables_data_manager_factory.h"
+#include "chrome/browser/sync/test/integration/fake_server_match_status_checker.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_service_impl_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "components/autofill/core/browser/data_manager/autofill_ai/entity_data_manager_test_utils.h"
 #include "components/autofill/core/browser/data_manager/valuables/valuables_data_manager.h"
 #include "components/autofill/core/browser/data_manager/valuables/valuables_data_manager_test_utils.h"
+#include "components/autofill/core/browser/data_model/autofill_ai/entity_type_names.h"
 #include "components/autofill/core/browser/data_model/valuables/loyalty_card.h"
 #include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
 #include "components/autofill/core/browser/test_utils/valuables_data_test_utils.h"
@@ -38,6 +41,17 @@ using testing::ElementsAre;
 using testing::UnorderedElementsAre;
 
 namespace {
+
+EntityInstance GetServerVehicleEntityInstance(
+    autofill::test::VehicleOptions options = {}) {
+  options.nickname = "";
+  options.date_modified = {};
+  options.use_date = {};
+  options.record_type = EntityInstance::RecordType::kServerWallet;
+  options.are_attributes_read_only =
+      EntityInstance::AreAttributesReadOnly(false);
+  return autofill::test::GetVehicleEntityInstance(options);
+}
 
 EntityInstance GetServerVehicleEntityInstanceWithRandomGuid() {
   return autofill::test::GetVehicleEntityInstanceWithRandomGuid(
@@ -98,6 +112,44 @@ sync_pb::SyncEntity EntityInstanceToSyncEntity(
       autofill::CreateSpecificsFromEntityInstance(entity_instance);
   return entity;
 }
+
+// Since the sync server operates in terms of entity specifics, this helper
+// function converts a given `entity_instance` to the equivalent
+// `AutofillValuableSpecifics`.
+sync_pb::AutofillValuableSpecifics AsAutofillValuableSpecifics(
+    const EntityInstance& entity_instance) {
+  return autofill::CreateSpecificsFromEntityInstance(entity_instance);
+}
+
+// Helper class to wait until the fake server's AutofillValuableSpecifics match
+// a given predicate. Unfortunately, since protos don't have an equality
+// operator, the comparisons are based on the `base::test::EqualsProto()`
+// representation of the specifics.
+class FakeServerSpecificsChecker
+    : public fake_server::FakeServerMatchStatusChecker {
+ public:
+  using Matcher =
+      testing::Matcher<std::vector<sync_pb::AutofillValuableSpecifics>>;
+
+  explicit FakeServerSpecificsChecker(const Matcher& matcher)
+      : matcher_(matcher) {}
+
+  // StatusChangeChecker implementation.
+  bool IsExitConditionSatisfied(std::ostream* os) override {
+    std::vector<sync_pb::AutofillValuableSpecifics> specifics;
+    for (const sync_pb::SyncEntity& entity :
+         fake_server()->GetSyncEntitiesByDataType(syncer::AUTOFILL_VALUABLE)) {
+      specifics.push_back(entity.specifics().autofill_valuable());
+    }
+    testing::StringMatchResultListener listener;
+    bool matches = testing::ExplainMatchResult(matcher_, specifics, &listener);
+    *os << listener.str();
+    return matches;
+  }
+
+ private:
+  const Matcher matcher_;
+};
 
 class SingleClientValuableSyncTestBase : public SyncTest {
  public:
@@ -469,6 +521,210 @@ IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
 
   WaitForNumberOfEntityInstancesCards(0, edm);
   EXPECT_EQ(0uL, edm->GetEntityInstances().size());
+}
+
+// Verifies that local entities are never uploaded to the sync server.
+IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
+                       NotUploadLocalEntity) {
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), testing::IsEmpty());
+  const EntityInstance vehicle =
+      autofill::test::GetVehicleEntityInstanceWithRandomGuid();
+  edm->AddOrUpdateEntityInstance(vehicle);
+  EXPECT_TRUE(FakeServerSpecificsChecker(testing::IsEmpty()).Wait());
+}
+
+// Verifies that a new wallet entity created locally is successfully uploaded to
+// the sync server.
+IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
+                       UploadWalletEntity) {
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), testing::IsEmpty());
+  const EntityInstance vehicle = GetServerVehicleEntityInstanceWithRandomGuid();
+  edm->AddOrUpdateEntityInstance(vehicle);
+  EXPECT_TRUE(
+      FakeServerSpecificsChecker(UnorderedElementsAre(base::test::EqualsProto(
+                                     AsAutofillValuableSpecifics(vehicle))))
+          .Wait());
+
+  const EntityInstance vehicle2 =
+      GetServerVehicleEntityInstanceWithRandomGuid();
+  edm->AddOrUpdateEntityInstance(vehicle2);
+  EXPECT_TRUE(
+      FakeServerSpecificsChecker(
+          UnorderedElementsAre(
+              base::test::EqualsProto(AsAutofillValuableSpecifics(vehicle)),
+              base::test::EqualsProto(AsAutofillValuableSpecifics(vehicle2))))
+          .Wait());
+}
+
+// Verifies that updating an existing wallet entity locally correctly propagates
+// that update to the sync server.
+IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
+                       UploadAndUpdateWalletEntity) {
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), testing::IsEmpty());
+  const EntityInstance vehicle = GetServerVehicleEntityInstance();
+  edm->AddOrUpdateEntityInstance(vehicle);
+  const EntityInstance updated_vehicle =
+      GetServerVehicleEntityInstance({.model = u"Q2"});
+  // Update vehicle
+  edm->AddOrUpdateEntityInstance(updated_vehicle);
+  EXPECT_TRUE(FakeServerSpecificsChecker(
+                  UnorderedElementsAre(base::test::EqualsProto(
+                      AsAutofillValuableSpecifics(updated_vehicle))))
+                  .Wait());
+}
+
+// Verifies that simultaneous local and remote changes are applied consistently.
+// In this case, both updates are complementary. No common entity is affected.
+IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
+                       SimultaneousLocalAndRemoteChangeNoCommonEntity) {
+  const EntityInstance initial_vehicle =
+      GetServerVehicleEntityInstanceWithRandomGuid();
+  GetFakeServer()->SetValuableData(
+      {EntityInstanceToSyncEntity(initial_vehicle)});
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  WaitForNumberOfEntityInstancesCards(1, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), UnorderedElementsAre(initial_vehicle));
+
+  // Put some completely new data in the sync server.
+  const EntityInstance vehicle2 =
+      GetServerVehicleEntityInstanceWithRandomGuid();
+  const EntityInstance flight2 =
+      GetFlightReservationEntityInstanceWithRandomGuid();
+
+  // This will trigger a sync update to the client. It overrides the
+  // `initial_vehicle`.
+  GetFakeServer()->SetValuableData({EntityInstanceToSyncEntity(vehicle2),
+                                    EntityInstanceToSyncEntity(flight2)});
+
+  // Make a local change simultaneous with the server change.
+  const EntityInstance vehicle3 = GetServerVehicleEntityInstance();
+  edm->AddOrUpdateEntityInstance(vehicle3);
+  const EntityInstance updated_vehicle3 =
+      GetServerVehicleEntityInstance({.model = u"Q2"});
+  // Update vehicle
+  edm->AddOrUpdateEntityInstance(updated_vehicle3);
+  EXPECT_TRUE(FakeServerSpecificsChecker(
+                  UnorderedElementsAre(base::test::EqualsProto(
+                      AsAutofillValuableSpecifics(updated_vehicle3))))
+                  .Wait());
+
+  EXPECT_THAT(edm->GetEntityInstances(),
+              UnorderedElementsAre(vehicle2, flight2, updated_vehicle3));
+}
+
+// Verifies that simultaneous local and remote changes are applied consistently.
+// In this case, a local update is applied even if the same entity is received
+// via a server update.
+IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
+                       SimultaneousLocalAndRemoteChangeCommonEntityNoConflict) {
+  const EntityInstance server_vehicle = GetServerVehicleEntityInstance();
+  GetFakeServer()->SetValuableData(
+      {EntityInstanceToSyncEntity(server_vehicle)});
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  WaitForNumberOfEntityInstancesCards(1, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), UnorderedElementsAre(server_vehicle));
+
+  // Put some completely new data in the sync server.
+  const EntityInstance flight =
+      GetFlightReservationEntityInstanceWithRandomGuid();
+
+  // This will trigger a sync update to the client. It overrides the
+  // `server_vehicle`.
+  GetFakeServer()->SetValuableData({EntityInstanceToSyncEntity(server_vehicle),
+                                    EntityInstanceToSyncEntity(flight)});
+
+  // Make a local change simultaneous with the server change. Update vehicle.
+  const EntityInstance updated_server_vehicle =
+      GetServerVehicleEntityInstance({.model = u"Q2"});
+  edm->AddOrUpdateEntityInstance(updated_server_vehicle);
+  EXPECT_TRUE(FakeServerSpecificsChecker(
+                  UnorderedElementsAre(base::test::EqualsProto(
+                      AsAutofillValuableSpecifics(updated_server_vehicle))))
+                  .Wait());
+
+  EXPECT_THAT(edm->GetEntityInstances(),
+              UnorderedElementsAre(updated_server_vehicle, flight));
+}
+
+// Verifies that simultaneous local and remote changes are applied consistently.
+// In this case, conflicting updated versions of the same entity are received
+// from the server and updated locally. The server entity must prevail.
+IN_PROC_BROWSER_TEST_F(
+    SingleClientEntityValuablesSyncTest,
+    SimultaneousLocalAndRemoteChangeCommonEntityWithConflict) {
+  const EntityInstance server_vehicle = GetServerVehicleEntityInstance();
+  GetFakeServer()->SetValuableData(
+      {EntityInstanceToSyncEntity(server_vehicle)});
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  WaitForNumberOfEntityInstancesCards(1, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), UnorderedElementsAre(server_vehicle));
+
+  // Put some completely new data in the sync server.
+  const EntityInstance flight =
+      GetFlightReservationEntityInstanceWithRandomGuid();
+
+  const EntityInstance updated_server_vehicle =
+      GetServerVehicleEntityInstance({.model = u"A3"});
+  // This will trigger a sync update to the client. It overrides the
+  // `server_vehicle`.
+  GetFakeServer()->SetValuableData(
+      {EntityInstanceToSyncEntity(updated_server_vehicle),
+       EntityInstanceToSyncEntity(flight)});
+
+  // Make a local change simultaneous with the server change. Update vehicle.
+  const EntityInstance updated_local_vehicle =
+      GetServerVehicleEntityInstance({.model = u"Q2"});
+  edm->AddOrUpdateEntityInstance(updated_local_vehicle);
+  // The commit is never applied. The server update is preferred.
+  WaitForNumberOfEntityInstancesCards(2, edm);
+  EXPECT_THAT(edm->GetEntityInstances(),
+              UnorderedElementsAre(updated_server_vehicle, flight));
+}
+
+// Verifies that server updates override client entities.
+IN_PROC_BROWSER_TEST_F(SingleClientEntityValuablesSyncTest,
+                       ServerOverridesClientChanges) {
+  ASSERT_TRUE(SetupSync());
+  EntityDataManager* edm = GetEntityDataManager(0);
+  ASSERT_NE(nullptr, edm);
+  ASSERT_THAT(edm->GetEntityInstances(), testing::IsEmpty());
+
+  // Make a local change and commit it.
+  const EntityInstance local_vehicle =
+      GetServerVehicleEntityInstanceWithRandomGuid();
+  edm->AddOrUpdateEntityInstance(local_vehicle);
+  EXPECT_TRUE(FakeServerSpecificsChecker(
+                  UnorderedElementsAre(base::test::EqualsProto(
+                      AsAutofillValuableSpecifics(local_vehicle))))
+                  .Wait());
+
+  // Put some completely new data in the sync server.
+  const EntityInstance server_vehicle =
+      GetServerVehicleEntityInstanceWithRandomGuid();
+  const EntityInstance server_flight =
+      GetFlightReservationEntityInstanceWithRandomGuid();
+
+  // This will trigger a sync update to the client.
+  GetFakeServer()->SetValuableData({EntityInstanceToSyncEntity(server_vehicle),
+                                    EntityInstanceToSyncEntity(server_flight)});
+  EntityDataChangedWaiter(edm).Wait();
+  EXPECT_THAT(edm->GetEntityInstances(),
+              UnorderedElementsAre(server_vehicle, server_flight));
 }
 
 }  // namespace

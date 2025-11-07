@@ -32,6 +32,8 @@
 
 @synthesize accessibilityName = _accessibilityName;
 @synthesize accessibilityValue = _accessibilityValue;
+@synthesize backgroundColor = _backgroundColor;
+@synthesize isCustomColor = _isCustomColor;
 
 - (instancetype)initWithUserUploadedImagePath:(NSString*)imagePath
                            framingCoordinates:
@@ -58,11 +60,11 @@
   if (self) {
     _collectionImage = collectionImage;
     _backgroundStyle = HomeCustomizationBackgroundStyle::kPreset;
-    _configurationID = [NSString
-        stringWithFormat:@"%@_%ld_%@", kBackgroundCellIdentifier,
-                         _backgroundStyle,
-                         base::SysUTF8ToNSString(
-                             base::NumberToString(collectionImage.asset_id))];
+    _configurationID =
+        [NSString stringWithFormat:@"%@_%ld_%@", kBackgroundCellIdentifier,
+                                   _backgroundStyle,
+                                   base::SysUTF8ToNSString(
+                                       collectionImage.image_url.spec())];
     _accessibilityName = accessibilityName;
     _accessibilityValue = accessibilityValue;
   }

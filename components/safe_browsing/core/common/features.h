@@ -34,13 +34,24 @@ BASE_DECLARE_FEATURE(kAddWarningShownTSToClientSafeBrowsingReport);
 // received a number of notifications with a suspicious verdict from the
 // on-device model.
 BASE_DECLARE_FEATURE(kAutoRevokeSuspiciousNotification);
+// The number of days in which suspicious notification will be counted toward
+// `kAutoRevokeSuspiciousNotificationMinNotificationCount`.
+extern const base::FeatureParam<int>
+    kAutoRevokeSuspiciousNotificationLookBackPeriod;
+// Notification permissions with site engagement score of
+// kAutoRevokeSuspiciousNotificationEngagementScoreCutOff or higher will not be
+// revoked due to suspicious content reason to prevent false positive
+// revocations.
+extern const base::FeatureParam<double>
+    kAutoRevokeSuspiciousNotificationEngagementScoreCutOff;
+// The minimum number of suspicious notification warning the user have received
+// during `kAutoRevokeSuspiciousNotificationLookBackPeriod` before the
+// notification permission is revoked.
+extern const base::FeatureParam<int>
+    kAutoRevokeSuspiciousNotificationMinNotificationCount;
 
 // Enables Bundled Security Settings UI on chrome://settings/security
 BASE_DECLARE_FEATURE(kBundledSecuritySettings);
-
-// Create a response containing the brand and the intent of the page using the
-// on-device model LLM.
-BASE_DECLARE_FEATURE(kClientSideDetectionBrandAndIntentForScamDetection);
 
 // Expand CSPP beyond phishing and trigger when clipboard copy API is called on
 // the page.
@@ -49,6 +60,7 @@ extern const base::FeatureParam<double> kCsdClipboardCopyApiHCAcceptanceRate;
 extern const base::FeatureParam<int> kCsdClipboardCopyApiMaxLength;
 extern const base::FeatureParam<int> kCsdClipboardCopyApiMinLength;
 extern const base::FeatureParam<double> kCsdClipboardCopyApiSampleRate;
+extern const base::FeatureParam<bool> kCSDClipboardCopyApiProcessPayload;
 
 // Enables sending a CSD ping on the detection of a credit card form.
 BASE_DECLARE_FEATURE(kClientSideDetectionCreditCardForm);
@@ -57,10 +69,10 @@ BASE_DECLARE_FEATURE(kClientSideDetectionCreditCardForm);
 extern const base::FeatureParam<double> kCsdCreditCardFormHCAcceptanceRate;
 // Sets the percentage of credit card forms that trigger a CSD ping.
 extern const base::FeatureParam<double> kCsdCreditCardFormSampleRate;
-// Sets the maximum site engagement allowed when sending a CSD ping.
-// The int value corresponds to the value of blink::mojom::EngagementLevel
-// (//third_party/blink/public/mojom/site_engagement/site_engagement.mojom).
-extern const base::FeatureParam<int> kCsdCreditCardFormMaxSiteEngagement;
+// Sets the maximum site visit count allowed when sending a CSD ping.
+// If the user has visited more times than this max, then the CSD ping is
+// blocked.
+extern const base::FeatureParam<int> kCsdCreditCardFormMaxUserVisit;
 
 // Killswitch for Llama forced trigger info redirect chain check.
 BASE_DECLARE_FEATURE(kClientSideDetectionForcedLlamaRedirectChainKillswitch);
@@ -103,10 +115,6 @@ BASE_DECLARE_FEATURE(kClientSideDetectionSendLlamaForcedTriggerInfo);
 // Show a warning to the user based on the
 // IntelligentScanVerdict::SCAM_EXPERIMENT_VERDICT_2.
 BASE_DECLARE_FEATURE(kClientSideDetectionShowLlamaScamVerdictWarning);
-
-// Show a warning to the user that factors in the IntelligentScanVerdict from
-// ClientPhishingResponse.
-BASE_DECLARE_FEATURE(kClientSideDetectionShowScamVerdictWarning);
 
 #if BUILDFLAG(IS_ANDROID)
 // Show a warning to the user that factors in the IntelligentScanVerdict from
@@ -247,11 +255,6 @@ BASE_DECLARE_FEATURE(kHashPrefixRealTimeLookupsSamplePing);
 // HPRT lookup. The value should be between 0 and 100.
 extern const base::FeatureParam<int> kHashPrefixRealTimeLookupsSampleRate;
 
-// Adds local IP address field to security-sensitive events reported to
-// chrome://safe-browsing. These events are triggered when the reporting policy
-// is enabled for managed devices or profiles.
-BASE_DECLARE_FEATURE(kLocalIpAddressInEvents);
-
 // If enabled, fetching lists from Safe Browsing and performing checks on those
 // lists uses the v5 APIs instead of the v4 Update API. There is no change to
 // how often the checks are triggered (they are still not in real time).
@@ -276,6 +279,22 @@ extern const base::FeatureParam<std::string>
 BASE_DECLARE_FEATURE_PARAM(bool, kMaliciousApkDownloadCheckTelemetryOnly);
 #endif
 
+// TODO(crbug.com/449960661): Remove this flag once the MigrateAccountPrefs
+// feature is launched and the regression of users with ESB enhanced protection
+// is resolved.
+//  When enabled, this feature fixes a flaw in the Tailored Security service's
+//  handling of failed requests for the Enhanced Safe Browsing (ESB) setting.
+//  Previously, a network error would cause the service to incorrectly assume
+//  ESB was disabled. With this fix, the service preserves the last known state
+//  of the ESB bit during a failed request, preventing transient errors from
+//  disabling user protection.
+BASE_DECLARE_FEATURE(kModifiedESBFetchErrorHandling);
+
+// When enabled, the Password Leak detection toggle is moved out from under the
+// 'Standard protection' Safe Browsing option to the top-level 'Privacy and
+// security' page.
+BASE_DECLARE_FEATURE(kMovePasswordLeakDetectionToggleIos);
+
 // Enable the collection of Notification Telemetry to track potentially abusive
 // notifications.
 BASE_DECLARE_FEATURE(kNotificationTelemetry);
@@ -299,6 +318,10 @@ extern const base::FeatureParam<std::string> kRedWarningSurveyDidProceedFilter;
 extern const base::FeatureParam<std::string> kRedWarningSurveyReportTypeFilter;
 // Specifies the HaTS survey's identifier.
 extern const base::FeatureParam<std::string> kRedWarningSurveyTriggerId;
+
+// If enabled, advanced protection program users are shown relaunch to apply
+// update required.
+BASE_DECLARE_FEATURE(kRelaunchNotificationForAdvancedProtection);
 
 // Enables reporting notification contents and metadata to the server, upon user
 // consent.

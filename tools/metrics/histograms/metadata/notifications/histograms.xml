@@ -96,7 +96,7 @@ chromium-metrics-reviews@google.com.
 <histogram name="Notifications.Actions" enum="NotificationActionType"
     expires_after="2026-03-08">
   <owner>dewittj@chromium.org</owner>
-  <owner>leandre@chromium.org</owner>
+  <owner>newcomer@chromium.org</owner>
   <owner>cros-status-area-eng@google.com</owner>
   <summary>
     The actions taken on notifications, recorded every time they happen. This
@@ -197,7 +197,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Android.JobNativeStartupDuration{IntentAction}"
-    units="ms" expires_after="2026-03-01">
+    units="ms" expires_after="2026-05-03">
   <owner>peter@chromium.org</owner>
   <owner>engedy@chromium.org</owner>
   <summary>
@@ -450,7 +450,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Notifications.Cros.Actions.{NotificationAction}"
     enum="NotificationTypeDetailed" expires_after="2025-12-28">
-  <owner>leandre@chromium.org</owner>
+  <owner>newcomer@chromium.org</owner>
   <owner>cros-status-area-eng@google.com</owner>
   <summary>
     Records the notification type when a notification interaction occurs:
@@ -462,7 +462,7 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="Notifications.Cros.Actions.{NotificationAction}.GroupedByCatalog"
     enum="NotificationCatalogName" expires_after="2026-07-14">
-  <owner>leandre@chromium.org</owner>
+  <owner>newcomer@chromium.org</owner>
   <owner>cros-status-area-eng@google.com</owner>
   <summary>
     Records the notification catalog name when a notification interaction
@@ -630,7 +630,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Engagement.{Type}.Volume{Volume}"
-    units="site-engagement-score*2" expires_after="2026-02-01">
+    units="site-engagement-score*2" expires_after="2026-04-05">
   <owner>antoniosartori@chromium.org</owner>
   <owner>feuunk@chromium.org</owner>
   <summary>
@@ -722,7 +722,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.NonPersistentNotificationThirdPartyCount"
-    enum="Boolean" expires_after="2026-03-01">
+    enum="Boolean" expires_after="2026-05-03">
   <owner>awillia@chromium.org</owner>
   <owner>peter@chromium.org</owner>
   <summary>
@@ -853,7 +853,7 @@ chromium-metrics-reviews@google.com.
 <histogram name="Notifications.PerNotificationActions"
     enum="NotificationActionType" expires_after="2026-03-15">
   <owner>dewittj@chromium.org</owner>
-  <owner>leandre@chromium.org</owner>
+  <owner>newcomer@chromium.org</owner>
   <owner>cros-status-area-eng@google.com</owner>
   <summary>
     The actions taken on notifications, recorded once per notification, when it
@@ -873,7 +873,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.PersistentNotificationDisplayResult"
-    enum="PersistentNotificationDisplayResult" expires_after="2026-02-22">
+    enum="PersistentNotificationDisplayResult" expires_after="2026-04-26">
   <owner>knollr@chromium.org</owner>
   <owner>peter@chromium.org</owner>
   <summary>
@@ -887,7 +887,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.PersistentNotificationThirdPartyCount"
-    enum="Boolean" expires_after="2026-03-01">
+    enum="Boolean" expires_after="2026-05-03">
   <owner>awillia@chromium.org</owner>
   <owner>peter@chromium.org</owner>
   <summary>
@@ -930,13 +930,16 @@ chromium-metrics-reviews@google.com.
 <histogram
     name="Notifications.Scheduler.NotificationLifeCycleEvent{NotificationSchedulerClientType}"
     enum="NotificationSchedulerNotificationLifeCycleEvent"
-    expires_after="2023-03-05">
+    expires_after="2026-03-05">
   <owner>shaktisahu@chromium.org</owner>
   <owner>nyquist@chromium.org</owner>
   <summary>
     Records life cycle events for a scheduled notification, when notification is
     scheduled, shown or encountering any error.
     {NotificationSchedulerClientType}
+
+    This metric was expired between March 2023 and November 2025, so data may be
+    missing.
   </summary>
   <token key="NotificationSchedulerClientType">
     <variant name=""/>
@@ -945,6 +948,7 @@ chromium-metrics-reviews@google.com.
     <variant name=".FeatureGuide" summary="Deprecated"/>
     <variant name=".Prefetch" summary=""/>
     <variant name=".ReadingList" summary=""/>
+    <variant name=".Tips" summary=""/>
     <variant name=".Unknown" summary=""/>
     <variant name=".WebUI" summary=""/>
   </token>
@@ -994,7 +998,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Notifications.Windows.ActivationStatus"
-    enum="WindowsNotificationActivationStatus" expires_after="2026-02-01">
+    enum="WindowsNotificationActivationStatus" expires_after="2026-04-05">
   <owner>finnur@chromium.org</owner>
   <owner>peter@chromium.org</owner>
   <summary>

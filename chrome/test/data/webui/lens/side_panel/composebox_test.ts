@@ -10,7 +10,7 @@ import {PageCallbackRouter, PageHandlerRemote} from 'chrome-untrusted://resource
 import {ComposeboxProxyImpl} from 'chrome-untrusted://resources/cr_components/composebox/composebox_proxy.js';
 import {loadTimeData} from 'chrome-untrusted://resources/js/load_time_data.js';
 import {type AutocompleteMatch, type AutocompleteResult, PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote, type PageRemote as SearchboxPageRemote} from 'chrome-untrusted://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-import {assertEquals, assertFalse, assertTrue} from 'chrome-untrusted://webui-test/chai_assert.js';
+import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome-untrusted://webui-test/chai_assert.js';
 import {waitAfterNextRender} from 'chrome-untrusted://webui-test/polymer_test_util.js';
 import {TestMock} from 'chrome-untrusted://webui-test/test_mock.js';
 import {isVisible} from 'chrome-untrusted://webui-test/test_util.js';
@@ -55,6 +55,7 @@ suite('Composebox', () => {
 
   function createAutocompleteMatch(): AutocompleteMatch {
     return {
+      isHidden: false,
       a11yLabel: '',
       actions: [],
       allowedToBeDefaultMatch: false,
@@ -81,6 +82,7 @@ suite('Composebox', () => {
       isWeatherAnswerSuggestion: null,
       answer: null,
       tailSuggestCommonPrefix: null,
+      hasInstantKeyword: false,
       keywordChipHint: '',
       keywordChipA11y: '',
     };
@@ -133,8 +135,12 @@ suite('Composebox', () => {
 
     await waitAfterNextRender(lensSidePanelElement);
     const composebox =
-        lensSidePanelElement.shadowRoot!.querySelector('ntp-composebox');
+        lensSidePanelElement.shadowRoot!.querySelector('cr-composebox');
     assertTrue(!!composebox);
+
+    testBrowserProxy.page.setIsOverlayShowing(false);
+    await waitAfterNextRender(lensSidePanelElement);
+
     return composebox;
   }
 
@@ -178,9 +184,8 @@ suite('Composebox', () => {
         composebox.shadowRoot!.querySelector<HTMLElement>('#lensIcon');
     assertTrue(!!lensButton);
 
-    // The button should not be visible initially while the composebox is
-    // collapsed.
-    assertFalse(isTrulyVisible(lensButton));
+    // The button should be visible.
+    assertTrue(isTrulyVisible(lensButton));
 
     // Grab the input to focus it.
     const input = composebox.shadowRoot!.querySelector<HTMLTextAreaElement>(
@@ -197,7 +202,7 @@ suite('Composebox', () => {
     input.focus();
     await expandPromise;
 
-    // The button should be visible now that the composebox is expanded.
+    // The button should still be visible now that the composebox is expanded.
     assertTrue(isTrulyVisible(lensButton));
   });
 
@@ -249,7 +254,7 @@ suite('Composebox', () => {
 
     // Grab the buttons to do visibility checks.
     const submitButton =
-        composebox.shadowRoot!.querySelector<HTMLElement>('#submitIcon');
+        composebox.shadowRoot!.querySelector<HTMLElement>('#submitContainer');
     const cancelButton =
         composebox.shadowRoot!.querySelector<HTMLElement>('#cancelIcon');
     assertTrue(!!submitButton);
@@ -266,8 +271,7 @@ suite('Composebox', () => {
     assertTrue(!!input);
 
     // Focusing the input should expand the composebox.
-    const container = submitButton.parentElement!;
-    const expansionPromise = getTransitionEndPromise(container, 'opacity');
+    const expansionPromise = getTransitionEndPromise(submitButton, 'opacity');
     input.focus();
     await expansionPromise;
 
@@ -284,7 +288,7 @@ suite('Composebox', () => {
     const cancelContainerShowPromise =
         getTransitionEndPromise(cancelButton.parentElement!, 'opacity');
     const submitContainerShowPromise =
-        getTransitionEndPromise(submitButton.parentElement!, 'opacity');
+        getTransitionEndPromise(submitButton, 'opacity');
     input.dispatchEvent(new Event('input', {bubbles: true}));
     await waitAfterNextRender(composebox);
     await Promise.all([
@@ -297,8 +301,7 @@ suite('Composebox', () => {
     assertFalse(cancelButton.hasAttribute('disabled'));
 
     // Blur the input to collapse the composebox.
-    const submitHidePromise =
-        getTransitionEndPromise(submitButton.parentElement!, 'opacity');
+    const submitHidePromise = getTransitionEndPromise(submitButton, 'opacity');
     const cancelHidePromise =
         getTransitionEndPromise(cancelButton.parentElement!, 'opacity');
     input.blur();
@@ -454,7 +457,7 @@ suite('Composebox', () => {
         composebox.shadowRoot!.querySelector<HTMLTextAreaElement>('textarea');
     assertTrue(!!input);
     const submitButton =
-        composebox.shadowRoot!.querySelector<HTMLElement>('#submitIcon');
+        composebox.shadowRoot!.querySelector<HTMLElement>('#submitContainer');
     const cancelButton =
         composebox.shadowRoot!.querySelector<HTMLElement>('#cancelIcon');
     assertTrue(!!submitButton);
@@ -498,7 +501,7 @@ suite('Composebox', () => {
     const cancelContainerShowPromise =
         getTransitionEndPromise(cancelButton.parentElement!, 'opacity');
     const submitContainerShowPromise =
-        getTransitionEndPromise(submitButton.parentElement!, 'opacity');
+        getTransitionEndPromise(submitButton, 'opacity');
     await Promise.all([
       cancelShowPromise,
       cancelContainerShowPromise,
@@ -580,6 +583,27 @@ suite('Composebox', () => {
         url.url, `https://www.google.com/search?q=${query.replace(/ /g, '+')}`);
   });
 
+  test('SubmitButtonNoopWhenDisabled', async () => {
+    loadTimeData.overrideValues({enableAimSearchbox: true});
+    const composebox = await setupTest();
+
+    const submitButton =
+        composebox.shadowRoot!.querySelector<HTMLElement>('#submitContainer');
+    assertTrue(!!submitButton);
+
+    // The button should be disabled initially with no input.
+    assertTrue(submitButton.hasAttribute('disabled'));
+
+    // Click the submit button.
+    submitButton.click();
+    await waitAfterNextRender(composebox);
+
+    // Verify that neither of the submit handlers were called.
+    assertEquals(0, mockSearchboxPageHandler.getCallCount('submitQuery'));
+    assertEquals(
+        0, mockSearchboxPageHandler.getCallCount('openAutocompleteMatch'));
+  });
+
   test('SelectingMatchPopulatesComposebox', async () => {
     loadTimeData.overrideValues({
       enableAimSearchbox: true,
@@ -643,20 +667,66 @@ suite('Composebox', () => {
         composebox.shadowRoot!.querySelector<HTMLElement>('#composebox');
     assertTrue(!!animatedElement);
 
-    // The button should not be visible initially while the composebox is
-    // collapsed.
-    assertFalse(isTrulyVisible(lensButton));
-
-    // Focusing the input should expand the composebox.
-    const expandPromise =
-        getTransitionEndPromise(animatedElement, 'max-height');
-    input.focus();
-    await expandPromise;
-
+    // The button should be visible.
     assertTrue(isTrulyVisible(lensButton));
 
     lensButton.click();
     await mockPageHandler.whenCalled('handleLensButtonClick');
     assertEquals(1, mockPageHandler.getCallCount('handleLensButtonClick'));
+  });
+
+  test('LensButtonDisabledChangesOnOverlayState', async () => {
+    loadTimeData.overrideValues(
+        {enableAimSearchbox: true, showLensButton: true});
+    const composebox = await setupTest();
+
+    const lensButton =
+        composebox.shadowRoot!.querySelector<HTMLElement>('#lensIcon');
+    assertTrue(!!lensButton);
+
+    const input =
+        composebox.shadowRoot!.querySelector<HTMLTextAreaElement>('textarea');
+    assertTrue(!!input);
+
+    const animatedElement =
+        composebox.shadowRoot!.querySelector<HTMLElement>('#composebox');
+    assertTrue(!!animatedElement);
+
+    // The button should be visible.
+    assertTrue(isTrulyVisible(lensButton));
+
+    // The Lens button is in an enabled state by default.
+    assertFalse(lensButton.hasAttribute('disabled'));
+
+    // Setting the overlay to not showing should make the button enabled.
+    testBrowserProxy.page.setIsOverlayShowing(true);
+    await waitAfterNextRender(lensSidePanelElement);
+
+    assertTrue(lensButton.hasAttribute('disabled'));
+
+    // Setting the overlay to showing should make the button disabled again.
+    testBrowserProxy.page.setIsOverlayShowing(false);
+    await waitAfterNextRender(lensSidePanelElement);
+
+    assertFalse(lensButton.hasAttribute('disabled'));
+  });
+
+  test('FocusesComposeboxOnCallback', async () => {
+    loadTimeData.overrideValues({enableAimSearchbox: true});
+    const composebox = await setupTest();
+    const input =
+        composebox.shadowRoot!.querySelector<HTMLTextAreaElement>('textarea');
+    assertTrue(!!input);
+
+    // Make sure input is not focused initially.
+    input.blur();
+    assertNotEquals(input, composebox.shadowRoot!.activeElement);
+
+    // Trigger the mojom callback to focus the composebox.
+    testBrowserProxy.page.focusSearchbox();
+    await waitAfterNextRender(composebox);
+
+    // Verify the input is now focused.
+    assertEquals(input, composebox.shadowRoot!.activeElement);
   });
 });

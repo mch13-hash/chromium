@@ -325,14 +325,6 @@ const char kExtensionContentVerificationEnforceStrict[] = "enforce_strict";
 // Name of the command line flag to allow the experimental actor API.
 const char kExtensionExperimentalActor[] = "enable-extension-actor-api";
 
-// Turns on extension install verification if it would not otherwise have been
-// turned on.
-const char kExtensionsInstallVerification[] = "extensions-install-verification";
-
-// Specifies a comma-separated list of extension ids that should be forced to
-// be treated as not from the webstore when doing install verification.
-const char kExtensionsNotWebstore[] = "extensions-not-webstore";
-
 // Specifies the variation of Zero State extensions toolbar recommendation to
 // show.
 // When a user with zero extensions installed clicks on the extensions puzzle
@@ -512,6 +504,9 @@ const char kOpenInNewWindow[] = "new-window";
 // Example: --focus=https://meet.google.com/*,app:abc123
 const char kFocus[] = "focus";
 
+// Specifies a file path to write JSON focus result information.
+const char kFocusResultFile[] = "focus-result-file";
+
 // Packages an extension to a .crx installable file from a given directory.
 const char kPackExtension[] = "pack-extension";
 
@@ -565,7 +560,8 @@ const char kProxyAutoDetect[] = "proxy-auto-detect";
 // Specifies a list of hosts for whom we bypass proxy settings and use direct
 // connections. Ignored if --proxy-auto-detect or --no-proxy-server are also
 // specified. This is a comma-separated list of bypass rules. See:
-// "net/proxy_resolution/proxy_bypass_rules.h" for the format of these rules.
+// "net/proxy_resolution/proxy_host_matching_rules.h" for the format of these
+// rules.
 const char kProxyBypassList[] = "proxy-bypass-list";
 
 // Uses the pac script at the given URL
@@ -969,6 +965,9 @@ const char kGlicSkipReloadAfterNavigation[] =
     "glic-skip-reload-after-navigation";
 // Whether additional logging is enabled in the glic api host.
 const char kGlicHostLogging[] = "glic-host-logging";
+// Whether to show web actuation toggle in the Chrome AI settings page.
+const char kGlicAlwaysShowWebActuationToggle[] =
+    "glic-always-show-web-actuation-toggle";
 
 // List of URL patterns in the glic webview to redirect to an admin blocked
 // panel, as a space-separated list.

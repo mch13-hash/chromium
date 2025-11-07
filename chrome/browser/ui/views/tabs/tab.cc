@@ -159,7 +159,7 @@ class TabStyleHighlightPathGenerator : public views::HighlightPathGenerator {
 
   // views::HighlightPathGenerator:
   SkPath GetHighlightPath(const views::View* view) override {
-    return tab_style_views_->GetPath(TabStyle::PathType::kHighlight, 1.0);
+    return tab_style_views_->GetPath(TabStyle::PathType::kHighlight, 1.0, {});
   }
 
  private:
@@ -258,6 +258,7 @@ Tab::Tab(TabSlotController* controller)
 
 #if BUILDFLAG(ENABLE_GLIC)
   if (base::FeatureList::IsEnabled(features::kGlicMultitabUnderlines) &&
+      controller_->GetBrowser() &&
       glic::GlicEnabling::IsProfileEligible(
           controller_->GetBrowser()->GetProfile())) {
     glic_tab_underline_view_ = AddChildView(
@@ -342,7 +343,7 @@ bool Tab::GetHitTestMask(SkPath* mask) const {
   *mask = tab_style_views()->GetPath(
       TabStyle::PathType::kHitTest,
       GetWidget()->GetCompositor()->device_scale_factor(),
-      /* force_active */ false, TabStyle::RenderUnits::kDips);
+      {.render_units = TabStyle::RenderUnits::kDips});
   return true;
 }
 
@@ -451,6 +452,7 @@ void Tab::Layout(PassKey) {
     }
     alert_indicator_button_->SetBoundsRect(bounds);
   }
+  alert_indicator_button_->UpdateAlertIndicatorAnimation();
   alert_indicator_button_->SetVisible(showing_alert_indicator_);
 
   // Size the title to fill the remaining width and use all available height.
@@ -608,7 +610,7 @@ void Tab::OnMouseReleased(const ui::MouseEvent& event) {
   // In some cases, ending the drag will schedule the tab for destruction; if
   // so, bail immediately, since our members are already dead and we shouldn't
   // do anything else except drop the tab where it is.
-  if (controller_->EndDrag(END_DRAG_COMPLETE)) {
+  if (controller_->EndDrag(EndDragReason::kComplete)) {
     shift_pressed_on_mouse_down_ = false;
     return;
   }
@@ -648,7 +650,7 @@ void Tab::OnMouseReleased(const ui::MouseEvent& event) {
 }
 
 void Tab::OnMouseCaptureLost() {
-  controller_->EndDrag(END_DRAG_CAPTURE_LOST);
+  controller_->EndDrag(EndDragReason::kCaptureLost);
 }
 
 void Tab::OnMouseMoved(const ui::MouseEvent& event) {
@@ -813,7 +815,7 @@ void Tab::PaintChildren(const views::PaintInfo& info) {
   const float paint_recording_scale = info.paint_recording_scale_x();
 
   const SkPath clip_path = tab_style_views()->GetPath(
-      TabStyle::PathType::kInteriorClip, paint_recording_scale);
+      TabStyle::PathType::kInteriorClip, paint_recording_scale, {});
 
   clip_recorder.ClipPathWithAntiAliasing(clip_path);
   View::PaintChildren(info);
@@ -1121,8 +1123,8 @@ void Tab::UpdateIconVisibility() {
   std::optional<tabs::TabAlert> current_alert_state =
       alert_indicator_button_->showing_alert_state();
   if (glic_tab_underline_view_ &&
-      (current_alert_state == tabs::TabAlert::GLIC_ACCESSING ||
-       current_alert_state == tabs::TabAlert::GLIC_SHARING)) {
+      (current_alert_state == tabs::TabAlert::kGlicAccessing ||
+       current_alert_state == tabs::TabAlert::kGlicSharing)) {
     // Tab underlines for glic multitab replace `alert_indicator_button` as the
     // UI indicator for sharing. In this case, ensure the alert indicator is
     // hidden.
@@ -1267,7 +1269,7 @@ void Tab::CloseButtonPressed(const ui::Event& event) {
   if (!alert_indicator_button_ || !alert_indicator_button_->GetVisible()) {
     base::RecordAction(UserMetricsAction("CloseTab_NoAlertIndicator"));
   } else if (GetAlertStateToShow(data_.alert_state) ==
-             tabs::TabAlert::AUDIO_PLAYING) {
+             tabs::TabAlert::kAudioPlaying) {
     base::RecordAction(UserMetricsAction("CloseTab_AudioIndicator"));
   } else {
     base::RecordAction(UserMetricsAction("CloseTab_RecordingIndicator"));

@@ -378,8 +378,7 @@ class PLATFORM_EXPORT ResourceFetcher
   void CancelWebBundleSubresourceLoadersFor(
       const base::UnguessableToken& web_bundle_token);
 
-  void OnMemoryPressure(
-      base::MemoryPressureListener::MemoryPressureLevel) override;
+  void OnMemoryPressure(base::MemoryPressureLevel) override;
 
   void MaybeRecordLCPPSubresourceMetrics(const KURL& document_url);
 
@@ -548,8 +547,7 @@ class PLATFORM_EXPORT ResourceFetcher
                                       const Resource& existing_resource,
                                       bool is_static_data) const;
 
-  void MakePreloadedResourceBlockOnloadIfNeeded(Resource*,
-                                                const FetchParameters&);
+  void MakePreloadedResourceBlockIfNeeded(Resource*, const FetchParameters&);
   void MoveResourceLoaderToNonBlocking(ResourceLoader*);
   void RemoveResourceLoader(ResourceLoader*);
 

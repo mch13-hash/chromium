@@ -24,6 +24,7 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.ResettersForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.build.BuildConfig;
@@ -33,6 +34,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.app.tab_activity_glue.ReparentingTabsTask;
 import org.chromium.chrome.browser.app.tabmodel.TabModelOrchestrator;
+import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.lifecycle.ConfigurationChangedObserver;
 import org.chromium.chrome.browser.lifecycle.DestroyObserver;
@@ -40,6 +42,7 @@ import org.chromium.chrome.browser.lifecycle.NativeInitObserver;
 import org.chromium.chrome.browser.lifecycle.PauseResumeWithNativeObserver;
 import org.chromium.chrome.browser.lifecycle.RecreateObserver;
 import org.chromium.chrome.browser.lifecycle.TopResumedActivityChangedObserver;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowAppSource;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils.InstanceAllocationType;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
@@ -329,6 +332,7 @@ public class MultiInstanceManagerImpl extends MultiInstanceManager
 
     @Override
     public boolean handleMenuOrKeyboardAction(int id, boolean fromMenu) {
+        int appSource = fromMenu ? NewWindowAppSource.MENU : NewWindowAppSource.KEYBOARD_SHORTCUT;
         if (id == R.id.move_to_other_window_menu_id) {
             TabModelOrchestrator tabModelOrchestrator = mTabModelOrchestratorSupplier.get();
             if (tabModelOrchestrator == null) return true;
@@ -336,14 +340,22 @@ public class MultiInstanceManagerImpl extends MultiInstanceManager
             if (tabModelSelector == null) return true;
 
             Tab currentTab = tabModelSelector.getCurrentTab();
-            if (currentTab != null) moveTabsToOtherWindow(Collections.singletonList(currentTab));
+            if (currentTab != null) {
+                moveTabsToOtherWindow(Collections.singletonList(currentTab), appSource);
+            }
             return true;
         } else if (id == R.id.new_window_menu_id) {
-            openNewWindow("MobileMenuNewWindow", /* incognito= */ false);
+            openNewWindow("MobileMenuNewWindow", /* incognito= */ false, appSource);
             return true;
         } else if (id == R.id.new_incognito_window_menu_id) {
-            // TODO(crbug.com/429518328): Hook up with incognito window.
-            openNewWindow("MobileMenuNewIncognitoWindow", /* incognito= */ true);
+            TabModelOrchestrator tabModelOrchestrator = mTabModelOrchestratorSupplier.get();
+            if (tabModelOrchestrator == null) return true;
+            TabModelSelector tabModelSelector = tabModelOrchestrator.getTabModelSelector();
+            if (tabModelSelector == null) return true;
+            Profile profile = tabModelSelector.getCurrentModel().getProfile();
+            if (profile != null && IncognitoUtils.isIncognitoModeEnabled(profile)) {
+                openNewWindow("MobileMenuNewIncognitoWindow", /* incognito= */ true, appSource);
+            }
             return true;
         }
 
@@ -435,9 +447,9 @@ public class MultiInstanceManagerImpl extends MultiInstanceManager
     }
 
     @Override
-    public void moveTabsToOtherWindow(List<Tab> tabs) {
+    public void moveTabsToOtherWindow(List<Tab> tabs, @NewWindowAppSource int source) {
         if (MultiWindowUtils.getInstanceCount() == 1) {
-            moveTabsToNewWindow(tabs);
+            moveTabsToNewWindow(tabs, source);
             return;
         }
 
@@ -454,13 +466,19 @@ public class MultiInstanceManagerImpl extends MultiInstanceManager
         RecordUserAction.record("MobileMenuMoveToOtherWindow");
     }
 
-    protected void openNewWindow(String umaAction, boolean incognito) {
+    @Override
+    public @Nullable Intent createNewWindowIntent(boolean isIncognito) {
+        assert !isIncognito : "Opening an incognito window isn't supported";
         assert mMultiWindowModeStateDispatcher.canEnterMultiWindowMode()
-                || mMultiWindowModeStateDispatcher.isInMultiWindowMode()
-                || mMultiWindowModeStateDispatcher.isInMultiDisplayMode();
+                        || mMultiWindowModeStateDispatcher.isInMultiWindowMode()
+                        || mMultiWindowModeStateDispatcher.isInMultiDisplayMode()
+                : "Current windowing mode doesn't support opening a new window";
 
         Intent intent = mMultiWindowModeStateDispatcher.getOpenInOtherWindowIntent();
-        if (intent == null) return;
+        if (intent == null) {
+            return null;
+        }
+
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
 
@@ -470,13 +488,28 @@ public class MultiInstanceManagerImpl extends MultiInstanceManager
             intent.setFlags(intent.getFlags() & ~Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
         }
 
+        return intent;
+    }
+    // TODO(crbug.com/455922432): Clean up the umaAction param.
+    protected void openNewWindow(
+            String umaAction, boolean incognito, @NewWindowAppSource int source) {
+        Intent intent = createNewWindowIntent(incognito);
+        if (intent == null) {
+            return;
+        }
+
         onMultiInstanceModeStarted();
         mActivity.startActivity(intent);
+        RecordHistogram.recordEnumeratedHistogram(
+                MultiInstanceManager.NEW_WINDOW_APP_SOURCE_HISTOGRAM,
+                source,
+                NewWindowAppSource.NUM_ENTRIES);
         RecordUserAction.record(umaAction);
     }
 
     @Override
-    public Pair<Integer, Integer> allocInstanceId(int windowId, int taskId, boolean preferNew) {
+    public Pair<Integer, Integer> allocInstanceId(
+            int windowId, int taskId, boolean preferNew, @SupportedProfileType int profileType) {
         return Pair.create(0, InstanceAllocationType.DEFAULT); // Use a default index 0.
     }
 

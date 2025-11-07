@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_view.h"
 
 #import <UIKit/UIKit.h>
@@ -122,9 +117,6 @@ const CGFloat kCustomizationNewBadgeOffset = 14.0;
 // The name of the animation for the MIA button.
 NSString* const kMIACircleAnimationLightMode = @"mia_circle_animation_no_glow";
 NSString* const kMIACircleAnimationDarkMode = @"mia_glowing_circle_animation";
-
-// The value that makes the Lottie animation loop indefinitely.
-const CGFloat kLottieInfiniteLoopFlag = -1;
 
 // The value of the sides of the MIA circle animation for the normal size of the
 // fakebox.
@@ -330,11 +322,18 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
       [weakSelf updateUIOnTraitChange:previousCollection];
     };
     [self registerForTraitChanges:traits withHandler:handler];
+    NSMutableArray<UITrait>* buttonTraits =
+        [@[ UITraitUserInterfaceStyle.class ] mutableCopy];
     if (IsNTPBackgroundCustomizationEnabled()) {
-      [self registerForTraitChanges:
-                @[ NewTabPageTrait.class, NewTabPageImageBackgroundTrait.class ]
+      NSArray<UITrait>* customizationTraits =
+          @[ NewTabPageTrait.class, NewTabPageImageBackgroundTrait.class ];
+      [buttonTraits addObjectsFromArray:customizationTraits];
+      [self registerForTraitChanges:customizationTraits
                          withAction:@selector(applyBackgroundTheme)];
     }
+    [self registerForTraitChanges:buttonTraits
+                       withAction:@selector
+                       (updateButtonsForCurrentTraitCollection)];
   }
   return self;
 }
@@ -394,7 +393,7 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
                 textColor:color
             textInputTint:color
                  iconTint:color
-      presentationContext:OmniboxPresentationContext::kLocationBar];
+      presentationContext:OmniboxPresentationContext::kNTPHeader];
   omnibox.textInput.placeholder = self.placeholderText;
   [omnibox.textInput setText:@""];
   omnibox.translatesAutoresizingMaskIntoConstraints = NO;
@@ -520,14 +519,21 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
   _logoView.image = logo;
 }
 
-- (void)updateButtonsForUserInterfaceStyle:(UIUserInterfaceStyle)style {
+// Updates button styling for the current trait collection.
+- (void)updateButtonsForCurrentTraitCollection {
   // Variations containing MIA entry point force disable colors in the icons.
   const BOOL aimInQuickActions = GetNTPMIAEntrypointVariation() ==
                                  NTPMIAEntrypointVariation::kAIMInQuickAction;
   const BOOL forceDisableColors =
       self.shouldShowMIAEntrypoint || aimInQuickActions;
-  const BOOL darkUIStyle = style == UIUserInterfaceStyleDark;
-  const BOOL useColorIcon = !darkUIStyle && !forceDisableColors;
+  const BOOL darkUIStyle =
+      self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+  const BOOL ntpHasCustomBackground =
+      IsNTPBackgroundCustomizationEnabled() &&
+      ([self.traitCollection boolForNewTabPageImageBackgroundTrait] ||
+       [self.traitCollection objectForNewTabPageTrait]);
+  const BOOL useColorIcon =
+      !darkUIStyle && !forceDisableColors && !ntpHasCustomBackground;
 
   content_suggestions::ConfigureVoiceSearchButton(self.voiceSearchButton,
                                                   useColorIcon);
@@ -1059,8 +1065,7 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
     }
   }
 
-  [self updateButtonsForUserInterfaceStyle:self.traitCollection
-                                               .userInterfaceStyle];
+  [self updateButtonsForCurrentTraitCollection];
 
   [self addActionsToFakeboxButtons];
   [self updateHintLabelTrailingConstraint];
@@ -1264,7 +1269,7 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
     return kEndButtonMIAEnlargedFakebox;
   }
   // If normal sized fakebox and new bade is showing, reduce trailing space.
-  if (_useNewBadgeForLensButton && !ShouldEnlargeLogoAndFakebox()) {
+  if (_useNewBadgeForLensButton && !ShouldEnlargeNTPFakeboxForMIA()) {
     return kEndButtonNormalSizeFakeboxWithBadgeTrailingSpace;
   }
   // Common trailing space.
@@ -1336,7 +1341,7 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
       self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark
           ? kMIACircleAnimationDarkMode
           : kMIACircleAnimationLightMode;
-  config.loopAnimationCount = kLottieInfiniteLoopFlag;
+  config.shouldLoop = YES;
   return ios::provider::GenerateLottieAnimation(config);
 }
 
@@ -1390,7 +1395,7 @@ CGFloat MIAAnimationOpacityForScrollProgress(CGFloat percent) {
 #pragma mark - helpers
 
 - (CGFloat)fakeboxHorizontalMargin {
-  if (IsSplitToolbarMode(self) && ShouldEnlargeLogoAndFakebox() &&
+  if (IsSplitToolbarMode(self) && ShouldEnlargeNTPFakeboxForMIA() &&
       !ShouldEnlargeNTPFakeboxForMIA()) {
     return kLargeFakeboxHorizontalMargin;
   }

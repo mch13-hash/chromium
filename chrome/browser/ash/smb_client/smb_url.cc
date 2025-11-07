@@ -53,7 +53,7 @@ bool ParseAndValidateUrl(const std::string& url, url::Parsed* parsed) {
   DCHECK(parsed);
   DCHECK(ShouldProcessUrl(url));
 
-  *parsed = url::ParseStandardURL(url);
+  *parsed = url::ParseStandardUrl(url);
   return !ContainsUnnecessaryComponents(*parsed);
 }
 
@@ -144,8 +144,8 @@ void SmbUrl::CanonicalizeSmbUrl(const std::string& url) {
   canonical_output.push_back('/');
 
   url::Component path;
-  if (!(url::CanonicalizeHost(url.c_str(), initial_parsed.host,
-                              &canonical_output, &host_) &&
+  if (!(url::CanonicalizeHost(url, initial_parsed.host, &canonical_output,
+                              &host_) &&
         url::CanonicalizePath(url.c_str(), initial_parsed.path,
                               &canonical_output, &path))) {
     Reset();

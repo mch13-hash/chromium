@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.touch_to_fill.payments;
 
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ScreenId.ALL_LOYALTY_CARDS_SCREEN;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ScreenId.BNPL_ISSUER_SELECTION_SCREEN;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ScreenId.BNPL_ISSUER_TOS_SCREEN;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ScreenId.ERROR_SCREEN;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ScreenId.HOME_SCREEN;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ScreenId.PROGRESS_SCREEN;
@@ -61,6 +62,10 @@ class TouchToFillPaymentMethodView extends TouchToFillViewBase {
                 case ItemType.PROGRESS_ICON:
                 case ItemType.BNPL_SELECTION_PROGRESS_HEADER:
                 case ItemType.ERROR_DESCRIPTION:
+                case ItemType.BNPL_SELECTION_PROGRESS_FOOTER:
+                case ItemType.TOS_FOOTER:
+                case ItemType.TEXT_BUTTON:
+                case ItemType.BNPL_TOS_TEXT:
                     return true;
                 case ItemType.CREDIT_CARD:
                 case ItemType.IBAN:
@@ -186,14 +191,20 @@ class TouchToFillPaymentMethodView extends TouchToFillViewBase {
     @Override
     protected Set<Integer> listedItemTypes() {
         return Set.of(
+                TouchToFillPaymentMethodProperties.ItemType.BNPL,
+                TouchToFillPaymentMethodProperties.ItemType.BNPL_ISSUER,
+                TouchToFillPaymentMethodProperties.ItemType.BNPL_TOS_TEXT,
                 TouchToFillPaymentMethodProperties.ItemType.CREDIT_CARD,
                 TouchToFillPaymentMethodProperties.ItemType.IBAN,
                 TouchToFillPaymentMethodProperties.ItemType.LOYALTY_CARD);
     }
 
     @Override
-    protected int footerItemType() {
-        return TouchToFillPaymentMethodProperties.ItemType.FOOTER;
+    protected Set<Integer> footerItemTypes() {
+        return Set.of(
+                TouchToFillPaymentMethodProperties.ItemType.BNPL_SELECTION_PROGRESS_FOOTER,
+                TouchToFillPaymentMethodProperties.ItemType.TOS_FOOTER,
+                TouchToFillPaymentMethodProperties.ItemType.FOOTER);
     }
 
     private int getDisplayedChildForScreenId(@ScreenId int screenId) {
@@ -208,6 +219,8 @@ class TouchToFillPaymentMethodView extends TouchToFillViewBase {
                 return 3;
             case ERROR_SCREEN:
                 return 4;
+            case BNPL_ISSUER_TOS_SCREEN:
+                return 5;
         }
         assert false : "Undefined ScreenId: " + screenId;
         return 0;
@@ -225,6 +238,8 @@ class TouchToFillPaymentMethodView extends TouchToFillViewBase {
                 return R.id.touch_to_fill_bnpl_issuer_selection_screen;
             case ERROR_SCREEN:
                 return R.id.touch_to_fill_error_screen;
+            case BNPL_ISSUER_TOS_SCREEN:
+                return R.id.touch_to_fill_bnpl_issuer_tos_screen;
         }
         assert false : "Undefined ScreenId: " + screenId;
         return 0;

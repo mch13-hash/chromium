@@ -22,6 +22,7 @@
 #include "base/notreached.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/types/pass_key.h"
+#include "base/values.h"
 #include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/ash/app_mode/kiosk_app_types.h"
 #include "chrome/browser/ash/app_mode/kiosk_controller.h"
@@ -240,7 +241,9 @@ LoginDisplayHostCommon::LoginDisplayHostCommon(
       oobe_metrics_helper_(std::make_unique<OobeMetricsHelper>(
           base::PassKey<LoginDisplayHostCommon>(),
           base::BindRepeating(
-              []() { return g_browser_process->local_state(); }))) {
+              []() { return g_browser_process->local_state(); }),
+          base::BindRepeating(
+              []() { return g_browser_process->metrics_service(); }))) {
   if (features::IsOobeCrosEventsEnabled()) {
     oobe_cros_events_metrics_ =
         std::make_unique<OobeCrosEventsMetrics>(oobe_metrics_helper_.get());
@@ -657,6 +660,13 @@ void LoginDisplayHostCommon::ShowSigninError(SigninError error,
 
   GetWizardController()->GetScreen<SignInFatalErrorScreen>()->SetCustomError(
       error_text, keyboard_hint, details, help_link_text);
+  StartWizard(SignInFatalErrorView::kScreenId);
+}
+
+void LoginDisplayHostCommon::ShowOobeNotCompletedError() {
+  GetWizardController()->GetScreen<SignInFatalErrorScreen>()->SetErrorState(
+      SignInFatalErrorScreen::Error::kOobeCompletionSkipped,
+      base::Value::Dict());
   StartWizard(SignInFatalErrorView::kScreenId);
 }
 

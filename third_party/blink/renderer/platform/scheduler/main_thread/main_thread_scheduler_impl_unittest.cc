@@ -123,6 +123,7 @@ class MockWidgetSchedulerDelegate : public WidgetScheduler::Delegate {
   ~MockWidgetSchedulerDelegate() override = default;
 
   MOCK_METHOD(void, RequestBeginMainFrameNotExpected, (bool));
+  MOCK_METHOD(bool, AreMainFramesPausedOrDeferred, (), (const, override));
 };
 
 }  // namespace
@@ -288,7 +289,6 @@ class MockPageSchedulerImpl : public PageSchedulerImpl {
         .WillByDefault(Return(false));
     ON_CALL(*this, IsWaitingForMainFrameMeaningfulPaint)
         .WillByDefault(Return(false));
-    ON_CALL(*this, IsMainFrameLoading).WillByDefault(Return(false));
     ON_CALL(*this, IsMainFrameLocal).WillByDefault(Return(true));
     ON_CALL(*this, IsOrdinary).WillByDefault(Return(true));
 
@@ -303,7 +303,6 @@ class MockPageSchedulerImpl : public PageSchedulerImpl {
   MOCK_METHOD(bool, RequestBeginMainFrameNotExpected, (bool));
   MOCK_METHOD(bool, IsWaitingForMainFrameContentfulPaint, (), (const));
   MOCK_METHOD(bool, IsWaitingForMainFrameMeaningfulPaint, (), (const));
-  MOCK_METHOD(bool, IsMainFrameLoading, (), (const));
   MOCK_METHOD(bool, IsMainFrameLocal, (), (const));
   MOCK_METHOD(bool, IsOrdinary, (), (const));
 };
@@ -319,7 +318,8 @@ class MainThreadSchedulerImplForTest : public MainThreadSchedulerImpl {
       std::unique_ptr<base::sequence_manager::SequenceManager> manager)
       : MainThreadSchedulerImpl(std::move(manager)), update_policy_count_(0) {}
 
-  void UpdatePolicyLocked(UpdateType update_type) override {
+  void UpdatePolicyLocked(UpdateType update_type) override
+      EXCLUSIVE_LOCKS_REQUIRED(any_thread_lock_) {
     update_policy_count_++;
     MainThreadSchedulerImpl::UpdatePolicyLocked(update_type);
 
@@ -689,7 +689,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
       scheduler_->DidHandleInputEventOnMainThread(
           FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
           WebInputEventResult::kHandledSystem,
-          /*frame_requested=*/true);
+          /*is_frame_expected=*/true);
 
       scheduler_->DidHandleInputEventOnCompositorThread(
           FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
@@ -697,7 +697,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
       scheduler_->DidHandleInputEventOnMainThread(
           FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
           WebInputEventResult::kHandledSystem,
-          /*frame_requested=*/true);
+          /*is_frame_expected=*/true);
 
       scheduler_->DidHandleInputEventOnCompositorThread(
           FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
@@ -705,7 +705,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
       scheduler_->DidHandleInputEventOnMainThread(
           FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
           WebInputEventResult::kHandledSystem,
-          /*frame_requested=*/true);
+          /*is_frame_expected=*/true);
     }
     if (gesture_type != blink::WebInputEvent::Type::kUndefined) {
       scheduler_->DidHandleInputEventOnCompositorThread(
@@ -713,7 +713,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
           InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
       scheduler_->DidHandleInputEventOnMainThread(
           FakeInputEvent(gesture_type), WebInputEventResult::kHandledSystem,
-          /*frame_requested=*/true);
+          /*is_frame_expected=*/true);
     }
   }
 
@@ -726,7 +726,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
     scheduler_->DidHandleInputEventOnMainThread(
         FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
         WebInputEventResult::kHandledApplication,
-        /*frame_requested=*/true);
+        /*is_frame_expected=*/true);
     scheduler_->DidCommitFrameToCompositor();
   }
 
@@ -840,7 +840,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
     scheduler_->DidHandleInputEventOnMainThread(
         FakeInputEvent(WebInputEvent::Type::kMouseMove),
         WebInputEventResult::kHandledApplication,
-        /*frame_requested=*/true);
+        /*is_frame_expected=*/true);
     AppendToVectorBeginMainFrameTask(vector, value);
   }
 
@@ -849,7 +849,7 @@ class MainThreadSchedulerImplTest : public testing::Test {
                                     String value) {
     scheduler_->DidHandleInputEventOnMainThread(
         FakeInputEvent(event_type), WebInputEventResult::kHandledApplication,
-        /*frame_requested=*/true);
+        /*is_frame_expected=*/true);
     AppendToVectorTestTask(vector, value);
   }
 
@@ -1022,29 +1022,6 @@ class MainThreadSchedulerImplTest : public testing::Test {
   bool simulate_throttleable_task_ran_;
   uint64_t next_begin_frame_number_ = viz::BeginFrameArgs::kStartingFrameNumber;
 };
-
-class
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest
-    : public MainThreadSchedulerImplTest,
-      public ::testing::WithParamInterface<bool> {
- public:
-  MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest() {
-    if (GetParam()) {
-      feature_list_.Reset();
-      feature_list_.InitWithFeaturesAndParameters(
-          {base::test::FeatureRefAndParams(
-              features::kLoadingPhaseBufferTimeAfterFirstMeaningfulPaint,
-              {{"LoadingPhaseBufferTimeAfterFirstMeaningfulPaintMillis",
-                "5000"}})},
-          {});
-    }
-  }
-};
-
-INSTANTIATE_TEST_SUITE_P(
-    All,
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest,
-    testing::Bool());
 
 TEST_F(MainThreadSchedulerImplTest, TestPostDefaultTask) {
   Vector<String> run_order;
@@ -1315,7 +1292,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureFlingStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
 }
 
 TEST_F(MainThreadSchedulerImplTest,
@@ -1334,7 +1311,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureFlingStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
 }
 
 TEST_F(MainThreadSchedulerImplTest,
@@ -1349,7 +1326,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledApplication,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   base::RunLoop().RunUntilIdle();
   // Because the main thread is performing custom input handling, we let all
   // tasks run. However compositing tasks are still given priority.
@@ -1371,7 +1348,7 @@ TEST_F(
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   base::RunLoop().RunUntilIdle();
   // Because we are still waiting for the touchstart to be processed,
   // non-essential tasks like loading tasks are blocked.
@@ -1446,7 +1423,7 @@ TEST_F(MainThreadSchedulerImplTest, TestTouchstartPolicy_MainThread) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EnableIdleTasks();
   base::RunLoop().RunUntilIdle();
   EXPECT_THAT(run_order, testing::ElementsAre("C1", "C2", "D1", "D2"));
@@ -1459,14 +1436,14 @@ TEST_F(MainThreadSchedulerImplTest, TestTouchstartPolicy_MainThread) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureFlingCancel),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   scheduler_->DidHandleInputEventOnCompositorThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureTapDown),
       InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureTapDown),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   base::RunLoop().RunUntilIdle();
   EXPECT_THAT(run_order, testing::ElementsAre());
 
@@ -1479,22 +1456,19 @@ TEST_F(MainThreadSchedulerImplTest, TestTouchstartPolicy_MainThread) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureScrollBegin),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_THAT(run_order, testing::ElementsAre("L1", "T1", "T2"));
 }
 
-TEST_P(
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest,
-    InitiallyInEarlyLoadingUseCase) {
+TEST_F(MainThreadSchedulerImplTest, InitiallyInEarlyLoadingUseCase) {
   // `IsWaitingForMainFrame(Contentful|Meaningful)Paint return true for a new
   // page scheduler in production.
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameContentfulPaint)
       .WillByDefault(Return(true));
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(true));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(true));
 
   scheduler_->OnMainFramePaint();
 
@@ -1508,21 +1482,18 @@ TEST_P(
 
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(false));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(false));
   scheduler_->OnMainFramePaint();
   EXPECT_EQ(UseCase::kNone, CurrentUseCase());
 }
 
-TEST_P(
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest,
-    NonOrdinaryPageDoesNotTriggerLoadingUseCase) {
+TEST_F(MainThreadSchedulerImplTest,
+       NonOrdinaryPageDoesNotTriggerLoadingUseCase) {
   // `IsWaitingForMainFrame(Contentful|Meaningful)Paint return true for a new
   // page scheduler in production.
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameContentfulPaint)
       .WillByDefault(Return(true));
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(true));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(true));
 
   // Make the page non-ordinary.
   ON_CALL(*page_scheduler_, IsOrdinary).WillByDefault(Return(false));
@@ -1604,7 +1575,7 @@ TEST_F(MainThreadSchedulerImplTest,
       FakeInputEvent(blink::WebInputEvent::Type::kMouseMove,
                      blink::WebInputEvent::kLeftButtonDown),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
 }
 
 TEST_F(MainThreadSchedulerImplTest,
@@ -1780,7 +1751,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kKeyDown),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
 }
 
 TEST_F(MainThreadSchedulerImplTest,
@@ -1941,7 +1912,7 @@ TEST_F(MainThreadSchedulerImplTest, SlowMainThreadInputEvent) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureFlingStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   base::RunLoop().RunUntilIdle();
 
   // Even though we exceeded the input priority escalation period, we should
@@ -1992,7 +1963,7 @@ TEST_F(MainThreadSchedulerImplTest, UpdatePolicyCountTriggeredByOneInputEvent) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EXPECT_EQ(1, scheduler_->update_policy_count_);
 
   test_task_runner_->AdvanceMockTickClock(base::Seconds(1));
@@ -2016,7 +1987,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EXPECT_EQ(1, scheduler_->update_policy_count_);
 
   // The second call to DidHandleInputEventOnCompositorThread should not post
@@ -2031,7 +2002,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EXPECT_EQ(1, scheduler_->update_policy_count_);
 
   // The third call to DidHandleInputEventOnCompositorThread should post a
@@ -2047,7 +2018,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EXPECT_EQ(2, scheduler_->update_policy_count_);
   test_task_runner_->FastForwardBy(base::Seconds(1));
   // We finally expect a delayed policy update.
@@ -2069,7 +2040,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EXPECT_EQ(1, scheduler_->update_policy_count_);
   test_task_runner_->FastForwardBy(base::Seconds(1));
   // We expect a delayed policy update.
@@ -2087,7 +2058,7 @@ TEST_F(MainThreadSchedulerImplTest,
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   EXPECT_EQ(3, scheduler_->update_policy_count_);
   test_task_runner_->FastForwardBy(base::Seconds(1));
   // We finally expect a delayed policy update.
@@ -2122,19 +2093,19 @@ TEST_F(MainThreadSchedulerImplTest, EnsureUpdatePolicyNotTriggeredTooOften) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeTouchEvent(blink::WebInputEvent::Type::kTouchStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kTouchMove),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kTouchEnd),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
 
   EXPECT_EQ(2, scheduler_->update_policy_count_);
 
@@ -2423,7 +2394,7 @@ TEST_F(MainThreadSchedulerImplTest, MismatchedDidHandleInputEventOnMainThread) {
   scheduler_->DidHandleInputEventOnMainThread(
       FakeInputEvent(blink::WebInputEvent::Type::kGestureFlingStart),
       WebInputEventResult::kHandledSystem,
-      /*frame_requested=*/true);
+      /*is_frame_expected=*/true);
 }
 
 TEST_F(MainThreadSchedulerImplTest, BeginMainFrameOnCriticalPath) {
@@ -2705,9 +2676,7 @@ TEST_F(MainThreadSchedulerImplTest, TestDefaultRAILMode) {
   scheduler_->RemoveRAILModeObserver(&observer);
 }
 
-TEST_P(
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest,
-    TestLoadRAILMode) {
+TEST_F(MainThreadSchedulerImplTest, TestLoadRAILMode) {
   InSequence s;
   MockRAILModeObserver observer;
   EXPECT_CALL(observer, OnRAILModeChanged(RAILMode::kDefault));
@@ -2719,7 +2688,6 @@ TEST_P(
       .WillByDefault(Return(true));
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(true));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(true));
   scheduler_->DidStartProvisionalLoad(true);
   EXPECT_EQ(RAILMode::kLoad, GetRAILMode());
   EXPECT_EQ(UseCase::kEarlyLoading, ForceUpdatePolicyAndGetCurrentUseCase());
@@ -2729,16 +2697,13 @@ TEST_P(
   EXPECT_EQ(UseCase::kLoading, ForceUpdatePolicyAndGetCurrentUseCase());
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(false));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(false));
   scheduler_->OnMainFramePaint();
   EXPECT_EQ(UseCase::kNone, ForceUpdatePolicyAndGetCurrentUseCase());
   EXPECT_EQ(RAILMode::kDefault, GetRAILMode());
   scheduler_->RemoveRAILModeObserver(&observer);
 }
 
-TEST_P(
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest,
-    TestLoadRAILModeWhileHidden) {
+TEST_F(MainThreadSchedulerImplTest, TestLoadRAILModeWhileHidden) {
   InSequence s;
   MockRAILModeObserver observer;
   EXPECT_CALL(observer, OnRAILModeChanged(RAILMode::kDefault));
@@ -2749,7 +2714,6 @@ TEST_P(
       .WillByDefault(Return(true));
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(true));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(true));
 
   // Because the widget is hidden, the mode should still be kDefault while
   // loading.
@@ -2762,16 +2726,13 @@ TEST_P(
   EXPECT_EQ(UseCase::kLoading, ForceUpdatePolicyAndGetCurrentUseCase());
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(false));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(false));
   scheduler_->OnMainFramePaint();
   EXPECT_EQ(UseCase::kNone, ForceUpdatePolicyAndGetCurrentUseCase());
   EXPECT_EQ(RAILMode::kDefault, GetRAILMode());
   scheduler_->RemoveRAILModeObserver(&observer);
 }
 
-TEST_P(
-    MainThreadSchedulerImplWithLoadingPhaseBufferTimeAfterFirstMeaningfulPaintTest,
-    InputTerminatesLoadRAILMode) {
+TEST_F(MainThreadSchedulerImplTest, InputTerminatesLoadRAILMode) {
   InSequence s;
   MockRAILModeObserver observer;
   EXPECT_CALL(observer, OnRAILModeChanged(RAILMode::kDefault));
@@ -2783,7 +2744,6 @@ TEST_P(
       .WillByDefault(Return(true));
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(true));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(true));
   scheduler_->DidStartProvisionalLoad(true);
   EXPECT_EQ(RAILMode::kLoad, GetRAILMode());
   EXPECT_EQ(UseCase::kEarlyLoading, ForceUpdatePolicyAndGetCurrentUseCase());
@@ -3363,7 +3323,7 @@ TEST_F(MainThreadSchedulerImplTest,
         scheduler_->DidHandleInputEventOnMainThread(
             FakeInputEvent(WebInputEvent::Type::kMouseLeave),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/true);
+            /*is_frame_expected=*/true);
         run_order.push_back("I1");
       }));
   PostTestTasks(&run_order, "D1 D2 CM1");
@@ -3377,7 +3337,7 @@ TEST_F(MainThreadSchedulerImplTest,
         scheduler_->DidHandleInputEventOnMainThread(
             FakeInputEvent(WebInputEvent::Type::kTouchMove),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/true);
+            /*is_frame_expected=*/true);
         run_order.push_back("I1");
       }));
   PostTestTasks(&run_order, "D1 D2 CM1");
@@ -3977,7 +3937,7 @@ TEST_P(DeferRendererTasksAfterInputTest,
         scheduler_->DidHandleInputEventOnMainThread(
             FakeInputEvent(WebInputEvent::Type::kMouseUp),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/false);
+            /*is_frame_expected=*/false);
       }));
   EXPECT_EQ(CurrentUseCase(), UseCase::kNone);
   base::RunLoop().RunUntilIdle();
@@ -3988,7 +3948,7 @@ TEST_P(DeferRendererTasksAfterInputTest,
         scheduler_->DidHandleInputEventOnMainThread(
             FakeInputEvent(WebInputEvent::Type::kMouseUp),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/true);
+            /*is_frame_expected=*/true);
       }));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(CurrentUseCase(), UseCase::kDiscreteInputResponse);
@@ -4001,7 +3961,7 @@ TEST_P(DeferRendererTasksAfterInputTest,
         scheduler_->DidHandleInputEventOnMainThread(
             FakeInputEvent(WebInputEvent::Type::kMouseMove),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/false);
+            /*is_frame_expected=*/false);
       }));
   EXPECT_EQ(CurrentUseCase(), UseCase::kNone);
   base::RunLoop().RunUntilIdle();
@@ -4054,7 +4014,7 @@ TEST_P(DeferRendererTasksAfterInputTest, DiscreteInputDuringContinuousGesture) {
             FakeInputEvent(WebInputEvent::Type::kMouseDown,
                            blink::WebInputEvent::kLeftButtonDown),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/true);
+            /*is_frame_expected=*/true);
       }));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(CurrentUseCase(), UseCase::kDiscreteInputResponse);
@@ -4068,7 +4028,7 @@ TEST_P(DeferRendererTasksAfterInputTest, DiscreteInputDuringContinuousGesture) {
             FakeInputEvent(WebInputEvent::Type::kMouseMove,
                            blink::WebInputEvent::kLeftButtonDown),
             WebInputEventResult::kHandledApplication,
-            /*frame_requested=*/true);
+            /*is_frame_expected=*/true);
       }));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(CurrentUseCase(), UseCase::kDiscreteInputResponse);
@@ -4096,7 +4056,6 @@ TEST_P(DeferRendererTasksAfterInputTest, DiscreteInputDoesNotChangeRAILMode) {
       .WillByDefault(Return(true));
   ON_CALL(*page_scheduler_, IsWaitingForMainFrameMeaningfulPaint)
       .WillByDefault(Return(true));
-  ON_CALL(*page_scheduler_, IsMainFrameLoading).WillByDefault(Return(true));
   scheduler_->DidStartProvisionalLoad(true);
   EXPECT_EQ(ForceUpdatePolicyAndGetCurrentUseCase(), UseCase::kEarlyLoading);
   EXPECT_EQ(GetRAILMode(), RAILMode::kLoad);
@@ -4111,6 +4070,70 @@ TEST_P(DeferRendererTasksAfterInputTest, DiscreteInputDoesNotChangeRAILMode) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(CurrentUseCase(), UseCase::kEarlyLoading);
   EXPECT_EQ(GetRAILMode(), RAILMode::kLoad);
+}
+
+TEST_P(DeferRendererTasksAfterInputTest, TasksAreNotDeferredIfRenderingPaused) {
+  // Simulate pausing or deferring rendering.
+  ON_CALL(*widget_scheduler_delegate_, AreMainFramesPausedOrDeferred)
+      .WillByDefault(Return(true));
+
+  // Post potentially deferrable tasks.
+  Vector<String> run_order;
+  Vector<TestTaskSpecEntry> test_spec = {
+      {.descriptor = "F1", .type_info = TaskType::kDOMManipulation},
+      {.descriptor = "F2", .type_info = TaskType::kPostedMessage},
+      {.descriptor = "F3", .type_info = TaskType::kInternalMediaRealTime},
+      {.descriptor = "F4", .type_info = TaskType::kJavascriptTimerImmediate},
+      {.descriptor = "BG1",
+       .type_info = WebSchedulingParams(
+           {.queue_type = WebSchedulingQueueType::kTaskQueue,
+            .priority = WebSchedulingPriority::kBackgroundPriority})},
+      {.descriptor = "UV1",
+       .type_info = WebSchedulingParams(
+           {.queue_type = WebSchedulingQueueType::kTaskQueue,
+            .priority = WebSchedulingPriority::kUserVisiblePriority})},
+      {.descriptor = "UB1",
+       .type_info = WebSchedulingParams(
+           {.queue_type = WebSchedulingQueueType::kTaskQueue,
+            .priority = WebSchedulingPriority::kUserBlockingPriority})}};
+  web_scheduling_test_helper_->PostTestTasks(&run_order, test_spec);
+
+  // The input task will run first, but the UseCase shouldn't change because
+  // rendering is paused, so all of the tasks should run.
+  input_task_runner_->PostTask(
+      FROM_HERE, base::BindLambdaForTesting([&]() {
+        widget_scheduler_->DidHandleInputEventOnMainThread(
+            FakeInputEvent(WebInputEvent::Type::kMouseDown,
+                           blink::WebInputEvent::kLeftButtonDown),
+            WebInputEventResult::kHandledApplication,
+            /*frame_requested=*/true);
+        run_order.push_back("PD1");
+      }));
+
+  EXPECT_EQ(CurrentUseCase(), UseCase::kNone);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(CurrentUseCase(), UseCase::kNone);
+  EXPECT_THAT(run_order, testing::ElementsAre("PD1", "UB1", "F1", "F2", "F3",
+                                              "F4", "UV1", "BG1"));
+}
+
+TEST_P(DeferRendererTasksAfterInputTest, TasksAreDeferredIfRenderingNotPaused) {
+  // Test that when going through the `widget_scheduler_`, tasks the UseCase
+  // changes as expected, which controls task deferral.
+  ON_CALL(*widget_scheduler_delegate_, AreMainFramesPausedOrDeferred)
+      .WillByDefault(Return(false));
+
+  EXPECT_EQ(CurrentUseCase(), UseCase::kNone);
+  input_task_runner_->PostTask(
+      FROM_HERE, base::BindLambdaForTesting([&]() {
+        widget_scheduler_->DidHandleInputEventOnMainThread(
+            FakeInputEvent(WebInputEvent::Type::kMouseDown,
+                           blink::WebInputEvent::kLeftButtonDown),
+            WebInputEventResult::kHandledApplication,
+            /*frame_requested=*/true);
+      }));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(CurrentUseCase(), UseCase::kDiscreteInputResponse);
 }
 
 INSTANTIATE_TEST_SUITE_P(

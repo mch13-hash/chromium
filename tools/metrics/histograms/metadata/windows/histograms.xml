@@ -90,7 +90,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.Enclave.{Type}.Available" enum="BooleanAvailable"
-    expires_after="2026-02-22">
+    expires_after="2026-04-26">
   <owner>ajgo@chromium.org</owner>
   <owner>wfh@chromium.org</owner>
   <summary>
@@ -166,7 +166,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.DestinationMatches" enum="Boolean"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -176,7 +176,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.DownloadSucceed" enum="Boolean"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -186,8 +186,19 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Windows.InstallerDownloader.FailureReason"
+    enum="InstallerDownloaderFailureReason" expires_after="2026-05-03">
+  <owner>koretadaniel@chromium.org</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <summary>
+    Records the reason why an installer download failed after it had already
+    started. This is recorded when the download enters a terminal state other
+    than COMPLETE.
+  </summary>
+</histogram>
+
 <histogram name="Windows.InstallerDownloader.InfobarShown" enum="Boolean"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -197,8 +208,20 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Windows.InstallerDownloader.InterruptReason"
+    enum="InterruptReason" expires_after="2026-03-01">
+  <owner>koretadaniel@chromium.org</owner>
+  <owner>top-chrome-desktop-ui@google.com</owner>
+  <summary>
+    Records the download interrupt reason when an installer download fails to
+    start. This is recorded when the DownloadManager returns an interrupt reason
+    other than NONE, which can happen for a wide variety of reasons including
+    network errors, file errors, or server issues.
+  </summary>
+</histogram>
+
 <histogram name="Windows.InstallerDownloader.RequestAccepted" enum="Boolean"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -235,7 +258,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.OneDriveSyncState.{SyncedState}" enum="BooleanEnabled"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>koretadaniel@chromium.org</owner>
   <owner>iclelland@chromium.org</owner>
   <summary>
@@ -321,7 +344,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.PlatformExperienceHelper.InstallerLaunchStatus.System"
-    enum="SystemInstallerLaunchStatus" expires_after="2026-02-01">
+    enum="SystemInstallerLaunchStatus" expires_after="2026-04-05">
   <owner>alsan@chromium.org</owner>
   <owner>chrome-desktop-ui-waterloo@google.com</owner>
   <summary>
@@ -331,7 +354,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.PlatformExperienceHelper.InstallerLaunchStatus.User"
-    enum="UserInstallerLaunchStatus" expires_after="2026-02-09">
+    enum="UserInstallerLaunchStatus" expires_after="2026-04-12">
   <owner>alsan@chromium.org</owner>
   <owner>chrome-desktop-ui-waterloo@google.com</owner>
   <summary>
@@ -365,7 +388,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.ShouldPinToTaskbarResult" enum="TaskbarPinResult"
-    expires_after="2026-02-01">
+    expires_after="2026-04-05">
   <owner>davidbienvenu@chromium.org</owner>
   <owner>jessemckenna@google.com</owner>
   <summary>
@@ -375,7 +398,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.TaskbarPinFromFRESucceeded" enum="Boolean"
-    expires_after="2026-02-01">
+    expires_after="2026-04-05">
   <owner>davidbienvenu@chromium.org</owner>
   <owner>jessemckenna@google.com</owner>
   <summary>
@@ -387,7 +410,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.TaskbarPinFromSettingsSucceeded" enum="Boolean"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>davidbienvenu@chromium.org</owner>
   <owner>jessemckenna@google.com</owner>
   <summary>
@@ -398,7 +421,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.TaskbarPinResult" enum="TaskbarPinResult"
-    expires_after="2026-02-01">
+    expires_after="2026-04-05">
   <owner>davidbienvenu@chromium.org</owner>
   <owner>jessemckenna@google.com</owner>
   <summary>
@@ -408,7 +431,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.TimeInSelectFileDialog" units="ms"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>fdoray@chromium.org</owner>
   <owner>pmonette@chromium.org</owner>
   <summary>
@@ -421,7 +444,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.Win11HardwareRequirements.{Type}Check"
-    enum="BooleanEnabled" expires_after="2026-02-09">
+    enum="BooleanEnabled" expires_after="2026-04-12">
   <owner>estalin@chromium.org</owner>
   <owner>davidbienvenu@chromium.org</owner>
   <summary>
@@ -438,7 +461,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.Win11UpgradeEligible" enum="BooleanEnabled"
-    expires_after="2026-02-09">
+    expires_after="2026-04-12">
   <owner>estalin@chromium.org</owner>
   <owner>davidbienvenu@chromium.org</owner>
   <summary>

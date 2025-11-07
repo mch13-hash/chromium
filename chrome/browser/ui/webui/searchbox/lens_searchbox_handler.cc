@@ -106,15 +106,12 @@ LensSearchboxHandler::LensSearchboxHandler(
     mojo::PendingReceiver<searchbox::mojom::PageHandler> pending_page_handler,
     Profile* profile,
     content::WebContents* web_contents,
-    MetricsReporter* metrics_reporter,
     LensSearchboxClient* lens_searchbox_client)
     : SearchboxHandler(
           std::move(pending_page_handler),
           profile,
           web_contents,
-          metrics_reporter,
           std::make_unique<OmniboxController>(
-              /*view=*/nullptr,
               std::make_unique<LensOmniboxClient>(profile,
                                                   web_contents,
                                                   lens_searchbox_client),

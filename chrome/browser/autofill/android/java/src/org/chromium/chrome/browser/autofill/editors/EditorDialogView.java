@@ -16,12 +16,14 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.text.method.LinkMovementMethod;
+import android.view.ContextThemeWrapper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -34,15 +36,18 @@ import android.widget.RelativeLayout.LayoutParams;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.view.MarginLayoutParamsCompat;
 
 import org.chromium.base.ResettersForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.autofill.R;
 import org.chromium.chrome.browser.autofill.editors.EditorProperties.EditorItem;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherFactory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
 import org.chromium.chrome.browser.util.ChromeAccessibilityUtil;
@@ -87,6 +92,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
     private @Nullable static EditorObserverForTest sObserverForTest;
 
     private final Activity mActivity;
+    private final Context mContext;
     private final Profile mProfile;
     private final Handler mHandler;
     private final int mHalfRowMargin;
@@ -117,7 +123,16 @@ public class EditorDialogView extends AlwaysDismissedDialog
     private @Nullable Runnable mDoneRunnable;
     private @Nullable Runnable mCancelRunnable;
 
+    private @Nullable String mProfileRecordTypeSuffix;
+
     private boolean mValidateOnShow;
+
+    @VisibleForTesting
+    public static final String PROFILE_DELETED_HISTOGRAM = "Autofill.ProfileDeleted.Any.Total";
+
+    @VisibleForTesting
+    public static final String PROFILE_DELETED_SETTINGS_HISTOGRAM =
+            "Autofill.ProfileDeleted.Settings.Total";
 
     /**
      * Builds the editor dialog.
@@ -133,12 +148,20 @@ public class EditorDialogView extends AlwaysDismissedDialog
         // Sets transparent background for animating content view.
         assumeNonNull(getWindow()).setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         mActivity = activity;
+        if (ChromeFeatureList.sAndroidSettingsContainment.isEnabled()) {
+            // TODO(crbug.com/439911511): Set the style directly in the layout instead.
+            mContext =
+                    new ContextThemeWrapper(
+                            activity, R.style.ThemeOverlay_Chromium_Settings_InputFields);
+        } else {
+            mContext = activity;
+        }
         mProfile = profile;
         mHandler = new Handler();
         mIsDismissed = false;
 
         mHalfRowMargin =
-                activity.getResources()
+                mContext.getResources()
                         .getDimensionPixelSize(R.dimen.editor_dialog_section_large_spacing);
         mFieldViews = new ArrayList<>();
         mTextFieldMCPs = new ArrayList<>();
@@ -150,7 +173,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
         setOnDismissListener(this);
 
         mContainerView =
-                LayoutInflater.from(mActivity).inflate(R.layout.autofill_editor_dialog, null);
+                LayoutInflater.from(mContext).inflate(R.layout.autofill_editor_dialog, null);
         setContentView(mContainerView);
 
         prepareToolbar();
@@ -174,7 +197,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
         if (customDoneButtonText != null) {
             mDoneButton.setText(customDoneButtonText);
         } else {
-            mDoneButton.setText(mActivity.getString(R.string.done));
+            mDoneButton.setText(mContext.getString(R.string.done));
         }
     }
 
@@ -215,6 +238,15 @@ public class EditorDialogView extends AlwaysDismissedDialog
 
     public void setCancelRunnable(Runnable cancelRunnable) {
         mCancelRunnable = cancelRunnable;
+    }
+
+    /**
+     * Sets the suffix to be appended to the profile deletion histogram.
+     *
+     * @param suffix The suffix to append, e.g., the profile's record type.
+     */
+    public void setProfileRecordTypeSuffix(@Nullable String suffix) {
+        mProfileRecordTypeSuffix = suffix;
     }
 
     public void setValidateOnShow(boolean validateOnShow) {
@@ -450,8 +482,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
     public void onConfigurationChanged() {
         if (mUiConfig == null) {
             int minWidePaddingPixels =
-                    mActivity
-                            .getResources()
+                    mContext.getResources()
                             .getDimensionPixelSize(R.dimen.settings_wide_display_min_padding);
             mUiConfig = new UiConfig(mContentView);
             ViewResizer.createAndAttach(mContentView, mUiConfig, 0, minWidePaddingPixels);
@@ -476,20 +507,23 @@ public class EditorDialogView extends AlwaysDismissedDialog
             case DROPDOWN:
                 {
                     DropdownFieldView dropdownView =
-                            new DropdownFieldView(mActivity, parent, editorItem.model);
+                            new DropdownFieldView(mContext, parent, editorItem.model);
                     mDropdownFieldMCPs.add(
                             PropertyModelChangeProcessor.create(
                                     editorItem.model,
                                     dropdownView,
                                     EditorDialogViewBinder::bindDropdownFieldView));
                     mFieldViews.add(dropdownView);
-                    mDropdownFields.add(dropdownView.getDropdown());
+                    View dropdown = dropdownView.getDropdown();
+                    if (dropdown instanceof Spinner) {
+                        mDropdownFields.add((Spinner) dropdown);
+                    }
                     childView = dropdownView.getLayout();
                     break;
                 }
             case TEXT_INPUT:
                 {
-                    TextFieldView inputLayout = new TextFieldView(mActivity, editorItem.model);
+                    TextFieldView inputLayout = new TextFieldView(mContext, editorItem.model);
                     mTextFieldMCPs.add(
                             PropertyModelChangeProcessor.create(
                                     editorItem.model,
@@ -503,7 +537,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
             case NON_EDITABLE_TEXT:
                 {
                     View textLayout =
-                            LayoutInflater.from(mActivity)
+                            LayoutInflater.from(mContext)
                                     .inflate(
                                             R.layout.autofill_editor_dialog_non_editable_textview,
                                             null);
@@ -517,7 +551,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
             case NOTICE:
                 {
                     View noticeLayout =
-                            LayoutInflater.from(mActivity)
+                            LayoutInflater.from(mContext)
                                     .inflate(R.layout.autofill_editor_dialog_notice, null);
                     TextView textView = noticeLayout.findViewById(R.id.notice);
                     PropertyModelChangeProcessor.create(
@@ -647,6 +681,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
                         .setNegativeButton(
                                 R.string.cancel,
                                 (dialog, which) -> {
+                                    recordDeletionHistogram(false);
                                     dialog.cancel();
                                     mConfirmationDialog = null;
                                     if (sObserverForTest != null) {
@@ -656,6 +691,7 @@ public class EditorDialogView extends AlwaysDismissedDialog
                         .setPositiveButton(
                                 primaryButtonText,
                                 (dialog, which) -> {
+                                    recordDeletionHistogram(true);
                                     handleDelete();
                                     mConfirmationDialog = null;
                                 })
@@ -677,11 +713,6 @@ public class EditorDialogView extends AlwaysDismissedDialog
         return mEditableTextFields;
     }
 
-    /** @return All dropdown fields in the editor. Used only for tests. */
-    public List<Spinner> getDropdownFieldsForTest() {
-        return mDropdownFields;
-    }
-
     public @Nullable AlertDialog getConfirmationDialogForTest() {
         return mConfirmationDialog;
     }
@@ -698,5 +729,17 @@ public class EditorDialogView extends AlwaysDismissedDialog
                 getContext(),
                 R.drawable.ic_arrow_back_white_24dp,
                 R.color.default_icon_color_tint_list);
+    }
+
+    private void recordDeletionHistogram(boolean deleted) {
+        RecordHistogram.recordBooleanHistogram(PROFILE_DELETED_HISTOGRAM, deleted);
+        RecordHistogram.recordBooleanHistogram(PROFILE_DELETED_SETTINGS_HISTOGRAM, deleted);
+
+        if (mProfileRecordTypeSuffix != null && !mProfileRecordTypeSuffix.isEmpty()) {
+            RecordHistogram.recordBooleanHistogram(
+                    PROFILE_DELETED_HISTOGRAM + "." + mProfileRecordTypeSuffix, deleted);
+            RecordHistogram.recordBooleanHistogram(
+                    PROFILE_DELETED_SETTINGS_HISTOGRAM + "." + mProfileRecordTypeSuffix, deleted);
+        }
     }
 }

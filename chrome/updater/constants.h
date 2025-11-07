@@ -93,6 +93,9 @@ inline constexpr char kUpdateSwitch[] = "update";
 // Updates the apps.
 inline constexpr char kUpdateAppsSwitch[] = "update-apps";
 
+// Run as a patch worker.
+inline constexpr char kPatchWorkerSwitch[] = "patch-worker";
+
 // Run as an unzip worker.
 inline constexpr char kUnzipWorkerSwitch[] = "unzip-worker";
 
@@ -557,6 +560,9 @@ inline constexpr int kErrorNoObserverCompletionInfo = kUpdaterErrorBase + 82;
 
 // No apps to install.
 inline constexpr int kErrorNoApps = kUpdaterErrorBase + 83;
+
+// A path references the parent directory.
+inline constexpr int kErrorPathReferencesParent = kUpdaterErrorBase + 84;
 
 // Policy Management constants.
 // The maximum value allowed for policy AutoUpdateCheckPeriodMinutes.

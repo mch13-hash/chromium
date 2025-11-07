@@ -68,6 +68,7 @@
 #include "third_party/blink/public/web/web_plugin.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view_client.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_focus_options.h"
 #include "third_party/blink/renderer/core/accessibility/histogram_macros.h"
 #include "third_party/blink/renderer/core/content_capture/content_capture_manager.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
@@ -1357,12 +1358,6 @@ void WebFrameWidgetImpl::StartDragging(LocalFrame* source_frame,
                                        const SkBitmap& drag_image,
                                        const gfx::Vector2d& cursor_offset,
                                        const gfx::Rect& drag_obj_rect) {
-  if (doing_drag_and_drop_) {
-    // TODO: crbug.com/330274075 - Root cause nested drag-start events, remove
-    // once issue has been resolved.
-    base::debug::DumpWithoutCrashing();
-  }
-
   doing_drag_and_drop_ = true;
   if (drag_and_drop_disabled_) {
     DragSourceSystemDragEnded();
@@ -2130,6 +2125,13 @@ void WebFrameWidgetImpl::SetShouldThrottleFrameRate(bool flag) {
   return widget_base_->LayerTreeHost()->SetShouldThrottleFrameRate(flag);
 }
 
+void WebFrameWidgetImpl::RequestMainFrameOnCompositorAnimation(
+    cc::PropertyChangeForcesCommitCriteria
+        property_change_forces_commit_criteria) {
+  widget_base_->LayerTreeHost()->RequestMainFrameOnCompositorAnimation(
+      property_change_forces_commit_criteria);
+}
+
 std::optional<int> WebFrameWidgetImpl::GetMaxRenderBufferBounds() const {
   if (!View()->does_composite()) {
     return std::nullopt;
@@ -2447,6 +2449,11 @@ bool WebFrameWidgetImpl::ScrollFocusedEditableElementIntoView() {
   Element* element = FocusedElement();
   if (!element)
     return false;
+
+  const FocusOptions* focus_options = element->GetDocument().GetFocusOptions();
+  if (focus_options && focus_options->preventScroll()) {
+    return false;
+  }
 
   EditContext* edit_context = element->GetDocument()
                                   .GetFrame()
@@ -3213,8 +3220,8 @@ void WebFrameWidgetImpl::FlushInputProcessedCallback() {
   widget_base_->FlushInputProcessedCallback();
 }
 
-void WebFrameWidgetImpl::CancelCompositionForPepper() {
-  widget_base_->CancelCompositionForPepper();
+void WebFrameWidgetImpl::CancelComposition() {
+  widget_base_->CancelComposition();
 }
 
 void WebFrameWidgetImpl::RequestMouseLock(

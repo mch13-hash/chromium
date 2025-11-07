@@ -23,6 +23,8 @@
 #include "components/signin/public/identity_manager/primary_account_mutator.h"
 #include "components/sync/base/features.h"
 #include "components/sync_bookmarks/switches.h"
+#include "google_apis/gaia/core_account_id.h"
+#include "google_apis/gaia/gaia_id.h"
 #include "net/base/network_change_notifier.h"
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -119,6 +121,24 @@ const char* GetAvatarButtonPromoUsedKey(
   }
 }
 
+bool WasPreviouslySyncingWithPrimaryAccount(Profile* profile) {
+  const GaiaId last_syncing_gaia_id(
+      profile->GetPrefs()->GetString(prefs::kGoogleServicesLastSyncingGaiaId));
+  if (last_syncing_gaia_id.empty()) {
+    return false;
+  }
+
+  const GaiaId primary_account_gaia_id =
+      IdentityManagerFactory::GetForProfile(profile)
+          ->GetPrimaryAccountInfo(ConsentLevel::kSignin)
+          .gaia;
+  if (primary_account_gaia_id.empty()) {
+    return false;
+  }
+
+  return last_syncing_gaia_id == primary_account_gaia_id;
+}
+
 void ComputeProfileMenuAvatarButtonPromoInfoWithBatchUploadResult(
     Profile* profile,
     base::OnceCallback<void(ProfileMenuAvatarButtonPromoInfo)> result_callback,
@@ -134,8 +154,6 @@ void ComputeProfileMenuAvatarButtonPromoInfoWithBatchUploadResult(
       });
 
   // Batch Upload promo: Windows 10 depreciation promo.
-  // TODO(crbug.com/447048341): Confirm whether additional requirements are
-  // needed for this promo (e.g. minimum cookie age, cross account error).
   if (local_data_count > 0 && switches::IsSigninWindows10DepreciationState()) {
     std::move(result_callback)
         .Run(ProfileMenuAvatarButtonPromoInfo{
@@ -145,21 +163,25 @@ void ComputeProfileMenuAvatarButtonPromoInfoWithBatchUploadResult(
     return;
   }
 
-  // Batch Upload Bookmarks promo: for users that have local bookmarks.
-  // TODO(crbug.com/447048341): Confirm whether additional requirements are
-  // needed for this promo (e.g. previously syncing).
-  if (local_map_result.contains(syncer::BOOKMARKS) &&
-      !local_map_result[syncer::BOOKMARKS].local_data_models.empty()) {
-    std::move(result_callback)
-        .Run(ProfileMenuAvatarButtonPromoInfo{
-            .type = ProfileMenuAvatarButtonPromoInfo::Type::
-                kBatchUploadBookmarksPromo,
-            .local_data_count = local_data_count});
-    return;
+  // Batch Upload Bookmarks promo: for users that have local bookmarks and were
+  // previously syncing with the current primary account.
+  if (WasPreviouslySyncingWithPrimaryAccount(profile)) {
+    if (auto it = local_map_result.find(syncer::BOOKMARKS);
+        it != local_map_result.end() && !it->second.local_data_models.empty()) {
+      std::move(result_callback)
+          .Run(ProfileMenuAvatarButtonPromoInfo{
+              .type = ProfileMenuAvatarButtonPromoInfo::Type::
+                  kBatchUploadBookmarksPromo,
+              .local_data_count = local_data_count});
+      return;
+    }
   }
-
   // History sync promo.
-  if (signin_util::ShouldShowHistorySyncOptinScreen(*profile)) {
+  if (signin_util::ShouldShowHistorySyncOptinScreen(*profile) ==
+          signin_util::ShouldShowHistorySyncOptinResult::kShow &&
+      !signin_util::HasExplicitlyDisabledHistorySync(
+          SyncServiceFactory::GetForProfile(profile),
+          IdentityManagerFactory::GetForProfile(profile))) {
     std::move(result_callback)
         .Run(ProfileMenuAvatarButtonPromoInfo{
             .type = ProfileMenuAvatarButtonPromoInfo::Type::kHistorySyncPromo,
@@ -604,7 +626,7 @@ SyncPromoIdentityPillManager::SyncPromoIdentityPillManager(
     int max_shown_count,
     int max_used_count)
     : identity_manager_(identity_manager),
-      signin_prefs_(CHECK_DEREF(pref_service)),
+      signin_prefs_(std::make_unique<SigninPrefs>(CHECK_DEREF(pref_service))),
       max_shown_count_(max_shown_count),
       max_used_count_(max_used_count) {
   CHECK(identity_manager_);
@@ -625,17 +647,19 @@ bool SyncPromoIdentityPillManager::ShouldShowPromo(
     return false;
   }
 
+  CHECK(signin_prefs_);
   int promo_shown_count = 0;
   int promo_used_count = 0;
   if (promo_type == ProfileMenuAvatarButtonPromoInfo::Type::kSyncPromo) {
     CHECK(switches::IsAvatarSyncPromoFeatureEnabled());
     promo_shown_count =
-        signin_prefs_.GetSyncPromoIdentityPillShownCount(account.gaia);
+        signin_prefs_->GetSyncPromoIdentityPillShownCount(account.gaia);
     promo_used_count =
-        signin_prefs_.GetSyncPromoIdentityPillUsedCount(account.gaia);
+        signin_prefs_->GetSyncPromoIdentityPillUsedCount(account.gaia);
   } else {
     base::DictValue& promo_counts =
-        signin_prefs_.GetOrCreateAvatarButtonPromoCountDictionary(account.gaia);
+        signin_prefs_->GetOrCreateAvatarButtonPromoCountDictionary(
+            account.gaia);
 
     promo_shown_count =
         promo_counts.FindInt(GetAvatarButtonPromoShownKey(promo_type))
@@ -658,14 +682,15 @@ void SyncPromoIdentityPillManager::RecordPromoShown(
     return;
   }
 
+  CHECK(signin_prefs_);
   if (promo_type == ProfileMenuAvatarButtonPromoInfo::Type::kSyncPromo) {
     CHECK(switches::IsAvatarSyncPromoFeatureEnabled());
-    signin_prefs_.IncrementSyncPromoIdentityPillShownCount(account.gaia);
+    signin_prefs_->IncrementSyncPromoIdentityPillShownCount(account.gaia);
     return;
   }
 
   base::DictValue& promo_counts =
-      signin_prefs_.GetOrCreateAvatarButtonPromoCountDictionary(account.gaia);
+      signin_prefs_->GetOrCreateAvatarButtonPromoCountDictionary(account.gaia);
   const char* shown_key = GetAvatarButtonPromoShownKey(promo_type);
   int new_conut = promo_counts.FindInt(shown_key).value_or(0) + 1;
   promo_counts.Set(shown_key, new_conut);
@@ -680,14 +705,15 @@ void SyncPromoIdentityPillManager::RecordPromoUsed(
     return;
   }
 
+  CHECK(signin_prefs_);
   if (promo_type == ProfileMenuAvatarButtonPromoInfo::Type::kSyncPromo) {
     CHECK(switches::IsAvatarSyncPromoFeatureEnabled());
-    signin_prefs_.IncrementSyncPromoIdentityPillUsedCount(account.gaia);
+    signin_prefs_->IncrementSyncPromoIdentityPillUsedCount(account.gaia);
     return;
   }
 
   base::DictValue& promo_counts =
-      signin_prefs_.GetOrCreateAvatarButtonPromoCountDictionary(account.gaia);
+      signin_prefs_->GetOrCreateAvatarButtonPromoCountDictionary(account.gaia);
   const char* used_key = GetAvatarButtonPromoUsedKey(promo_type);
   int new_conut = promo_counts.FindInt(used_key).value_or(0) + 1;
   promo_counts.Set(used_key, new_conut);
@@ -703,9 +729,19 @@ void SyncPromoIdentityPillManager::OnIdentityManagerShutdown(
   CHECK_EQ(identity_manager, identity_manager_.get());
   identity_manager_ = nullptr;
   identity_manager_scoped_observation_.Reset();
+
+  // `SyncPromoIdentityPillManager::OnIdentityManagerShutdown()` is called upon
+  // profile destruction, which aligns with the need to clear the prefs. Since
+  // currently there is reliable way to be notified by the pref service shutting
+  // down, we rely on this notification as well.
+  // The need to clear the prefs here is primarily for unit tests that combines
+  // `Browser` + `TestingProfile` (where the `PrefService` is owned by the
+  // profile itself).
+  signin_prefs_.reset();
 }
 
 AccountInfo SyncPromoIdentityPillManager::GetSignedInAccountInfo() const {
+  CHECK(identity_manager_);
   CHECK(identity_manager_->AreRefreshTokensLoaded());
   // Checks for accounts in error as well.
   if (signin_util::GetSignedInState(identity_manager_.get()) !=

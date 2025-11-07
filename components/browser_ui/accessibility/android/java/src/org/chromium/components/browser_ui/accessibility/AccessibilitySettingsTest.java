@@ -12,6 +12,7 @@ import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -73,7 +74,7 @@ import org.chromium.ui.widget.ChromeImageButton;
     ContentFeatureList.ACCESSIBILITY_PAGE_ZOOM_V2,
     ContentFeatureList.SMART_ZOOM
 })
-@Batch(Batch.UNIT_TESTS)
+@Batch(Batch.PER_CLASS)
 public class AccessibilitySettingsTest {
     private AccessibilitySettings mAccessibilitySettings;
 
@@ -100,6 +101,8 @@ public class AccessibilitySettingsTest {
         when(mDelegate.getBrowserContextHandle()).thenReturn(mContextHandleMock);
         when(mDelegate.getForceEnableZoomAccessibilityDelegate()).thenReturn(mBoolPrefMock);
         when(mDelegate.getReaderAccessibilityDelegate()).thenReturn(mBoolPrefMock);
+        when(mDelegate.getTouchpadOverscrollHistoryNavigationAccessibilityDelegate())
+                .thenReturn(mBoolPrefMock);
         when(mDelegate.getTextSizeContrastAccessibilityDelegate()).thenReturn(mIntegerPrefMock);
         when(mDelegate.getSiteSettingsNavigation()).thenReturn(mSettingsNavigationMock);
 
@@ -223,7 +226,8 @@ public class AccessibilitySettingsTest {
                                 hasDescendant(withText(R.string.zoom_info_preference_title))));
         onView(withText(R.string.zoom_info_preference_title)).perform(click());
 
-        verify(mSettingsNavigationMock).startSettings(any(Context.class), any(), any(Bundle.class));
+        verify(mSettingsNavigationMock)
+                .startSettings(any(Context.class), any(), any(Bundle.class), eq(true));
     }
 
     // Tests related to Page Zoom V2 feature (OS-level adjustment experiments).

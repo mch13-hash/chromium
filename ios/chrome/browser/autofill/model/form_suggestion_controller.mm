@@ -501,7 +501,7 @@ bool IsRequestDedupingAllowed() {
           fieldByFieldFillingTypeUsed:suggestion.fieldByFieldFillingTypeUsed
                        requiresReauth:suggestion.requiresReauth
            acceptanceA11yAnnouncement:suggestion.acceptanceA11yAnnouncement];
-      // TODO(crbug.com/353663764): Include `featureForIPH` in the
+      // TODO(crbug.com/452315148): Include `featureForIPH` in the
       // `FormSuggestion` constructor.
       suggestionCopy.featureForIPH = suggestion.featureForIPH;
       [suggestionsCopy addObject:suggestionCopy];
@@ -519,10 +519,10 @@ bool IsRequestDedupingAllowed() {
                       state:(const AutofillSuggestionState&)suggestionState {
   id<FormSuggestionProvider> provider = suggestion.provider ?: _provider;
 
-  // If a password related suggestion was selected, reset the password bottom
+  // If a password related suggestion was selected, reset the credential bottom
   // sheet dismiss count to 0.
   if (provider.type == SuggestionProviderTypePassword) {
-    [self resetPasswordBottomSheetDismissCount];
+    [self resetCredentialBottomSheetDismissCount];
   }
 
   // Send the suggestion to the provider. Upon completion advance the cursor
@@ -543,8 +543,8 @@ bool IsRequestDedupingAllowed() {
         }];
 }
 
-// Resets the password bottom sheet dismiss count to 0.
-- (void)resetPasswordBottomSheetDismissCount {
+// Resets the credential bottom sheet dismiss count to 0.
+- (void)resetCredentialBottomSheetDismissCount {
   ProfileIOS* profile =
       _webState ? ProfileIOS::FromBrowserState(_webState->GetBrowserState())
                 : nullptr;

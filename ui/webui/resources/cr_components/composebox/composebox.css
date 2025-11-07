@@ -10,10 +10,12 @@
  * #css_wrapper_metadata_end */
 
 :host {
+  --cr-icon-button-size: 36px;
   --input-bottom-spacing: 10px;
   --text-input-top-spacing: 10px;
   --text-input-inline-end-spacing: 80px;
   --text-input-inline-start-spacing: 16px;
+  --text-input-max-height: 190px;
   --expanded-border-radius: 26px;
   --brand-gradient: conic-gradient(
     rgba(52, 168, 82, 0) 0deg,
@@ -81,6 +83,26 @@
 
   --glif-rotation-duration: 1000ms;
 
+  --icon-entry-transition: opacity var(--expand-ease-out-duration) linear 800ms;
+  --icon-exit-transition: opacity var(--collapse-ease-in-duration)
+    var(--emphasized-accelerate);
+
+  --height-expand-duration: 600ms;
+  --submit-enabled-transition: opacity 255ms;
+
+  --border-radius-transition: border-radius var(--collapse-duration)
+    var(--emphasized-curve);
+
+  --lens-icon-animation-duration: 1100ms;
+
+  border-radius: 30px;
+  box-shadow: var(--cr-searchbox-shadow);
+  font-size: var(--cr-composebox-font-size, 18px);
+  transition: var(--border-radius-transition);
+  width: var(--cr-composebox-width, 337px);
+}
+
+:host(:not([ntp-realbox-next-enabled])) {
   --expand-ease-in-duration: 400ms;
   --expand-delay: 300ms;
   --expand-ease-out-duration: 300ms;
@@ -93,22 +115,18 @@
   --collapse-duration: calc(
     var(--collapse-ease-in-duration) + var(--collapse-ease-out-duration)
   );
+}
 
-  --icon-entry-transition: opacity var(--expand-ease-out-duration) linear 800ms;
-  --icon-exit-transition: opacity var(--collapse-ease-in-duration)
-    var(--emphasized-accelerate);
+:host([ntp-realbox-next-enabled]) {
+  --cr-composebox-font-size: 16px;
+  --contextual-entrypoint-and-carousel-context-menu-container-padding-inline-start: 0px;
+  --input-bottom-spacing: 12px;
+  --text-input-inline-start-spacing: 18px;
+}
 
-  --height-expand-duration: 600ms;
-  --submit-enabled-transition: opacity 255ms;
-
-  --border-radius-transition: border-radius var(--collapse-duration)
-    var(--emphasized-curve);
-
-  border-radius: 30px;
-  box-shadow: var(--cr-searchbox-shadow);
-  font-size: var(--cr-composebox-font-size, 18px);
-  transition: var(--border-radius-transition);
-  width: var(--ntp-composebox-width, 337px);
+:host([ntp-realbox-next-enabled]) #input::placeholder {
+  font-size: 18px;
+  font-weight: 400;
 }
 
 :host([expanded_]) {
@@ -121,9 +139,46 @@
 
 #composebox {
   display: flex;
+  flex-direction: column;
   pointer-events: auto;
   position: relative;
   overflow: hidden;
+}
+
+:host([is-dragging-file_])::before {
+  /*  TODO(crbug.com/454730356): change color and add border */
+  background: linear-gradient(
+    90deg,
+    rgba(255, 240, 230, 0.8),
+    rgba(230, 240, 255, 0.8)
+  ), white;
+  border-radius: var(--expanded-border-radius);
+  content: '';
+  inset: 0;
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+:host([is-dragging-file_]) #composebox * {
+  pointer-events: none;
+}
+
+#dragDropPlaceholder {
+  display: none;
+  position: absolute;
+  top: 21px;
+  left: 20px;
+  pointer-events: none;
+}
+
+:host([searchbox-layout-mode='Compact']) #dragDropPlaceholder {
+  top: 16px;
+}
+
+:host([is-dragging-file_]) #dragDropPlaceholder {
+  display: block;
+  z-index: 3;
 }
 
 :host([is-collapsible]) #composebox {
@@ -151,6 +206,10 @@
 :host([is-collapsible][expanded_]) #composebox {
   min-height: 136px;
   max-height: 254px;
+}
+
+:host([is-collapsible][expanded_][show-file-carousel_][carousel-on-top_]) #composebox {
+  min-height: calc(136px + 52px);
 }
 
 #inputContainer {
@@ -182,9 +241,16 @@
   -webkit-mask-position: center;
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-size: cover;
-  background-color: var(--color-new-tab-page-composebox-input-icon);
-  height: 24px;
-  width: 24px;
+  background-color: var(--color-composebox-input-icon);
+  height: 20px;
+  width: 20px;
+}
+
+@media (forced-colors: active) {
+  #aimIcon {
+    background-color: Highlight;
+    border-radius: 4px;
+  }
 }
 
 #inputWrapper {
@@ -199,11 +265,20 @@
   font-size: inherit;
   line-height: 24px;
   min-height: 48px;
-  max-height: 190px;
+  max-height: var(--text-input-max-height);
   padding-block: var(--text-input-top-spacing) 0;
   padding-inline: 12px var(--text-input-inline-end-spacing);
   scrollbar-width: none;
   width: 100%;
+}
+
+#composebox.is-dragging-file #input {
+  position: relative;
+  z-index: 3;
+}
+
+:host(:not[ntp-realbox-next-enabled]) #input {
+  transition: padding var(--height-expand-duration) var(--standard-curve);
 }
 
 #input {
@@ -211,18 +286,17 @@
   background-color: inherit;
   border: none;
   caret-color: var(--google-blue-500);
-  color: var(--color-new-tab-page-composebox-font-light);
+  color: var(--color-composebox-font-light);
   field-sizing: content;
   mask-image: linear-gradient(transparent 7px, black calc(var(--text-input-top-spacing) + 7px));
-  height: calc-size(fit-content, min(size + 4px, 190px));
+  height: calc-size(fit-content, min(size + 4px, var(--text-input-max-height)));
   outline: none;
   position: relative;
   resize: none;
-  transition: padding var(--height-expand-duration) var(--standard-curve);
 }
 
 #input::placeholder {
-  color: var(--color-new-tab-page-composebox-type-ahead);
+  color: var(--color-composebox-type-ahead);
 }
 
 #smartCompose {
@@ -243,16 +317,16 @@
 }
 
 #ghostText {
-  color: var(--color-new-tab-page-composebox-type-ahead);
+  color: var(--color-composebox-type-ahead);
   white-space: pre-wrap;
 }
 
 #tabChip {
   align-items: center;
-  border: 1px solid var(--color-new-tab-page-composebox-type-ahead-chip);
+  border: 1px solid var(--color-composebox-type-ahead-chip);
   border-radius: 8px;
   box-sizing: border-box;
-  color: var(--color-new-tab-page-composebox-type-ahead-chip);
+  color: var(--color-composebox-type-ahead-chip);
   font-size: 12px;
   font-weight: 700;
   line-height: 28px;
@@ -283,7 +357,7 @@
   display: none;
 }
 
-:host([expanded_][show-dropdown_]) ntp-composebox-dropdown {
+:host([expanded_][show-dropdown_]) cr-composebox-dropdown {
   padding-bottom: 8px;
 }
 
@@ -293,7 +367,7 @@
   --cr-icon-button-hover-background-color:
       var(--color-searchbox-results-background-hovered);
   --cr-icon-button-margin-end: 0;
-  --cr-icon-button-size: 40px;
+  --cr-icon-button-size: 36px;
   position: absolute;
   right: 16px;
 }
@@ -305,13 +379,18 @@
 
 #cancelIcon {
   --cr-icon-button-fill-color:
-      var(--color-new-tab-page-composebox-cancel-button-light);
+      var(--color-composebox-cancel-button-light);
   /* SVG is size 20 with 5px of padding so actual size is 10px */
   --cr-icon-button-icon-size: 20px;
   position: absolute;
-  top: 8px;
+  top: 12px;
+  inset-inline-end: 12px;
   /* Uses the same transitions as the submit button so they are in sync. */
   transition: var(--submit-enabled-transition);
+}
+
+:host([searchbox-layout-mode="Compact"]) #cancelIcon {
+  top: 10px;
 }
 
 :host([expanded_][is-collapsible]) #cancelIcon {
@@ -324,14 +403,25 @@
   pointer-events: none;
 }
 
+@keyframes fade-out-in {
+  0% {
+    opacity: 0;
+  }
+
+  73% {
+    opacity: 0;
+  }
+}
+
 #lensIcon {
   --cr-icon-button-icon-size: 20px;
   --cr-icon-image: url(//resources/cr_components/searchbox/icons/camera.svg);
   bottom: var(--input-bottom-spacing);
   display: none;
-  pointer-events: auto;
+  opacity: 1;
   position: absolute;
-  right: 68px;
+  inset-inline-end: 16px;
+  top: 6px;
 }
 
 #lensIcon:focus-visible:focus {
@@ -340,22 +430,56 @@
   outline-offset: 2px;
 }
 
-:host-context([dir='rtl']) #lensIcon {
-  left: 68px;
-  right: unset;
+:host([expanded_]) #lensIcon {
+  animation: fade-out-in var(--lens-icon-animation-duration) linear;
+  inset-inline-end: 68px;
+  top: auto;
+}
+
+:host([lens-button-disabled_]) #lensIcon {
+  opacity: 0.3;
+}
+
+:host(:not([show-submit_])) #submitContainer,
+:host([ntp-realbox-next-enabled]) #submitContainer,
+:host([show-submit_]:not([submit-enabled_])) #submitContainer{
+  display: none;
 }
 
 #submitContainer {
-  display: none;
+  border-radius: 50%;
+  cursor: default; /* For Lens side panel. */
+  height: var(--cr-icon-button-size);
+  bottom: var(--input-bottom-spacing);
+  position: absolute;
+  inset-inline-end: 12px;
+  width: var(--cr-icon-button-size);
+}
+
+:host([show-submit_][submit-enabled_]:not([ntp-realbox-next-enabled])) #submitContainer {
+  cursor: pointer;
+}
+
+#submitOverlay {
+  border-radius: inherit;
+  display: inherit;
+  height: var(--cr-icon-button-size);
+  position: absolute;
+  width: var(--cr-icon-button-size);
+  z-index: 1;
+}
+
+:host([show-submit_][submit-enabled_]:not([ntp-realbox-next-enabled])) #submitContainer:hover #submitOverlay {
+  background-color: var(--color-searchbox-results-background-hovered);
 }
 
 #submitIcon {
   --cr-icon-button-fill-color: white;
   --cr-icon-button-icon-size: 16px;
-  background-color: var(--color-new-tab-page-composebox-submit-button);
-  bottom: var(--input-bottom-spacing);
-  cursor: default;
-  opacity: 30%;
+  background-color: var(--color-composebox-submit-button);
+  bottom: 0;
+  opacity: 30%; /* For Lens side panel. */
+  inset-inline-end: 0;
   transition: var(--submit-enabled-transition);
 }
 
@@ -365,9 +489,9 @@
   outline-offset: 2px;
 }
 
-:host([submit-enabled_]) #submitIcon {
-  cursor: pointer;
-  opacity: 100%;
+:host([show-submit_][submit-enabled_]:not([ntp-realbox-next-enabled])) #submitIcon {
+  display: block;
+  opacity: 100%; /* For Lens side panel. */
 }
 
 /* Controls the opacity of the icons when the composebox is expanded/collapsed. */
@@ -384,7 +508,7 @@
 @media (forced-colors: active) {
   :host,
   .action-icon {
-    border: solid var(--color-new-tab-page-composebox-outline-hcm);
+    border: solid var(--color-composebox-outline-hcm);
   }
 }
 
@@ -421,8 +545,8 @@
   top: 50%;
   translate: -50% -50%;
   opacity: 0;
-  /* The gradient is 120% wide to ensure it fills passed the entire container. */
-  width: 120%;
+  /* The gradient is 135% wide to ensure it fills passed the entire container. */
+  width: 135%;
 }
 
 :host([expanded_]) .gradient:before {
@@ -499,7 +623,7 @@
 }
 
 .background:before {
-  background: var(--ntp-composebox-background-color);
+  background: var(--cr-composebox-background-color);
   border-radius: inherit;
   content: '';
   contain: paint;
@@ -531,10 +655,10 @@
 
 @keyframes color-pulse-on-expand {
     40% {
-        background: var(--color-new-tab-page-composebox-scrim-background);
+        background: var(--color-composebox-scrim-background);
     }
     58% {
-        background: var(--color-new-tab-page-composebox-scrim-background);
+        background: var(--color-composebox-scrim-background);
     }
 }
 
@@ -557,7 +681,7 @@
 }
 
 #suggestionActivity {
-  color: var(--color-new-tab-page-composebox-suggestion-activity);
+  color: var(--color-composebox-suggestion-activity);
   font-size: 12px;
   font-weight: 400;
   left: 50%;
@@ -567,12 +691,102 @@
   transform: translate(-50%);
 }
 
+:host([expanded_][show-file-carousel_][carousel-on-top_]) #inputContainer {
+  padding-top: 60px;
+  --text-input-max-height: 130px;
+}
+
 .carousel-divider {
   border-radius: 100px;
   border-top: 1px solid
-    var(--color-new-tab-page-composebox-file-carousel-divider);
+    var(--color-composebox-file-carousel-divider);
   margin-inline-end: 16px;
   margin-inline-start: var(--text-input-inline-start-spacing);
   margin-top: 8px;
   margin-bottom: 10px;
+}
+
+:host([ntp-realbox-next-enabled]) contextual-entrypoint-and-carousel::part(context-menu-entrypoint-icon) {
+  --cr-icon-button-icon-size: 24px;
+  --cr-icon-button-size: 36px;
+}
+
+:host([ntp-realbox-next-enabled][searchbox-layout-mode^="Tall"][show-dropdown_]) {
+  --expanded-border-radius: 24px;
+}
+
+:host([ntp-realbox-next-enabled][searchbox-layout-mode="Compact"]) {
+  --expanded-border-radius: 30px;
+  --input-bottom-spacing: 10px;
+}
+
+:host([ntp-realbox-next-enabled][searchbox-layout-mode="Compact"]) #iconContainer {
+  display: none;
+}
+
+:host([ntp-realbox-next-enabled][searchbox-layout-mode="Compact"]) #textContainer {
+  --text-input-inline-start-spacing: 40px;
+  padding-block: 6px 0;
+}
+
+:host([ntp-realbox-next-enabled]) #input,
+:host([ntp-realbox-next-enabled]) #smartCompose {
+  --text-input-top-spacing: 10px;
+}
+
+:host([ntp-realbox-next-enabled]) #iconContainer {
+  height: 44px;
+}
+
+:host([ntp-realbox-next-enabled][searchbox-layout-mode="Compact"]) #context {
+  margin-top: -48px;
+}
+
+:host([expanded_][show-dropdown_][ntp-realbox-next-enabled][searchbox-layout-mode="Compact"]) cr-composebox-dropdown {
+  padding-bottom: 0;
+  padding-top: 8px;
+}
+
+:host-context([searchbox-layout-mode='TallTopContext']) contextual-entrypoint-and-carousel::part(carousel-divider) {
+  margin-top: 10px;
+}
+
+contextual-entrypoint-and-carousel::part(voice-icon) {
+  --cr-icon-button-fill-color: var(--color-composebox-font-light);
+  --cr-icon-button-hover-background-color: var(--color-composebox-context-entrypoint-hover-background);
+  --cr-icon-button-margin-end: 0px;
+  --cr-icon-button-margin-start: 0px;
+  --cr-icon-button-size: 36px;
+}
+
+:host(:not([ntp-realbox-next-enabled])) contextual-entrypoint-and-carousel::part(voice-icon),
+:host([realbox-layout-mode='TallBottomContext']) contextual-entrypoint-and-carousel::part(voice-icon) {
+  bottom: 10px;
+  inset-inline-end: 14px;
+  position: absolute;
+}
+
+:host([show-submit_][submit-enabled_]:not([ntp-realbox-next-enabled])) contextual-entrypoint-and-carousel::part(voice-icon) {
+  inset-inline-end: calc(var(--cr-icon-button-size) + 18px);
+}
+
+:host([realbox-layout-mode='TallTopContext']) contextual-entrypoint-and-carousel::part(voice-icon) {
+  margin-inline-end: 14px;
+  margin-inline-start: auto;
+  position: static;
+}
+
+:host([searchbox-layout-mode='Compact']) contextual-entrypoint-and-carousel::part(voice-icon) {
+  margin-inline-end: calc(var(--cr-icon-button-size) + 12px);
+  margin-inline-start: auto;
+  z-index: 100;
+}
+
+:host([ntp-realbox-next-enabled]) contextual-entrypoint-and-carousel::part(context-menu-entrypoint-icon) {
+  --cr-icon-button-icon-size: 24px;
+  --cr-icon-button-margin-start: 2px;
+}
+
+:host([searchbox-layout-mode='Compact']) contextual-entrypoint-and-carousel::part(cr-composebox-file-carousel) {
+  margin-top: 14px;
 }

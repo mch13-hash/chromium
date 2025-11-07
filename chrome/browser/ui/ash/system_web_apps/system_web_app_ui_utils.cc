@@ -343,15 +343,27 @@ BrowserDelegate* FindSystemWebAppBrowser(Profile* profile,
       user->GetAccountId(), app_id.value(), browser_type);
 }
 
+int CountSystemWebAppBrowsers(Profile* profile, SystemWebAppType app_type) {
+  auto* const provider = SystemWebAppManager::GetWebAppProvider(profile);
+  const std::optional<webapps::AppId> app_id =
+      GetAppIdForSystemWebApp(profile, app_type);
+  return provider && app_id.has_value()
+             ? provider->ui_manager().GetNumWindowsForApp(app_id.value())
+             : 0;
+}
+
 bool IsSystemWebApp(Browser* browser) {
   DCHECK(browser);
   return browser->app_controller() && browser->app_controller()->system_app();
 }
 
-bool IsBrowserForSystemWebApp(Browser* browser, SystemWebAppType type) {
+bool IsBrowserForSystemWebApp(BrowserWindowInterface* browser,
+                              SystemWebAppType type) {
   DCHECK(browser);
-  return browser->app_controller() && browser->app_controller()->system_app() &&
-         browser->app_controller()->system_app()->GetType() == type;
+  web_app::AppBrowserController* const app_controller =
+      web_app::AppBrowserController::From(browser);
+  return app_controller && app_controller->system_app() &&
+         app_controller->system_app()->GetType() == type;
 }
 
 std::optional<SystemWebAppType> GetCapturingSystemAppForURL(Profile* profile,

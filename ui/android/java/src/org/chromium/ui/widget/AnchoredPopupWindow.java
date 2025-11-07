@@ -243,6 +243,8 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
 
     private @StyleRes int mAnimationStyleId;
     private boolean mAnimateFromAnchor;
+    private boolean mDismissOnScreenSizeChange;
+    private @Nullable WindowBoundsChangeDetector mWindowBoundsChangeDetector;
 
     /** A builder for {@link AnchoredPopupWindow} instances. */
     public static class Builder {
@@ -270,6 +272,7 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         private int mPreferredHorizontalOrientation = HorizontalOrientation.MAX_AVAILABLE_SPACE;
 
         private boolean mDismissOnTouchInteraction;
+        private boolean mDismissOnScreenSizeChange;
         private boolean mVerticalOverlapAnchor;
         private boolean mHorizontalOverlapAnchor;
         private boolean mUpdateOrientationOnChange;
@@ -282,6 +285,8 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         private boolean mTouchModal;
         private boolean mOutsideTouchable;
         private boolean mIsOutsideTouchableSet;
+        private int mWindowLayoutType;
+        private boolean mIsWindowLayoutTypeSet;
 
         /**
          * Constructs an {@link AnchoredPopupWindow} instance.
@@ -417,6 +422,14 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         }
 
         /**
+         * @param dismiss Whether or not to dismiss this popup when the screen size changes.
+         */
+        public Builder setDismissOnScreenSizeChange(boolean dismiss) {
+            mDismissOnScreenSizeChange = dismiss;
+            return this;
+        }
+
+        /**
          * @param overlap Whether the popup should vertically overlap the anchor.
          */
         public Builder setVerticalOverlapAnchor(boolean overlap) {
@@ -507,6 +520,15 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         }
 
         /**
+         * @param layoutType The window layout type of the window.
+         */
+        public Builder setWindowLayoutType(int layoutType) {
+            mWindowLayoutType = layoutType;
+            mIsWindowLayoutTypeSet = true;
+            return this;
+        }
+
+        /**
          * @return A new {@link AnchoredPopupWindow}.
          */
         public AnchoredPopupWindow build() {
@@ -538,6 +560,7 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         setPreferredVerticalOrientation(builder.mPreferredVerticalOrientation);
         setPreferredHorizontalOrientation(builder.mPreferredHorizontalOrientation);
         setDismissOnTouchInteraction(builder.mDismissOnTouchInteraction);
+        setDismissOnScreenSizeChange(builder.mDismissOnScreenSizeChange);
         setVerticalOverlapAnchor(builder.mVerticalOverlapAnchor);
         setHorizontalOverlapAnchor(builder.mHorizontalOverlapAnchor);
         setUpdateOrientationOnChange(builder.mUpdateOrientationOnChange);
@@ -552,6 +575,9 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         setTouchModal(builder.mTouchModal);
         if (builder.mIsOutsideTouchableSet) {
             setOutsideTouchable(builder.mOutsideTouchable);
+        }
+        if (builder.mIsWindowLayoutTypeSet) {
+            setWindowLayoutType(builder.mWindowLayoutType);
         }
     }
 
@@ -665,6 +691,10 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
     public void show() {
         if (mPopupWindow.isShowing()) return;
 
+        if (mDismissOnScreenSizeChange) {
+            mWindowBoundsChangeDetector = new WindowBoundsChangeDetector(mRootView, this::dismiss);
+        }
+
         mRectProvider.startObserving(this);
         mViewportRectProvider.startObserving(this);
 
@@ -678,6 +708,10 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
      * @see PopupWindow#dismiss()
      */
     public void dismiss() {
+        if (mWindowBoundsChangeDetector != null) {
+            mWindowBoundsChangeDetector.detach();
+            mWindowBoundsChangeDetector = null;
+        }
         mPopupWindow.dismiss();
     }
 
@@ -744,6 +778,15 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
     }
 
     /**
+     * @param dismiss Whether or not to dismiss this popup when the screen size changes.
+     * @deprecated Use the {@link Builder} to set this value during construction.
+     */
+    @Deprecated
+    public void setDismissOnScreenSizeChange(boolean dismiss) {
+        mDismissOnScreenSizeChange = dismiss;
+    }
+
+    /**
      * If set to true, popup will be notified when an outside touch happens. It is not the
      * equivalent of closing the popup on all touch events. The user can still interact with the
      * popup by sending inside touch events. If set to false, the popup won't be notified about the
@@ -756,6 +799,17 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
     @Deprecated
     public void setOutsideTouchable(boolean touchable) {
         mPopupWindow.setOutsideTouchable(touchable);
+    }
+
+    /**
+     * Sets the layout type of this window.
+     *
+     * @param layoutType The layout type of the window.
+     * @deprecated Use the {@link Builder} to set this value during construction.
+     */
+    @Deprecated
+    private void setWindowLayoutType(int layoutType) {
+        mPopupWindow.setWindowLayoutType(layoutType);
     }
 
     /**
@@ -1108,13 +1162,22 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
     }
 
     /**
+     * Gets the content view of the {@link PopupWindow}.
+     *
+     * @return The content view.
+     */
+    public @Nullable View getContentView() {
+        return mContentView;
+    }
+
+    /**
      * Checks if the popup spec meets the minimal size requirements.
      *
      * <p>By default, this method ensures that the size is sufficient for users to see what they are
      * tapping. Popups can be very narrow (e.g. in landscape) and still be interactive. Use {@link
      * #setRequireTouchableSize(boolean)} to disable this check.
      *
-     * @return True iff the popup is large enough to be safely shown to users.
+     * @return True if the popup is large enough to be safely shown to users.
      */
     private boolean hasMinimalSize() {
         if (mAllowNonTouchableSize) {

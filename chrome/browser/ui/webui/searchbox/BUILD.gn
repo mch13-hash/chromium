@@ -6,6 +6,8 @@ assert(is_win || is_mac || is_linux || is_chromeos)
 
 source_set("searchbox") {
   sources = [
+    "contextual_search_type_converters.cc",
+    "contextual_search_type_converters.h",
     "contextual_searchbox_handler.cc",
     "contextual_searchbox_handler.h",
     "lens_searchbox_client.h",
@@ -58,13 +60,13 @@ source_set("searchbox") {
     "//chrome/browser/ui/views/location_bar",
     "//chrome/browser/ui/webui:webui_util",
     "//components/bookmarks/browser",
+    "//components/contextual_search:public",
     "//components/lens",
     "//components/navigation_metrics",
     "//components/omnibox/browser",
     "//components/omnibox/browser:location_bar",
     "//components/omnibox/browser:vector_icons",
     "//components/omnibox/common",
-    "//components/omnibox/composebox",
     "//components/prefs",
     "//components/profile_metrics",
     "//components/search",
@@ -80,6 +82,9 @@ source_set("searchbox") {
     "//ui/base",
     "//ui/webui/resources/cr_components/composebox:mojo_bindings",
   ]
+  if (!is_android) {
+    deps += [ "//chrome/browser/contextual_tasks" ]
+  }
 }
 
 source_set("searchbox_test_utils") {
@@ -92,6 +97,7 @@ source_set("searchbox_test_utils") {
     ":searchbox",
     "//base",
     "//chrome/browser/ui/omnibox:test_support",
+    "//components/lens",
     "//components/omnibox/browser",
     "//components/omnibox/browser:test_support",
     "//mojo/public/cpp/bindings",
@@ -99,6 +105,7 @@ source_set("searchbox_test_utils") {
     "//testing/gtest",
   ]
   deps = [
+    "//chrome/browser/ui/omnibox",
     "//components/omnibox/browser:vector_icons",
     "//components/search",
   ]
@@ -107,14 +114,14 @@ source_set("searchbox_test_utils") {
 source_set("browser_tests") {
   testonly = true
   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
-  sources = [ "searchbox_handler_browsertest.cc" ]
+  sources = [ "contextual_searchbox_handler_browsertest.cc" ]
   deps = [
     ":searchbox",
     ":searchbox_test_utils",
     "//chrome/browser/ui",
-    "//components/lens:lens",
     "//chrome/browser/ui/omnibox",
     "//chrome/test:test_support_ui",
+    "//components/lens",
     "//mojo/public/cpp/bindings",
     "//testing/gmock",
     "//ui/display",

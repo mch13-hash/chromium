@@ -103,7 +103,8 @@ struct PdfResult {
 struct ScreenshotResult {
   explicit ScreenshotResult(gfx::Size dimensions);
   ~ScreenshotResult();
-  std::vector<uint8_t> jpeg_data;
+  std::vector<uint8_t> screenshot_data;
+  std::string mime_type;
   gfx::Size dimensions;
   base::TimeTicks end_time;
 };
@@ -159,12 +160,11 @@ extern const base::FeatureParam<int> kMaxScreenshotWidthParam;
 
 extern const base::FeatureParam<int> kMaxScreenshotHeightParam;
 
-extern const base::FeatureParam<int> kScreenshotJpegQuality;
+extern const base::FeatureParam<int> kScreenshotQuality;
+
+extern const base::FeatureParam<std::string> kScreenshotImageType;
 
 extern const base::FeatureParam<base::TimeDelta> kScreenshotTimeout;
-
-// Enables page context eligibility checks.
-BASE_DECLARE_FEATURE(kGlicPageContextEligibility);
 
 // Callback used for relaying progress.
 class FetchPageProgressListener {

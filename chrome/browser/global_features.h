@@ -12,6 +12,10 @@
 #include "build/build_config.h"
 #include "chrome/common/buildflags.h"
 
+namespace default_browser {
+class DefaultBrowserManager;
+}
+
 namespace system_permission_settings {
 class PlatformHandle;
 }  // namespace system_permission_settings
@@ -37,6 +41,10 @@ class InstallerDownloaderController;
 namespace optimization_guide {
 class OptimizationGuideGlobalFeature;
 }  // namespace optimization_guide
+
+namespace safe_browsing {
+class ApplicationAdvancedProtectionStatusDetector;
+}  // namespace safe_browsing
 
 // This class owns the core controllers for features that are globally
 // scoped on desktop and Android. It can be subclassed by tests to perform
@@ -71,6 +79,10 @@ class GlobalFeatures {
   whats_new::WhatsNewRegistry* whats_new_registry() {
     return whats_new_registry_.get();
   }
+
+  default_browser::DefaultBrowserManager* default_browser_manager() {
+    return default_browser_manager_.get();
+  }
 #endif
 
 #if BUILDFLAG(ENABLE_GLIC)
@@ -103,6 +115,11 @@ class GlobalFeatures {
     return optimization_guide_global_feature_.get();
   }
 
+  safe_browsing::ApplicationAdvancedProtectionStatusDetector*
+  application_advanced_protection_status_detector() {
+    return application_advanced_protection_status_detector_.get();
+  }
+
  protected:
   GlobalFeatures();
 
@@ -124,6 +141,9 @@ class GlobalFeatures {
       system_permissions_platform_handle_;
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
   std::unique_ptr<whats_new::WhatsNewRegistry> whats_new_registry_;
+
+  std::unique_ptr<default_browser::DefaultBrowserManager>
+      default_browser_manager_;
 #endif
 
 #if BUILDFLAG(ENABLE_GLIC)
@@ -142,6 +162,9 @@ class GlobalFeatures {
 
   std::unique_ptr<optimization_guide::OptimizationGuideGlobalFeature>
       optimization_guide_global_feature_;
+
+  std::unique_ptr<safe_browsing::ApplicationAdvancedProtectionStatusDetector>
+      application_advanced_protection_status_detector_;
 };
 
 #endif  // CHROME_BROWSER_GLOBAL_FEATURES_H_

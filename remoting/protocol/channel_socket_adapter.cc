@@ -28,8 +28,6 @@ TransportChannelSocketAdapter::TransportChannelSocketAdapter(
       this, [this](webrtc::PacketTransportInternal* transport) {
         OnWritableState(transport);
       });
-  channel_->SignalDestroyed.connect(
-      this, &TransportChannelSocketAdapter::OnChannelDestroyed);
 }
 
 TransportChannelSocketAdapter::~TransportChannelSocketAdapter() {
@@ -119,7 +117,6 @@ void TransportChannelSocketAdapter::Close(int error_code) {
   DCHECK(error_code != net::OK);
   closed_error_code_ = error_code;
   channel_->DeregisterReceivedPacketCallback(this);
-  channel_->SignalDestroyed.disconnect(this);
   channel_ = nullptr;
 
   if (!read_callback_.is_null()) {
@@ -185,13 +182,6 @@ void TransportChannelSocketAdapter::OnWritableState(
       callback.Run(result);
     }
   }
-}
-
-void TransportChannelSocketAdapter::OnChannelDestroyed(
-    webrtc::IceTransportInternal* channel) {
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK_EQ(channel, channel_);
-  Close(net::ERR_CONNECTION_ABORTED);
 }
 
 }  // namespace remoting::protocol

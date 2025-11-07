@@ -9,6 +9,7 @@ import {PageCallbackRouter, PageHandlerFactory, PageHandlerRemote} from './compo
 
 export function createAutocompleteMatch(): AutocompleteMatch {
   return {
+    isHidden: false,
     a11yLabel: '',
     actions: [],
     allowedToBeDefaultMatch: false,
@@ -35,6 +36,7 @@ export function createAutocompleteMatch(): AutocompleteMatch {
     isWeatherAnswerSuggestion: null,
     answer: null,
     tailSuggestCommonPrefix: null,
+    hasInstantKeyword: false,
     keywordChipHint: '',
     keywordChipA11y: '',
   };

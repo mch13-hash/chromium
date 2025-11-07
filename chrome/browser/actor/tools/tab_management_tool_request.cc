@@ -36,8 +36,8 @@ void CreateTabToolRequest::Apply(ToolRequestVisitorFunctor& f) const {
   f.Apply(*this);
 }
 
-std::string CreateTabToolRequest::JournalEvent() const {
-  return "CreateTab";
+std::string_view CreateTabToolRequest::Name() const {
+  return kName;
 }
 
 ActivateTabToolRequest::ActivateTabToolRequest(tabs::TabHandle tab_handle)
@@ -64,8 +64,8 @@ void ActivateTabToolRequest::Apply(ToolRequestVisitorFunctor& f) const {
   f.Apply(*this);
 }
 
-std::string ActivateTabToolRequest::JournalEvent() const {
-  return "ActivateTab";
+std::string_view ActivateTabToolRequest::Name() const {
+  return kName;
 }
 
 CloseTabToolRequest::CloseTabToolRequest(tabs::TabHandle tab_handle)
@@ -92,8 +92,8 @@ void CloseTabToolRequest::Apply(ToolRequestVisitorFunctor& f) const {
   f.Apply(*this);
 }
 
-std::string CloseTabToolRequest::JournalEvent() const {
-  return "CloseTab";
+std::string_view CloseTabToolRequest::Name() const {
+  return kName;
 }
 
 }  // namespace actor

@@ -78,6 +78,9 @@ class TabListContainerProperties {
     public static final PropertyModel.WritableBooleanPropertyKey SUPPRESS_ACCESSIBILITY =
             new PropertyModel.WritableBooleanPropertyKey();
 
+    public static final PropertyModel.WritableBooleanPropertyKey IS_TABLET_OR_LANDSCAPE =
+            new PropertyModel.WritableBooleanPropertyKey();
+
     /** Keys for {@link TabSwitcherPaneCoordinator}. */
     public static final PropertyKey[] ALL_KEYS =
             new PropertyKey[] {
@@ -94,5 +97,6 @@ class TabListContainerProperties {
                 IS_CONTENT_SENSITIVE,
                 PAGE_KEY_LISTENER,
                 SUPPRESS_ACCESSIBILITY,
+                IS_TABLET_OR_LANDSCAPE,
             };
 }

@@ -224,7 +224,8 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       std::unique_ptr<PrefetchRequestStatusListener> request_status_listener,
       base::TimeDelta ttl,
       bool should_append_variations_header,
-      bool should_disable_block_until_head_timeout);
+      bool should_disable_block_until_head_timeout,
+      bool should_bypass_http_cache);
 
   // Updates the "Accept Language" header that the prefetch service delegate
   // will use.
@@ -509,7 +510,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
 #if BUILDFLAG(IS_ANDROID)
   // Returns extra request headers to be set when navigation happens for `url`.
   // This function is designed for the headers provided by WebView.loadUrl().
-  virtual net::HttpRequestHeaders GetExtraHeadersForUrl(const GURL& url);
+  virtual std::string GetExtraHeadersForUrl(const GURL& url);
 #endif  // BUILDFLAG(IS_ANDROID)
 
  private:

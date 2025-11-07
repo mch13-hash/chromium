@@ -1038,6 +1038,11 @@ bool Internals::isCompositedAnimation(Animation* animation) {
   return animation->HasActiveAnimationsOnCompositor();
 }
 
+bool Internals::isMainThreadAnimation(Animation* animation) {
+  return !(animation->HasActiveAnimationsOnCompositor() ||
+           animation->AnimationHasNoEffect());
+}
+
 void Internals::disableCompositedAnimation(Animation* animation) {
   animation->DisableCompositedAnimationForTesting();
 }
@@ -3556,7 +3561,7 @@ void Internals::forceLoseCanvasContext(CanvasRenderingContext* context) {
 
 void Internals::disableCanvasAccelerationForCanvas2D(
     HTMLCanvasElement* canvas) {
-  canvas->DisableAccelerationForCanvas2D();
+  canvas->RenderingContext()->DisableAccelerationForCanvas2D();
 }
 
 bool Internals::isCanvasImageSourceAccelerated(

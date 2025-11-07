@@ -312,6 +312,14 @@ bool FormFieldData::IsSelectElement() const {
   return form_control_type() == FormControlType::kSelectOne;
 }
 
+bool FormFieldData::IsFocusable() const {
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillSupportPresentationRole)) {
+    return is_focusable();
+  }
+  return is_focusable() && role() != RoleAttribute::kPresentation;
+}
+
 // static
 bool FormFieldData::DeepEqual(const FormFieldData& a, const FormFieldData& b) {
   auto equality_tuple = [](const FormFieldData& f) {
@@ -594,19 +602,26 @@ std::ostream& PrintWithIndentation(std::ostream& os,
   PRINT_PROPERTY(global_id);
   PRINT_PROPERTY(label);
   PRINT_PROPERTY(origin);
+  PRINT_PROPERTY(host_form_id);
+  PRINT_PROPERTY(host_form_signature);
   PRINT_PROPERTY(name);
   PRINT_PROPERTY(id_attribute);
   PRINT_PROPERTY(name_attribute);
   PRINT_PROPERTY(value);
+  PRINT_PROPERTY(selected_text);
   PRINT_PROPERTY(form_control_type);
   PRINT_PROPERTY(autocomplete_attribute);
   PRINT_PROPERTY(parsed_autocomplete);
+  PRINT_PROPERTY(pattern);
+  PRINT_PROPERTY(aria_label);
+  PRINT_PROPERTY(aria_description);
+  PRINT_PROPERTY(nonce);
   PRINT_PROPERTY(placeholder);
   PRINT_PROPERTY(max_length);
   PRINT_PROPERTY(css_classes);
   PRINT_PROPERTY(is_autofilled);
+  PRINT_PROPERTY(is_user_edited);
   PRINT_PROPERTY(check_status);
-  PRINT_PROPERTY(is_focusable);
   PRINT_PROPERTY(should_autocomplete);
   PRINT_PROPERTY(role);
   PRINT_PROPERTY(text_direction);

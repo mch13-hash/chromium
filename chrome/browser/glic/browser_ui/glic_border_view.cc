@@ -161,7 +161,12 @@ class GlicBorderView::BorderViewUpdater : public views::ViewObserver {
       // Force the border to show, regardless of other states. This gives the
       // actor priority over other signals.
       border_view_->StopShowing();
-      border_view_->Show();
+      // If the standalone border glow param is enabled, don't actually just
+      // suppress the glic_border_view from showing, as it is controlled by a
+      // different component.
+      if (!features::kGlicActorUiStandaloneBorderGlow.Get()) {
+        border_view_->Show();
+      }
     } else {
       // Revert to the last known state based on other signals like tab focus
       // or context access.
@@ -182,6 +187,7 @@ class GlicBorderView::BorderViewUpdater : public views::ViewObserver {
       return;
     }
     context_access_indicator_enabled_ = enabled;
+
     MaybeRunBorderViewUpdate(
         context_access_indicator_enabled_
             ? UpdateBorderReason::kContextAccessIndicatorOn
@@ -281,7 +287,7 @@ class GlicBorderView::BorderViewUpdater : public views::ViewObserver {
   }
 
   bool IsGlicWindowShowing() const {
-    return border_view_->GetGlicService()->window_controller().IsShowing();
+    return border_view_->GetGlicService()->IsWindowShowing();
   }
 
   bool IsTabInCurrentView(const content::WebContents* tab) const {
@@ -289,10 +295,21 @@ class GlicBorderView::BorderViewUpdater : public views::ViewObserver {
   }
 
   bool ShouldShowBorderAnimation() {
-    if (!context_access_indicator_enabled_ ||
-        !glic_focused_contents_in_current_view_) {
+    if (!glic_focused_contents_in_current_view_) {
       return false;
     }
+
+    // Remaining single instance checks.
+    if (!context_access_indicator_enabled_) {
+      return false;
+    }
+
+    // For multi-instance we rely on the sharing manager signal for everything
+    // else.
+    if (GlicEnabling::IsMultiInstanceEnabledByFlags()) {
+      return true;
+    }
+
     return IsGlicWindowShowing();
   }
 
@@ -424,6 +441,47 @@ void GlicBorderView::PopulateShaderUniforms(
                      corner_radius.lower_right(), corner_radius.lower_left()}});
 }
 
+void GlicBorderView::DrawSimplifiedEffect(gfx::Canvas* canvas) const {
+  const float kBorderWidth = 5.0f;
+  gfx::RectF bounds(GetLocalBounds());
+  // Ensure that the border does not spill out of the viewport (and taking the
+  // floor ensures that the anti-aliased border properly hugs the edge of the
+  // container).
+  bounds.Inset(std::floor(kBorderWidth * 0.5f));
+  auto content_border_insets = gfx::InsetsF(
+      GetContentsBorderInsets(browser_->GetBrowserView(),
+                              updater_->contents_web_view()->web_contents()));
+  bounds.Inset(content_border_insets);
+
+  cc::PaintFlags border_flags;
+  border_flags.setStyle(cc::PaintFlags::kStroke_Style);
+  border_flags.setStrokeWidth(kBorderWidth);
+  border_flags.setAntiAlias(true);
+
+  gfx::RoundedCornersF radii = GetContentBorderRadius();
+  SkRRect rrect;
+  SkVector corner_radii[4];
+  float radius_adjustment = kBorderWidth * 0.5f;
+  int index = 0;
+  auto radii_span = base::span<SkVector>(corner_radii);
+  for (float radius : {radii.upper_left(), radii.upper_right(),
+                       radii.lower_right(), radii.lower_left()}) {
+    if (content_border_insets.IsEmpty()) {
+      radius = std::max(0.f, radius - radius_adjustment);
+    } else {
+      // Do not use a border radius if we're further inset.
+      radius = 0.f;
+    }
+    // Assigning to corner_radii results an unsafe buffer access error. Instead,
+    // we will assign via the span.
+    radii_span[index] = {radius, radius};
+    index++;
+  }
+  rrect.setRectRadii(gfx::RectFToSkRect(bounds), corner_radii);
+  SetDefaultColors(border_flags, bounds);
+  canvas->sk_canvas()->drawRRect(rrect, border_flags);
+}
+
 void GlicBorderView::DrawEffect(gfx::Canvas* canvas,
                                 const cc::PaintFlags& flags) {
   auto bounds = GetLocalBounds();
@@ -465,6 +523,11 @@ void GlicBorderView::DrawEffect(gfx::Canvas* canvas,
   gfx::Rect top(top_origin, top_size);
   gfx::Rect bottom =
       top + gfx::Vector2d(0, bounds.size().height() - kMaxEffectWidth);
+
+  if (!flags.getShader()) {
+    DrawSimplifiedEffect(canvas);
+    return;
+  }
 
   canvas->DrawRect(gfx::RectF(left), flags);
   canvas->DrawRect(gfx::RectF(right), flags);

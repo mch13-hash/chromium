@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
+#include "base/memory/safety_checks.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -87,6 +88,9 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   };
 
   class NET_EXPORT_PRIVATE Request {
+    // TODO(crbug.com/422046500): Remove this macro once the bug gets fixed.
+    ADVANCED_MEMORY_SAFETY_CHECKS();
+
    public:
     // If |proxy_auth_callback| is null, proxy auth challenges will
     // result in an error.
@@ -155,6 +159,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   TransportClientSocketPool(
       int max_sockets,
       int max_sockets_per_group,
+      SocketPoolAdditionalCapacity additional_capacity,
       base::TimeDelta unused_idle_socket_timeout,
       const ProxyChain& proxy_chain,
       bool is_for_websockets,
@@ -173,6 +178,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   static std::unique_ptr<TransportClientSocketPool> CreateForTesting(
       int max_sockets,
       int max_sockets_per_group,
+      SocketPoolAdditionalCapacity additional_capacity,
       base::TimeDelta unused_idle_socket_timeout,
       base::TimeDelta used_idle_socket_timeout,
       const ProxyChain& proxy_chain_,
@@ -607,6 +613,7 @@ class NET_EXPORT_PRIVATE TransportClientSocketPool
   TransportClientSocketPool(
       int max_sockets,
       int max_sockets_per_group,
+      SocketPoolAdditionalCapacity additional_capacity,
       base::TimeDelta unused_idle_socket_timeout,
       base::TimeDelta used_idle_socket_timeout,
       const ProxyChain& proxy_chain,

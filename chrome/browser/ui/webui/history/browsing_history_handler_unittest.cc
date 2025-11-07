@@ -157,7 +157,8 @@ class BrowsingHistoryHandlerTest : public ChromeRenderViewHostTestHarness {
                 /*matching_algorithm=*/options.matching_algorithm,
                 /*host_only=*/options.host_only,
                 /*visit_order=*/options.visit_order,
-                /*app_id=*/options.app_id)))
+                /*app_id=*/options.app_id,
+                /*include_actor_visits=*/options.include_actor_visits)))
         .Times(1)
         .WillOnce([&, mock_results](const std::u16string& search_text,
                                     const QueryOptions& options) {
@@ -319,10 +320,9 @@ TEST_F(BrowsingHistoryHandlerTest, RequestAccountInfo) {
       callback;
   history::mojom::AccountInfoPtr account_info_ptr;
   EXPECT_CALL(callback, Run(_))
-      .WillOnce(testing::Invoke(
-          [&](history::mojom::AccountInfoPtr ptr) {
-            account_info_ptr = std::move(ptr);
-          }));
+      .WillOnce([&](history::mojom::AccountInfoPtr ptr) {
+        account_info_ptr = std::move(ptr);
+      });
 
   handler()->RequestAccountInfo(callback.Get());
 

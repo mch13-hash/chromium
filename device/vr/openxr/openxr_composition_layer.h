@@ -8,6 +8,7 @@
 #include "base/memory/raw_ptr.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "device/vr/openxr/openxr_swapchain_info.h"
+#include "device/vr/public/mojom/vr_service.mojom.h"
 #include "third_party/openxr/src/include/openxr/openxr.h"
 
 namespace device {
@@ -16,6 +17,14 @@ class OpenXrGraphicsBinding;
 
 class OpenXrCompositionLayer {
  public:
+  // See https://www.w3.org/TR/webxrlayers-1/#xrlayertypes
+  enum class Type {
+    kProjection = 0,
+    kQuad = 1,
+    kCylinder = 2,
+    kEquirect = 3,
+  };
+
   // Base class for graphics binding specific layer data.
   struct GraphicsBindingData {
     enum GraphicsBindingDataType {
@@ -29,9 +38,10 @@ class OpenXrCompositionLayer {
     GraphicsBindingDataType type = kInvalid;
   };
 
-  // Construct a projection layer
+  static Type GetTypeFromMojomData(const mojom::XRLayerSpecificData&);
+
   OpenXrCompositionLayer(
-      XrSpace space,
+      mojom::XRCompositionLayerDataPtr layer_data,
       OpenXrGraphicsBinding* graphics_binding,
       std::unique_ptr<GraphicsBindingData> graphics_binding_data);
 
@@ -94,6 +104,14 @@ class OpenXrCompositionLayer {
   // or not.
   bool IsUsingSharedImages() const;
 
+  // Update the layer's size and transform.
+  void UpdateMutableLayerData(mojom::XRLayerMutableDataPtr);
+
+  // Mark the layer rendered.
+  void SetIsRendered() { is_rendered_ = true; }
+
+  LayerId GetLayerId() const;
+
   // A group of simple getters.
   XrSwapchain color_swapchain() const { return color_swapchain_; }
   bool has_active_swapchain_image() const {
@@ -102,10 +120,23 @@ class OpenXrCompositionLayer {
   GraphicsBindingData* graphics_binding_data() {
     return graphics_binding_data_.get();
   }
-  XrSpace space() const { return space_; }
+  Type type() const { return type_; }
+  const mojom::XRNativeOriginInformation& native_origin_information() const {
+    DCHECK(creation_data_);
+    return *creation_data_->mutable_data->native_origin_information;
+  }
+  bool is_rendered() const { return is_rendered_; }
+  const mojom::XRLayerReadOnlyData& read_only_data() const {
+    DCHECK(creation_data_);
+    return *creation_data_->read_only_data;
+  }
+  const mojom::XRLayerMutableData& mutable_data() const {
+    DCHECK(creation_data_);
+    return *creation_data_->mutable_data;
+  }
 
  private:
-  XrSpace space_ = XR_NULL_HANDLE;
+  Type type_ = Type::kProjection;
   raw_ptr<OpenXrGraphicsBinding> graphics_binding_;
   std::vector<OpenXrSwapchainInfo> color_swapchain_images_;
   gfx::Size swapchain_image_size_{0, 0};
@@ -122,12 +153,19 @@ class OpenXrCompositionLayer {
   // ActivateSwapchainImage has been called, but ReleaseSwapchainImage has not).
   bool has_active_swapchain_image_ = false;
 
+  // Indicates whether the layer has been rendered at least once, in other
+  // words, if it contains some contents.
+  bool is_rendered_ = false;
+
   // The swapchain is initializd when a session begins and is re-created when
   // the state of a secondary view configuration changes.
   XrSwapchain color_swapchain_ = XR_NULL_HANDLE;
 
   // Store graphics binding specific data.
   std::unique_ptr<GraphicsBindingData> graphics_binding_data_;
+
+  // Data used to create the layer.
+  mojom::XRCompositionLayerDataPtr creation_data_;
 };  // OpenXrCompositionLayer
 
 }  // namespace device

@@ -38,7 +38,7 @@
 namespace {
 
 using InteractiveMixinBasedBrowserTest =
-    InteractiveBrowserTestT<MixinBasedInProcessBrowserTest>;
+    InteractiveBrowserTestMixin<MixinBasedInProcessBrowserTest>;
 
 // This JavaScript is used to select an option from a dropdown menu. This
 // JavaScript can be formatted with a single string to identify the desired
@@ -517,7 +517,7 @@ InteractiveAshTest::CreateBrowserWindow(const GURL& url) {
   CHECK(profile);
   NavigateParams params(profile, url, ui::PAGE_TRANSITION_TYPED);
   params.disposition = WindowOpenDisposition::NEW_WINDOW;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   return Navigate(&params);
 }
 
@@ -529,7 +529,7 @@ void InteractiveAshTest::TearDownOnMainThread() {
     base::RunLoop loop;
     loop.Run();
   }
-  InteractiveBrowserTestT<
+  InteractiveBrowserTestMixin<
       MixinBasedInProcessBrowserTest>::TearDownOnMainThread();
 }
 

@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "chrome/browser/ui/lens/lens_overlay_translate_options.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry_observer.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page_navigator.h"
@@ -31,7 +32,6 @@ class GURL;
 class LensOverlayController;
 class LensOverlaySidePanelWebView;
 class SidePanelEntryScope;
-class SidePanelCoordinator;
 
 enum class SidePanelEntryHideReason;
 
@@ -104,6 +104,8 @@ class LensOverlaySidePanelCoordinator
   // exist and then shows it.
   void RegisterEntryAndShow();
 
+  SidePanelEntry::PanelType GetPanelType() const;
+
   // Cleans up the side panel entry and closes the side panel.
   void DeregisterEntryAndCleanup();
 
@@ -125,6 +127,11 @@ class LensOverlaySidePanelCoordinator
   // Return the LensOverlayController that is part of this tab.
   LensOverlayController* GetLensOverlayController() {
     return lens_search_controller_->lens_overlay_controller();
+  }
+
+  // Return the LensOverlayQueryController that is part of this tab.
+  LensOverlayQueryController* GetLensOverlayQueryController() {
+    return lens_search_controller_->lens_overlay_query_controller();
   }
 
   // Return the LensSearchboxController that is part of this tab.
@@ -196,6 +203,9 @@ class LensOverlaySidePanelCoordinator
   // (`file://`). This is used to determine whether to scroll in the main tab or
   // open a new tab.
   void SetLatestPageUrlWithResponse(const GURL& url);
+
+  // Sets whether the lens overlay is showing in the side panel WebUI.
+  virtual void SetIsOverlayShowing(bool is_showing);
 
   // Internal state machine. States are mutually exclusive. Exposed for testing.
   enum class State {
@@ -281,6 +291,9 @@ class LensOverlaySidePanelCoordinator
 
   // Focuses the results iframe in the side panel.
   virtual void FocusResultsFrame();
+
+  // Focuses the composebox in the side panel.
+  virtual void FocusSearchbox();
 
  private:
   // Data class for constructing the side panel and storing side panel state for
@@ -409,13 +422,6 @@ class LensOverlaySidePanelCoordinator
   // page.
   mojom::SidePanelResultStatus side_panel_result_status_ =
       mojom::SidePanelResultStatus::kUnknown;
-
-  // General side panel coordinator responsible for all side panel interactions.
-  // Separate from this class because this controls interactions to other side
-  // panels as well, not just the Lens results. The side_panel_coordinator
-  // lives with the browser view, so it should outlive this class. Therefore
-  // this can be assumed to be non-null.
-  raw_ptr<SidePanelCoordinator> side_panel_coordinator_ = nullptr;
 
   raw_ptr<LensOverlaySidePanelWebView> side_panel_web_view_;
   base::WeakPtrFactory<LensOverlaySidePanelCoordinator> weak_ptr_factory_{this};

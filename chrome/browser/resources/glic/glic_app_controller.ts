@@ -5,9 +5,8 @@
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {getRequiredElement} from 'chrome://resources/js/util.js';
 
-import {BrowserProxyImpl} from './browser_proxy.js';
-import {PrepareForClientResult, ProfileReadyState, WebUiState} from './glic.mojom-webui.js';
-import type {PageInterface} from './glic.mojom-webui.js';
+import type {BrowserProxyImpl} from './browser_proxy.js';
+import {PanelStateKind, PrepareForClientResult, ProfileReadyState, WebUiState} from './glic.mojom-webui.js';
 import type {ApiHostEmbedder} from './glic_api_impl/glic_api_host.js';
 import {WebClientState} from './glic_api_impl/glic_api_host.js';
 import type {PageType, WebviewDelegate} from './webview.js';
@@ -97,8 +96,7 @@ export enum LoadingStage {
 }
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:LoadingStage,//tools/metrics/histograms/metadata/glic/histograms.xml:LoadingStage)
 
-export class GlicAppController implements PageInterface, WebviewDelegate,
-                                          ApiHostEmbedder {
+export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
   loadingTimer: number|undefined;
 
   // This is used to simulate no connection for tests.
@@ -108,7 +106,8 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
   private guestResizeEnabled: boolean = false;
 
   // Width for non-resizable panel.
-  private defaultWidth: number = 352;
+  private defaultWidth: number = 400;
+  private defaultHeight: number = 252;
 
   // Last seen width and height of guest panel.
   private lastWidth: number = 400;
@@ -126,6 +125,9 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
   private loadingStage: LoadingStage = LoadingStage.NOT_LOADING;
   private loadingStageStartTimestampMs?: DOMHighResTimeStamp;
 
+  private panelStateKind: PanelStateKind = PanelStateKind.kHidden;
+  private fromFre: boolean = false;
+
   state: WebUiState|undefined;
 
   // When entering loading state, this represents the earliest timestamp at
@@ -135,8 +137,9 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
 
   browserProxy: BrowserProxyImpl;
 
-  constructor() {
-    this.browserProxy = new BrowserProxyImpl(this);
+  constructor(browserProxy: BrowserProxyImpl, fromFre: boolean) {
+    this.browserProxy = browserProxy;
+    this.fromFre = fromFre;
 
     window.addEventListener('online', () => {
       this.online();
@@ -341,6 +344,7 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
       {
         onEnter: () => {
           this.trackLoadingStageEnd();
+          this.fromFre = false;
           $.guestPanel.classList.toggle('show-header', false);
           this.showPanel('guestPanel');
         },
@@ -484,6 +488,8 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
   }
 
   private showLoading(): void {
+    const sidePanelLoadingElement = getRequiredElement('sidePanelLoading');
+    sidePanelLoadingElement.classList.toggle('from-fre', this.fromFre);
     this.showPanel('loadingPanel');
     // After kMinHoldLoadingTimeMs, transition to finish-loading or ready. Note
     // that we do not transition from show-loading to ready before the timeout.
@@ -536,6 +542,9 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
     for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
       panel.hidden = panel.id !== id;
     }
+
+    const panelStateKindSection = getRequiredElement('localPanels');
+    panelStateKindSection.classList.toggle('hidden', id === 'guestPanel');
     // Resize widget to size of new panel.
     if (id === 'guestPanel') {
       // For the guest webview, use the most recently requested size.
@@ -545,7 +554,7 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
       this.browserProxy.handler.resizeWidget(
           {
             width: this.defaultWidth,
-            height: $[id].getBoundingClientRect().height,
+            height: this.defaultHeight,
           },
           transitionDuration);
     }
@@ -695,6 +704,18 @@ export class GlicAppController implements PageInterface, WebviewDelegate,
   }
 
   // PageInterface implementation.
+  updatePageState(panelStateKind: PanelStateKind) {
+    if (this.panelStateKind === panelStateKind) {
+      return;
+    }
+    this.panelStateKind = panelStateKind;
+
+    const panelStateKindSection = getRequiredElement('localPanels');
+    panelStateKindSection.classList.toggle(
+        'sidePanel', this.panelStateKind === PanelStateKind.kAttached);
+    panelStateKindSection.classList.toggle(
+        'floating', this.panelStateKind === PanelStateKind.kDetached);
+  }
 
   // Called before the WebUI is shown. If we're in an error state, automatically
   // try to reload.

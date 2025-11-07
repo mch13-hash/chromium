@@ -54,10 +54,6 @@ enum FocusgroupFlags : uint8_t {
 
   // Memory behavior override disables history-based focus restoration:
   kNoMemory = 1 << 6,
-
-  // Deprecated. Will be removed when opt-out behavior is implemented.
-  // Placed last for easy identification; its bit may be recycled after removal.
-  kExtend = 1 << 7,
 };
 
 inline constexpr FocusgroupFlags operator&(FocusgroupFlags a,
@@ -92,7 +88,10 @@ struct FocusgroupData {
   bool operator!=(const FocusgroupData& other) const = default;
 };
 
-FocusgroupData FindNearestFocusgroupAncestorData(const Element* element);
+// Returns the nearest ancestor Element that is an actual focusgroup owner or
+// nullptr if none exists.
+Element* FindFocusgroupOwner(const Element* element);
+
 CORE_EXPORT FocusgroupData ParseFocusgroup(const Element* element,
                                            const AtomicString& input);
 

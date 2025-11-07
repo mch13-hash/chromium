@@ -8,7 +8,7 @@
 
 # Version # should always be incremented up whenever this (or any pem file that
 # it references) is changed.
-version_major: 24
+version_major: 26
 
 # CN=Actalis Authentication Root CA, O=Actalis S.p.A./03358520967, L=Milan, C=IT
 # https://ssltest-a.actalis.it:8443
@@ -71,15 +71,23 @@ trust_anchors {
 }
 
 # CN=Buypass Class 2 Root CA, O=Buypass AS-983163327, C=NO
+# Constraint date and time (GMT): Friday, October 31, 2025 11:59:59 PM
 trust_anchors {
   sha256_hex: "9a114025197c5bb95d94e63d55cd43790847b646b23cdf11ada4a00eff15fb48"
+  constraints: {
+    sct_not_after_sec: 1761955199
+  }
 }
 
 # CN=Buypass Class 3 Root CA, O=Buypass AS-983163327, C=NO
 # https://valid.evident.ca23.ssl.buypass.no/
+# Constraint date and time (GMT): Friday, October 31, 2025 11:59:59 PM
 trust_anchors {
   sha256_hex: "edf7ebbca27a2a384d387b7d4010c666e2edb4843e4c29b4ae1d5b9332e6b24d"
   ev_policy_oids: "2.23.140.1.1"
+  constraints: {
+    sct_not_after_sec: 1761955199
+  }
 }
 
 # OU=certSIGN ROOT CA G2, O=CERTSIGN SA, C=RO
@@ -279,21 +287,6 @@ trust_anchors {
   }
 }
 
-# CN=Entrust Root Certification Authority - G4, OU=(c) 2015 Entrust, Inc. - for authorized use only, OU=See www.entrust.net/legal-terms, O=Entrust, Inc., C=US
-# https://validg4.entrust.net
-# Constraint date: Mon Nov 11, 2024 23:59:59 GMT+0000
-trust_anchors {
-  sha256_hex: "db3517d1f6732a2d5ab97c533ec70779ee3270a62fb4ac4238372460e6f01e88"
-  ev_policy_oids: "2.23.140.1.1"
-  constraints: {
-    sct_not_after_sec: 1731369599
-    min_version: "131"
-  }
-  constraints: {
-    max_version_exclusive: "131"
-  }
-}
-
 # CN=GDCA TrustAUTH R5 ROOT, O=GUANG DONG CERTIFICATE AUTHORITY CO.,LTD., C=CN
 trust_anchors {
   sha256_hex: "bfff8fd04433487d6a8aa60c1a29767a9fc2bbb05e420f713a13b992891d3893"
@@ -394,6 +387,7 @@ trust_anchors {
 # CN=ISRG Root X1, O=Internet Security Research Group, C=US
 trust_anchors {
   sha256_hex: "96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6"
+  trust_anchor_id: "\x82\xdf\x13\x02\x01"  # 44947.2.1
 }
 
 # CN=Izenpe.com, O=IZENPE S.A., C=ES
@@ -603,13 +597,17 @@ trust_anchors {
 }
 
 # CN=Certum EC-384 CA, OU=Certum Certification Authority, O=Asseco Data Systems S.A., C=PL
+# https://valid-cec384ca.certificates.certum.pl/
 trust_anchors {
   sha256_hex: "6b328085625318aa50d173c98d8bda09d57e27413d114cf787a0f5d06c030cf6"
+  ev_policy_oids: "2.23.140.1.1"
 }
 
 # CN=Certum Trusted Root CA, OU=Certum Certification Authority, O=Asseco Data Systems S.A., C=PL
+# https://valid-ctrca.certificates.certum.pl/
 trust_anchors {
   sha256_hex: "fe7696573855773e37a95e7ad4d9cc96c30157c15d31765ba9b15704e1ae78fd"
+  ev_policy_oids: "2.23.140.1.1"
 }
 
 # CN=D-TRUST BR Root CA 1 2020, O=D-Trust GmbH, C=DE
@@ -664,6 +662,7 @@ trust_anchors {
 # CN=ISRG Root X2, O=Internet Security Research Group, C=US
 trust_anchors {
   sha256_hex: "69729b8e15a86efc177a57afb7171dfc64add28c2fca8cf1507e34453ccb1470"
+  trust_anchor_id: "\x82\xdf\x13\x02\x06"  # 44947.2.6
 }
 
 # CN=NAVER Global Root Certification Authority, O=NAVER BUSINESS PLATFORM Corp., C=KR

@@ -119,6 +119,17 @@ class CanvasResourceProviderTest : public Test {
     return resource->sync_token();
   }
 
+  void EnsureResourceRecycled(CanvasResourceProvider* provider,
+                              scoped_refptr<CanvasResource>&& resource) {
+    viz::TransferableResource transferable_resource;
+    CanvasResource::ReleaseCallback release_callback;
+    CHECK(resource->PrepareTransferableResource(
+        &transferable_resource, &release_callback,
+        /*needs_verified_synctoken=*/false));
+    std::move(release_callback)
+        .Run(std::move(resource), resource->sync_token(), false);
+  }
+
   test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   ImageTrackingDecodeCache image_decode_cache_;
@@ -173,10 +184,6 @@ TEST_F(CanvasResourceProviderTest,
 }
 
 TEST_F(CanvasResourceProviderTest, CanvasResourceProviderAcceleratedOverlay) {
-#if BUILDFLAG(IS_WIN)
-  base::test::ScopedFeatureList feature_list{kUseCRPSIForLowLatencyOnWindows};
-#endif
-
   const gfx::Size kSize(10, 10);
   const SkImageInfo kInfo =
       SkImageInfo::MakeN32Premul(10, 10, SkColorSpace::MakeSRGB());
@@ -287,17 +294,6 @@ scoped_refptr<CanvasResource> UpdateResource(CanvasResourceProvider* provider) {
   return provider->ProduceCanvasResource(FlushReason::kTesting);
 }
 
-void EnsureResourceRecycled(CanvasResourceProvider* provider,
-                            scoped_refptr<CanvasResource>&& resource) {
-  viz::TransferableResource transferable_resource;
-  CanvasResource::ReleaseCallback release_callback;
-  auto sync_token = resource->GetSyncToken();
-  CHECK(resource->PrepareTransferableResource(
-      &transferable_resource, &release_callback,
-      /*needs_verified_synctoken=*/false));
-  std::move(release_callback).Run(std::move(resource), sync_token, false);
-}
-
 TEST_F(CanvasResourceProviderTest,
        CanvasResourceProviderSharedImageEndExternalWrite) {
   // Set up this test to use OOP rasterization to be able to verify
@@ -320,7 +316,7 @@ TEST_F(CanvasResourceProviderTest,
       shared_image_usage_flags);
 
   auto resource = provider->ProduceCanvasResource(FlushReason::kTesting);
-  auto old_compositor_read_sync_token = resource->GetSyncToken();
+  auto old_compositor_read_sync_token = GetSyncToken(resource.get());
 
   // NOTE: Need to ensure that this SyncToken's release count is greater than
   // that of the last one that TestRasterInterface waited on for
@@ -339,7 +335,7 @@ TEST_F(CanvasResourceProviderTest,
 
   // In addition, it should have ensured that the resource generates a new
   // compositor read sync token on the next request for that token.
-  EXPECT_NE(resource->GetSyncToken(), old_compositor_read_sync_token);
+  EXPECT_NE(GetSyncToken(resource.get()), old_compositor_read_sync_token);
 }
 
 TEST_F(CanvasResourceProviderTest,
@@ -389,7 +385,7 @@ TEST_F(CanvasResourceProviderTest,
   provider->Canvas().clear(SkColors::kBlack);
   auto resource_again = provider->ProduceCanvasResource(FlushReason::kTesting);
   EXPECT_EQ(resource_ptr, resource_again);
-  EXPECT_NE(sync_token, resource_again->GetSyncToken());
+  EXPECT_NE(sync_token, GetSyncToken(resource_again.get()));
 }
 
 TEST_F(CanvasResourceProviderTest, CanvasResourceProviderUnusedResources) {
@@ -401,7 +397,8 @@ TEST_F(CanvasResourceProviderTest, CanvasResourceProviderUnusedResources) {
   auto resource = provider->ProduceCanvasResource(FlushReason::kTesting);
   auto new_resource = UpdateResource(provider.get());
   ASSERT_NE(resource, new_resource);
-  ASSERT_NE(resource->GetSyncToken(), new_resource->GetSyncToken());
+
+  ASSERT_NE(GetSyncToken(resource.get()), GetSyncToken(new_resource.get()));
 
   EXPECT_FALSE(
       provider->unused_resources_reclaim_timer_is_running_for_testing());
@@ -431,7 +428,7 @@ TEST_F(CanvasResourceProviderTest,
   auto resource = provider->ProduceCanvasResource(FlushReason::kTesting);
   auto new_resource = UpdateResource(provider.get());
   ASSERT_NE(resource, new_resource);
-  ASSERT_NE(resource->GetSyncToken(), new_resource->GetSyncToken());
+  ASSERT_NE(GetSyncToken(resource.get()), GetSyncToken(new_resource.get()));
   EXPECT_FALSE(
       provider->unused_resources_reclaim_timer_is_running_for_testing());
   EnsureResourceRecycled(provider.get(), std::move(resource));
@@ -452,7 +449,7 @@ TEST_F(CanvasResourceProviderTest,
   auto resource = provider->ProduceCanvasResource(FlushReason::kTesting);
   auto new_resource = UpdateResource(provider.get());
   ASSERT_NE(resource, new_resource);
-  ASSERT_NE(resource->GetSyncToken(), new_resource->GetSyncToken());
+  ASSERT_NE(GetSyncToken(resource.get()), GetSyncToken(new_resource.get()));
   EXPECT_FALSE(
       provider->unused_resources_reclaim_timer_is_running_for_testing());
   EnsureResourceRecycled(provider.get(), std::move(resource));
@@ -472,7 +469,7 @@ TEST_F(CanvasResourceProviderTest,
   EXPECT_FALSE(provider->HasUnusedResourcesForTesting());
   new_resource = UpdateResource(provider.get());
   ASSERT_NE(resource, new_resource);
-  ASSERT_NE(resource->GetSyncToken(), new_resource->GetSyncToken());
+  ASSERT_NE(GetSyncToken(resource.get()), GetSyncToken(new_resource.get()));
 
   EnsureResourceRecycled(provider.get(), std::move(resource));
   EXPECT_TRUE(provider->HasUnusedResourcesForTesting());
@@ -599,10 +596,6 @@ TEST_F(CanvasResourceProviderTest,
 
 TEST_F(CanvasResourceProviderTest,
        CanvasResourceProviderDirect2DGpuMemoryBuffer) {
-#if BUILDFLAG(IS_WIN)
-  base::test::ScopedFeatureList feature_list{kUseCRPSIForLowLatencyOnWindows};
-#endif
-
   const gfx::Size kSize(10, 10);
   const SkImageInfo kInfo =
       SkImageInfo::MakeN32Premul(10, 10, SkColorSpace::MakeSRGB());
@@ -676,71 +669,6 @@ TEST_F(CanvasResourceProviderTest, DimensionsExceedMaxTextureSize_SharedImage) {
   // The CanvasResourceProvider for SharedImage should not be created or valid
   // if the texture size is greater than the maximum value
   EXPECT_TRUE(!provider || !provider->IsValid());
-}
-
-TEST_F(CanvasResourceProviderTest, DimensionsExceedMaxTextureSize_SwapChain) {
-  Canvas2DColorParams color_params(PredefinedColorSpace::kSRGB,
-                                   CanvasPixelFormat::kUint8,
-                                   /*has_alpha=*/true);
-  auto provider = CanvasResourceProvider::CreateSwapChainProvider(
-      gfx::Size(kMaxTextureSize - 1, kMaxTextureSize), color_params,
-      CanvasResourceProvider::ShouldInitialize::kCallClear,
-      context_provider_wrapper_);
-  EXPECT_TRUE(provider->SupportsDirectCompositing());
-  provider = CanvasResourceProvider::CreateSwapChainProvider(
-      gfx::Size(kMaxTextureSize, kMaxTextureSize), color_params,
-      CanvasResourceProvider::ShouldInitialize::kCallClear,
-      context_provider_wrapper_);
-  EXPECT_TRUE(provider->SupportsDirectCompositing());
-  provider = CanvasResourceProvider::CreateSwapChainProvider(
-      gfx::Size(kMaxTextureSize + 1, kMaxTextureSize), color_params,
-      CanvasResourceProvider::ShouldInitialize::kCallClear,
-      context_provider_wrapper_);
-
-  // The CanvasResourceProvider for SwapChain should not be created or valid
-  // if the texture size is greater than the maximum value
-  EXPECT_TRUE(!provider || !provider->IsValid());
-}
-
-TEST_F(CanvasResourceProviderTest, CanvasResourceProviderDirect2DSwapChain) {
-  const gfx::Size kSize(10, 10);
-  const SkImageInfo kInfo =
-      SkImageInfo::MakeN32Premul(10, 10, SkColorSpace::MakeSRGB());
-
-  Canvas2DColorParams color_params(PredefinedColorSpace::kSRGB,
-                                   CanvasPixelFormat::kUint8,
-                                   /*has_alpha=*/true);
-  auto provider = CanvasResourceProvider::CreateSwapChainProvider(
-      kSize, color_params, CanvasResourceProvider::ShouldInitialize::kCallClear,
-      context_provider_wrapper_);
-
-  ASSERT_TRUE(provider);
-  EXPECT_EQ(provider->Size(), kSize);
-  EXPECT_TRUE(provider->IsValid());
-  EXPECT_TRUE(provider->IsAccelerated());
-  EXPECT_TRUE(provider->SupportsDirectCompositing());
-  EXPECT_TRUE(provider->IsSingleBuffered());
-  EXPECT_EQ(provider->GetSkImageInfo(), kInfo);
-}
-
-TEST_F(
-    CanvasResourceProviderTest,
-    CanvasResourceProviderSwapChain_NonDefaultColorSpaceIsPropagatedToResource) {
-  const gfx::Size kSize(10, 10);
-  const auto color_space = gfx::ColorSpace::CreateSRGBLinear();
-
-  Canvas2DColorParams color_params(PredefinedColorSpace::kSRGBLinear,
-                                   CanvasPixelFormat::kUint8,
-                                   /*has_alpha=*/true);
-  auto provider = CanvasResourceProvider::CreateSwapChainProvider(
-      kSize, color_params, CanvasResourceProvider::ShouldInitialize::kCallClear,
-      context_provider_wrapper_);
-
-  ASSERT_TRUE(provider);
-  ASSERT_EQ(provider->GetColorSpace(), color_space);
-
-  auto resource = provider->ProduceCanvasResource(FlushReason::kTesting);
-  EXPECT_EQ(resource->GetClientSharedImage()->color_space(), color_space);
 }
 
 TEST_F(CanvasResourceProviderTest, FlushForImage) {

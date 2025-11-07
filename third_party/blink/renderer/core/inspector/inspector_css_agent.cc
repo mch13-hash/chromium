@@ -44,6 +44,7 @@
 #include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
 #include "third_party/blink/renderer/core/css/css_font_face.h"
 #include "third_party/blink/renderer/core/css/css_font_face_source.h"
+#include "third_party/blink/renderer/core/css/css_font_family_value.h"
 #include "third_party/blink/renderer/core/css/css_font_palette_values_rule.h"
 #include "third_party/blink/renderer/core/css/css_font_selector.h"
 #include "third_party/blink/renderer/core/css/css_function_declarations_rule.h"
@@ -154,7 +155,6 @@
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_custom_platform_data.h"
-#include "third_party/blink/renderer/platform/fonts/shaping/caching_word_shaper.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_view.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/clear_collection_scope.h"
@@ -185,7 +185,7 @@ class FrontendOperationScope {
 Element* GetPseudoIdAndTag(Element* element,
                            PseudoElement*& pseudo_element,
                            PseudoId& element_pseudo_id,
-                           AtomicString& view_transition_name) {
+                           AtomicString& pseudo_argument) {
   auto* resolved_element = element;
   auto* try_pseudo = DynamicTo<PseudoElement>(element);
   bool is_transition =
@@ -212,7 +212,7 @@ Element* GetPseudoIdAndTag(Element* element,
       return nullptr;
 
     element_pseudo_id = pseudo_element->GetPseudoIdForStyling();
-    view_transition_name = pseudo_element->view_transition_name();
+    pseudo_argument = pseudo_element->GetPseudoArgument();
   }
   return resolved_element;
 }
@@ -1364,13 +1364,13 @@ protocol::Response InspectorCSSAgent::getAnimatedStylesForNode(
 
   Element* animating_element = element;
   PseudoId element_pseudo_id = kPseudoIdNone;
-  AtomicString view_transition_name = g_null_atom;
+  AtomicString pseudo_argument = g_null_atom;
   PseudoElement* pseudo_element = nullptr;
   // If the requested element is a view transition pseudo-element, `element`
   // becomes the first non-pseudo parent element or shadow host element after
   // `GetPseudoIdAndTag` call below.
   element = GetPseudoIdAndTag(element, pseudo_element, element_pseudo_id,
-                              view_transition_name);
+                              pseudo_argument);
   if (!element) {
     return protocol::Response::ServerError("Pseudo element has no parent");
   }
@@ -1427,6 +1427,7 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
         css_property_registrations,
     std::unique_ptr<protocol::CSS::CSSFontPaletteValuesRule>*
         css_font_palette_values_rule,
+    std::unique_ptr<protocol::Array<protocol::CSS::CSSAtRule>>* css_at_rules,
     std::optional<int>* parent_layout_node_id,
     std::unique_ptr<protocol::Array<protocol::CSS::CSSFunctionRule>>*
         css_function_rules) {
@@ -1442,13 +1443,13 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
   Element* animating_element = element;
 
   PseudoId element_pseudo_id = kPseudoIdNone;
-  AtomicString view_transition_name = g_null_atom;
+  AtomicString pseudo_argument = g_null_atom;
   // If the requested element is a view transition pseudo-element, `element`
   // becomes the first non-pseudo parent element or shadow host element after
   // `GetPseudoIdAndTag` call below.
   PseudoElement* pseudo_element = nullptr;
   element = GetPseudoIdAndTag(element, pseudo_element, element_pseudo_id,
-                              view_transition_name);
+                              pseudo_argument);
   if (!element)
     return protocol::Response::ServerError("Pseudo element has no parent");
 
@@ -1457,6 +1458,11 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
   if (!document.IsActive())
     return protocol::Response::ServerError("Document is not active");
 
+  // Trigger layout update if needed.
+  if (element->GetDocument().NeedsLayoutTreeUpdateForNode(*element)) {
+    element->GetDocument().UpdateStyleAndLayoutForNode(
+        element, DocumentUpdateReason::kInspector);
+  }
   InspectorGhostRules ghost_rules;
   HeapVector<Member<CSSStyleSheet>> ghost_sheets;
 
@@ -1465,25 +1471,20 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
   for (InspectorStyleSheet* stylesheet :
        css_style_sheet_to_inspector_style_sheet_.Values()) {
     stylesheet->SyncTextIfNeeded();
-    if (RuntimeEnabledFeatures::InspectorGhostRulesEnabled()) {
-      ghost_sheets.push_back(stylesheet->PageStyleSheet());
-    }
+    ghost_sheets.push_back(stylesheet->PageStyleSheet());
   }
 
-  if (RuntimeEnabledFeatures::InspectorGhostRulesEnabled()) {
-    ghost_rules.PopulateSheetsWithAssertion(std::move(ghost_sheets));
-    ghost_rules.Activate(document);
-  }
+  ghost_rules.PopulateSheetsWithAssertion(std::move(ghost_sheets));
+  ghost_rules.Activate(document);
 
   CheckPseudoHasCacheScope check_pseudo_has_cache_scope(
       &document, /*within_selector_checking=*/false);
-  InspectorStyleResolver resolver(element, element_pseudo_id,
-                                  view_transition_name);
+  InspectorStyleResolver resolver(element, element_pseudo_id, pseudo_argument);
 
   // Matched rules.
   *matched_css_rules = BuildArrayForMatchedRuleList(
       resolver.MatchedRules(), element, ghost_rules, element_pseudo_id,
-      view_transition_name);
+      pseudo_argument);
 
   // Inherited styles.
   *inherited_entries =
@@ -1493,7 +1494,7 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
         protocol::CSS::InheritedStyleEntry::create()
             .setMatchedCSSRules(BuildArrayForMatchedRuleList(
                 match->matched_rules, element, ghost_rules, element_pseudo_id,
-                view_transition_name))
+                pseudo_argument))
             .build();
     if (match->element->style() && match->element->style()->length()) {
       InspectorStyleSheetForInlineStyle* style_sheet =
@@ -1501,7 +1502,7 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
       if (style_sheet) {
         entry->setInlineStyle(style_sheet->BuildObjectForStyle(
             style_sheet->InlineStyle(), element, element_pseudo_id,
-            view_transition_name));
+            pseudo_argument));
       }
     }
     (*inherited_entries)->emplace_back(std::move(entry));
@@ -1544,12 +1545,10 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
                     match->pseudo_id))
                 .setMatches(BuildArrayForMatchedRuleList(
                     match->matched_rules, element, ghost_rules,
-                    match->pseudo_id, match->view_transition_name))
+                    match->pseudo_id, match->pseudo_argument))
                 .build());
-    if (match->view_transition_name) {
-      (*pseudo_id_matches)
-          ->back()
-          ->setPseudoIdentifier(match->view_transition_name);
+    if (match->pseudo_argument) {
+      (*pseudo_id_matches)->back()->setPseudoIdentifier(match->pseudo_argument);
     }
   }
 
@@ -1568,9 +1567,9 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
               .setMatches(BuildArrayForMatchedRuleList(
                   pseudo_match->matched_rules, element, ghost_rules))
               .build());
-      if (pseudo_match->view_transition_name) {
+      if (pseudo_match->pseudo_argument) {
         parent_pseudo_element_matches->back()->setPseudoIdentifier(
-            pseudo_match->view_transition_name);
+            pseudo_match->pseudo_argument);
       }
     }
 
@@ -1599,6 +1598,10 @@ protocol::Response InspectorCSSAgent::getMatchedStylesForNode(
 
   if (auto rule = FontPalettesForNode(*element)) {
     *css_font_palette_values_rule = std::move(rule);
+  }
+
+  if (auto rules = FontAtRulesForNode(*element)) {
+    *css_at_rules = std::move(rules);
   }
 
   auto* parent_layout_node = LayoutTreeBuilderTraversal::LayoutParent(*element);
@@ -1719,8 +1722,6 @@ InspectorCSSAgent::PositionTryRulesForElement(
     Element* element,
     std::optional<size_t> active_position_try_index) {
   Document& document = element->GetDocument();
-  CHECK(!document.NeedsLayoutTreeUpdateForNode(*element));
-
   const ComputedStyle* style = element->EnsureComputedStyle();
   if (!style) {
     return nullptr;
@@ -1841,8 +1842,6 @@ InspectorCSSAgent::CustomPropertiesForNode(Element* element) {
       std::make_unique<
           protocol::Array<protocol::CSS::CSSPropertyRegistration>>());
   Document& document = element->GetDocument();
-  DCHECK(!document.NeedsLayoutTreeUpdateForNode(*element));
-
   auto style_sheets = document_to_css_style_sheets_.find(&document);
   if (style_sheets == document_to_css_style_sheets_.end()) {
     return result;
@@ -1886,30 +1885,176 @@ InspectorCSSAgent::CustomPropertiesForNode(Element* element) {
   return result;
 }
 
-template <class CSSRuleCollection>
-static CSSFontPaletteValuesRule* FindFontPaletteValuesRule(
+template <class CSSRuleCollection, class CSSRuleType>
+static CSSRuleType* FindCSSRule(
     CSSRuleCollection* css_rules,
-    StyleRuleFontPaletteValues* values_rule) {
+    base::FunctionRef<bool(CSSRuleType&)> filter_callback) {
   if (!css_rules) {
     return nullptr;
   }
 
-  CSSFontPaletteValuesRule* result = nullptr;
+  CSSRuleType* result = nullptr;
   for (unsigned j = 0; j < css_rules->length() && !result; ++j) {
     CSSRule* css_rule = css_rules->item(j);
-    if (auto* css_style_rule = DynamicTo<CSSFontPaletteValuesRule>(css_rule)) {
-      if (css_style_rule->FontPaletteValues() == values_rule)
+    if (auto* css_style_rule = DynamicTo<CSSRuleType>(css_rule)) {
+      if (filter_callback(*css_style_rule)) {
         result = css_style_rule;
+      }
     } else if (auto* css_import_rule = DynamicTo<CSSImportRule>(css_rule)) {
-      result =
-          FindFontPaletteValuesRule(css_import_rule->styleSheet(), values_rule);
+      result = FindCSSRule(css_import_rule->styleSheet(), filter_callback);
     } else {
-      result = FindFontPaletteValuesRule(css_rule->cssRules(), values_rule);
+      result = FindCSSRule(css_rule->cssRules(), filter_callback);
     }
   }
   return result;
 }
 
+template <class CSSRuleType>
+static CSSRuleType* FindCSSRuleInSet(
+    GCedHeapHashSet<Member<CSSStyleSheet>>& css_rules,
+    base::FunctionRef<bool(CSSRuleType&)> filter_callback) {
+  for (CSSStyleSheet* style_sheet : css_rules) {
+    if (CSSRuleType* rule = FindCSSRule(style_sheet, filter_callback)) {
+      return rule;
+    }
+  }
+  return nullptr;
+}
+
+static CSSFontPaletteValuesRule* FindFontPaletteValuesRule(
+    GCedHeapHashSet<Member<CSSStyleSheet>>& css_rules,
+    StyleRuleFontPaletteValues* values_rule) {
+  return FindCSSRuleInSet<CSSFontPaletteValuesRule>(
+      css_rules, [&values_rule](CSSFontPaletteValuesRule& css_rule) {
+        return css_rule.FontPaletteValues() == values_rule;
+      });
+}
+
+static std::vector<StyleRuleFontFeature::FeatureType>
+FontFeatureTypesFromFontVariantAlternates(
+    const FontVariantAlternates* font_variant_alternates) {
+  std::vector<StyleRuleFontFeature::FeatureType> result;
+  // LINT.IfChange(FontVariantAlternatesFeatureType)
+  if (font_variant_alternates->Stylistic()) {
+    result.push_back(StyleRuleFontFeature::FeatureType::kStylistic);
+  }
+  if (!font_variant_alternates->Styleset().empty()) {
+    result.push_back(StyleRuleFontFeature::FeatureType::kStyleset);
+  }
+  if (!font_variant_alternates->CharacterVariant().empty()) {
+    result.push_back(StyleRuleFontFeature::FeatureType::kCharacterVariant);
+  }
+  if (font_variant_alternates->Swash()) {
+    result.push_back(StyleRuleFontFeature::FeatureType::kSwash);
+  }
+  if (font_variant_alternates->Ornaments()) {
+    result.push_back(StyleRuleFontFeature::FeatureType::kOrnaments);
+  }
+  if (font_variant_alternates->Annotation()) {
+    result.push_back(StyleRuleFontFeature::FeatureType::kAnnotation);
+  }
+  // LINT.ThenChange(//third_party/blink/renderer/core/inspector/inspector_style_sheet.cc:FontVariantAlternatesFeatureType,//third_party/blink/public/devtools_protocol/domains/CSS.pdl:FontVariantAlternatesFeatureType)
+  return result;
+}
+
+// TODO(crbug.com/408969009): Include pseudo-elements
+std::unique_ptr<protocol::Array<protocol::CSS::CSSAtRule>>
+InspectorCSSAgent::FontAtRulesForNode(Element& element) {
+  Document& document = element.GetDocument();
+  auto style_sheets = document_to_css_style_sheets_.find(&document);
+  if (style_sheets == document_to_css_style_sheets_.end()) {
+    return {};
+  }
+
+  const ComputedStyle* style = element.EnsureComputedStyle();
+  if (!style) {
+    return {};
+  }
+
+  auto result = std::make_unique<protocol::Array<protocol::CSS::CSSAtRule>>();
+  const AtomicString& family_name =
+      style->GetFontDescription().Family().FamilyName();
+
+  const FontPalette* palette = style->GetFontPalette();
+  if (palette && palette->IsCustomPalette()) {
+    StyleRuleFontPaletteValues* rule =
+        document.GetStyleEngine().FontPaletteValuesForNameAndFamily(
+            palette->GetPaletteValuesName(), family_name);
+    if (rule) {
+      // Find CSSOM wrapper.
+      CSSFontPaletteValuesRule* values_rule =
+          FindFontPaletteValuesRule(*style_sheets->value, rule);
+
+      DCHECK(values_rule);
+      InspectorStyleSheet* inspector_style_sheet =
+          BindStyleSheet(values_rule->parentStyleSheet());
+      auto at_rule =
+          inspector_style_sheet->BuildAtRuleObjectForFontPaletteValuesRule(
+              values_rule);
+      result->push_back(std::move(at_rule));
+    }
+  }
+
+  const FontVariantAlternates* font_variant_alternates =
+      style->GetFontDescription().GetFontVariantAlternates();
+  if (font_variant_alternates && !font_variant_alternates->IsNormal()) {
+    const HeapVector<Member<StyleRuleFontFeatureValues>>* feature_values_rules =
+        document.GetScopedStyleResolver()
+            ? document.GetScopedStyleResolver()
+                  ->FontFeatureValuesRulesForFamily(family_name)
+            : nullptr;
+    std::vector<StyleRuleFontFeature::FeatureType> feature_types =
+        FontFeatureTypesFromFontVariantAlternates(font_variant_alternates);
+    if (feature_values_rules && !feature_types.empty()) {
+      for (const auto& rule : *feature_values_rules) {
+        // Find CSSOM wrapper.
+        CSSFontFeatureValuesRule* values_rule =
+            FindCSSRuleInSet<CSSFontFeatureValuesRule>(
+                *style_sheets->value,
+                [&rule](CSSFontFeatureValuesRule& css_rule) {
+                  bool result = css_rule.FontFeatureValues() == rule;
+                  return result;
+                });
+
+        if (values_rule) {
+          InspectorStyleSheet* inspector_style_sheet =
+              BindStyleSheet(values_rule->parentStyleSheet());
+          for (const auto& feature_type : feature_types) {
+            auto at_rule = inspector_style_sheet
+                               ->BuildAtRuleObjectForFontFeatureValuesRule(
+                                   values_rule, feature_type);
+            if (at_rule) {
+              result->push_back(std::move(at_rule));
+            }
+          }
+        }
+      }
+    }
+  }
+
+  CSSFontFaceRule* font_face_rule = FindCSSRuleInSet<CSSFontFaceRule>(
+      *style_sheets->value, [&family_name](CSSFontFaceRule& css_rule) {
+        auto* family = DynamicTo<CSSFontFamilyValue>(
+            css_rule.StyleRule()->Properties().GetPropertyCSSValue(
+                AtRuleDescriptorID::FontFamily));
+        if (!family) {
+          return false;
+        }
+        return family->Value() == family_name;
+      });
+  if (font_face_rule) {
+    InspectorStyleSheet* inspector_style_sheet =
+        BindStyleSheet(font_face_rule->parentStyleSheet());
+    auto at_rule =
+        inspector_style_sheet->BuildAtRuleObjectForFontFaceRule(font_face_rule);
+    result->push_back(std::move(at_rule));
+  }
+
+  return result;
+}
+
+// TODO(crbug.com/408969009): Delete this in favor of FontAtRulesForNode once
+// the devtools frontend is updated to use the new method.
 std::unique_ptr<protocol::CSS::CSSFontPaletteValuesRule>
 InspectorCSSAgent::FontPalettesForNode(Element& element) {
   const ComputedStyle* style = element.EnsureComputedStyle();
@@ -1932,12 +2077,8 @@ InspectorCSSAgent::FontPalettesForNode(Element& element) {
   }
 
   // Find CSSOM wrapper.
-  CSSFontPaletteValuesRule* values_rule = nullptr;
-  for (CSSStyleSheet* style_sheet : *style_sheets->value) {
-    values_rule = FindFontPaletteValuesRule(style_sheet, rule);
-    if (values_rule)
-      break;
-  }
+  CSSFontPaletteValuesRule* values_rule =
+      FindFontPaletteValuesRule(*style_sheets->value, rule);
 
   InspectorStyleSheet* inspector_style_sheet =
       BindStyleSheet(values_rule->parentStyleSheet());
@@ -2022,7 +2163,6 @@ InspectorCSSAgent::AnimationsForNode(Element* element,
   auto css_keyframes_rules =
       std::make_unique<protocol::Array<protocol::CSS::CSSKeyframesRule>>();
   Document& document = element->GetDocument();
-  DCHECK(!document.NeedsLayoutTreeUpdateForNode(*element));
   // We want to match the animation name of the animating element not the parent
   // element's animation names for pseudo-elements. When the `element` is a
   // non-pseudo-element then `animating_element` and the `element` are the same.
@@ -2127,11 +2267,8 @@ protocol::Response InspectorCSSAgent::getComputedStyleForNode(
         "Node is not an element and does not have a parent element");
   }
 
-  if (element->GetDocument().View() &&
-      element->GetDocument().View()->NeedsLayout()) {
-    element->GetDocument().UpdateStyleAndLayoutForNode(
-        element, DocumentUpdateReason::kInspector);
-  }
+  element->GetDocument().UpdateStyleAndLayoutForNode(
+      element, DocumentUpdateReason::kInspector);
 
   TRACE_EVENT1("devtools", "InspectorCSSAgent::getComputedStyleForNode", "node",
                element->DebugName());
@@ -2164,7 +2301,7 @@ protocol::Response InspectorCSSAgent::getComputedStyleForNode(
 
   bool is_appearance_base = false;
   if (auto* computed_style = element->GetComputedStyle()) {
-    is_appearance_base = computed_style->InBaseSelectAppearance();
+    is_appearance_base = computed_style->InBaseAppearance();
   }
   *extra_fields = protocol::CSS::ComputedStyleExtraFields::create()
                       .setIsAppearanceBase(is_appearance_base)
@@ -2269,12 +2406,12 @@ protocol::Response InspectorCSSAgent::resolveValues(
   ExecutionContext* execution_context = element->GetExecutionContext();
 
   if (pseudo_type.has_value()) {
-    AtomicString view_transition_name = pseudo_identifier.has_value()
-                                            ? AtomicString(*pseudo_identifier)
-                                            : g_null_atom;
+    AtomicString pseudo_argument = pseudo_identifier.has_value()
+                                       ? AtomicString(*pseudo_identifier)
+                                       : g_null_atom;
     element = element->GetStyledPseudoElement(
         InspectorDOMAgent::ProtocolPseudoTypeToPseudoId(*pseudo_type),
-        view_transition_name);
+        pseudo_argument);
     if (!element) {
       return protocol::Response::ServerError(
           "Could not retrieve pseudo element.");
@@ -2335,7 +2472,7 @@ protocol::Response InspectorCSSAgent::resolveValues(
 
     StyleResolverState state(element->GetDocument(), *element);
     state.EnsureParentStyle();
-    state.SetStyle(*element->GetComputedStyle());
+    state.CreateNewClonedStyle(*element->GetComputedStyle());
     // TODO: When Devtools gets mixin support, we need to figure out
     // what @env bindings to use here.
     const CSSUnparsedDeclarationValue* substituted =
@@ -3210,8 +3347,7 @@ std::unique_ptr<protocol::CSS::CSSMedia> InspectorCSSAgent::BuildMediaObject(
   for (wtf_size_t i = 0; i < query_vector.size(); ++i) {
     const MediaQuery& query = *query_vector.at(i);
     HeapVector<MediaQueryExp> expressions;
-    if (query.ExpNode())
-      query.ExpNode()->CollectExpressions(expressions);
+    query.CollectExpressions(expressions);
     auto expression_array = std::make_unique<
         protocol::Array<protocol::CSS::MediaQueryExpression>>();
     bool has_expression_items = false;
@@ -3221,13 +3357,13 @@ std::unique_ptr<protocol::CSS::CSSMedia> InspectorCSSAgent::BuildMediaObject(
       if (!exp_value.IsNumericLiteralValue()) {
         continue;
       }
-      const char* value_name =
+      StringView value_name =
           CSSPrimitiveValue::UnitTypeToString(exp_value.GetUnitType());
       std::unique_ptr<protocol::CSS::MediaQueryExpression>
           media_query_expression =
               protocol::CSS::MediaQueryExpression::create()
                   .setValue(exp_value.GetDoubleValue())
-                  .setUnit(String(value_name))
+                  .setUnit(value_name.ToString())
                   .setFeature(media_query_exp.MediaFeature())
                   .build();
 
@@ -4260,10 +4396,10 @@ void InspectorCSSAgent::ResetStartingStyles() {
 HeapVector<Member<CSSStyleDeclaration>> InspectorCSSAgent::MatchingStyles(
     Element* element) {
   PseudoId pseudo_id = kPseudoIdNone;
-  AtomicString view_transition_name = g_null_atom;
+  AtomicString pseudo_argument = g_null_atom;
   PseudoElement* pseudo_element = nullptr;
-  element = GetPseudoIdAndTag(element, pseudo_element, pseudo_id,
-                              view_transition_name);
+  element =
+      GetPseudoIdAndTag(element, pseudo_element, pseudo_id, pseudo_argument);
   if (!element)
     return {};
 
@@ -4284,8 +4420,7 @@ HeapVector<Member<CSSStyleDeclaration>> InspectorCSSAgent::MatchingStyles(
 
   HeapVector<Member<CSSStyleRule>> rules =
       FilterDuplicateRules(style_resolver.PseudoCSSRulesForElement(
-          element, pseudo_id, view_transition_name,
-          StyleResolver::kAllCSSRules));
+          element, pseudo_id, pseudo_argument, StyleResolver::kAllCSSRules));
   HeapVector<Member<CSSStyleDeclaration>> styles;
   if (!pseudo_id && element->style())
     styles.push_back(element->style());

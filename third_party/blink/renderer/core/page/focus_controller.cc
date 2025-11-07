@@ -336,9 +336,15 @@ Element* InvokerForOpenPopover(const Node* node) {
 }
 
 const Element* InclusiveAncestorOpenPopoverWithInvoker(const Element* element) {
-  for (; element; element = FlatTreeTraversal::ParentElement(*element)) {
-    if (InvokerForOpenPopover(element)) {
-      return element;  // Return the popover
+  for (const Element* current = element; current;
+       current = FlatTreeTraversal::ParentElement(*current)) {
+    if (RuntimeEnabledFeatures::
+            OpenPopoverInvokerRestrictToSameTreeScopeEnabled() &&
+        element->GetTreeScope() != current->GetTreeScope()) {
+      break;
+    }
+    if (InvokerForOpenPopover(current)) {
+      return current;  // Return the popover
     }
   }
   return nullptr;
@@ -1359,6 +1365,25 @@ Element* FindFocusableElementDescendingDownIntoFrameDocument(
   return element;
 }
 
+namespace {
+ScopedFocusNavigation GetScopeFor(Element*& owner,
+                                  FocusController::OwnerMap& owner_map) {
+  ScopedFocusNavigation new_scope =
+      ScopedFocusNavigation::CreateFor(*owner, owner_map);
+  while (new_scope.Owner() == owner) {
+    // This can happen if a single element is both the root of a scope,
+    // *and* the owner of a scope. E.g. <slot popover>. See
+    // crbug.com/447888734.
+    owner = owner->parentElement();
+    if (!owner) {
+      break;
+    }
+    new_scope = ScopedFocusNavigation::CreateFor(*owner, owner_map);
+  }
+  return new_scope;
+}
+}  // namespace
+
 Element* FindFocusableElementAcrossFocusScopesForward(
     ScopedFocusNavigation& scope,
     FocusController::OwnerMap& owner_map) {
@@ -1396,7 +1421,7 @@ Element* FindFocusableElementAcrossFocusScopesForward(
     Element* owner = current_scope.Owner();
     if (!owner)
       break;
-    current_scope = ScopedFocusNavigation::CreateFor(*owner, owner_map);
+    current_scope = GetScopeFor(owner, owner_map);
     found = FindFocusableElementRecursivelyForward(current_scope, owner_map);
   }
   return FindFocusableElementDescendingDownIntoFrameDocument(
@@ -1435,7 +1460,7 @@ Element* FindFocusableElementAcrossFocusScopesBackward(
       found = owner;
       break;
     }
-    current_scope = ScopedFocusNavigation::CreateFor(*owner, owner_map);
+    current_scope = GetScopeFor(owner, owner_map);
     found = FindFocusableElementRecursivelyBackward(current_scope, owner_map);
   }
   return FindFocusableElementDescendingDownIntoFrameDocument(

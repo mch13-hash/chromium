@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import './top_toolbar.js';
+import '//resources/cr_components/composebox/composebox.js';
+
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import {getCss} from './app.css.js';
@@ -27,11 +30,33 @@ export class ContextualTasksAppElement extends CrLitElement {
   private browserProxy_: BrowserProxy = BrowserProxyImpl.getInstance();
   protected accessor threadUrl_: string = '';
 
+  // TODO(crbug.com/454388385): Remove this once the authentication flow is
+  // implemented. Removing the gsc param renders the OGB header, which allows
+  // the user to press "Sign In" to authenticate.
+  protected removeGsc_() {
+    const url = new URL(this.threadUrl_);
+    url.searchParams.delete('gsc');
+    this.threadUrl_ = url.toString();
+  }
+
   override async connectedCallback() {
     super.connectedCallback();
 
-    const {url} = await this.browserProxy_.getThreadUrl();
-    this.threadUrl_ = url.url;
+    // Check if the URL that loaded this page has a task attached to it. If it
+    // does, we'll use the tasks URL to load the embedded page.
+    const params = new URLSearchParams(window.location.search);
+    const taskUuid = params.get('task');
+    if (taskUuid) {
+      const {url} = await this.browserProxy_.getUrlForTask({value: taskUuid});
+      this.browserProxy_.setTaskId({value: taskUuid});
+
+      const aiPageParams = new URLSearchParams(new URL(url.url).search);
+      this.browserProxy_.setThreadTitle(aiPageParams.get('q') || '');
+      this.threadUrl_ = url.url;
+    } else {
+      const {url} = await this.browserProxy_.getThreadUrl();
+      this.threadUrl_ = url.url;
+    }
   }
 
   override render() {

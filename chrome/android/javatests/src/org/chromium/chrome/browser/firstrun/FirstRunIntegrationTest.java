@@ -666,6 +666,7 @@ public class FirstRunIntegrationTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "Flaky, see crbug.com/457658024")
     public void testSkipTosPage() throws TimeoutException {
         // Test case that verifies when the ToS Page was previously accepted, launching the FRE
         // should transition to the next page.
@@ -1105,6 +1106,7 @@ public class FirstRunIntegrationTest {
     @MediumTest
     // Sign-in is not supported on automotive devices.
     @Restriction({DeviceRestriction.RESTRICTION_TYPE_NON_AUTO})
+    @DisabledTest(message = "Flaky, see crbug.com/431982831")
     public void testPrefsUpdated_historySyncPromoPromoDisabledWhilePromoShown() throws Exception {
         FirstRunPagesTestCase testCase = FirstRunPagesTestCase.createWithShowAllPromos();
         initializePreferences(testCase);

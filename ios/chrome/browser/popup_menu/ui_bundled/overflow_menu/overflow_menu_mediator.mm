@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/popup_menu/ui_bundled/overflow_menu/overflow_menu_mediator.h"
 
+#import "base/apple/foundation_util.h"
 #import "base/ios/ios_util.h"
 #import "base/metrics/histogram_functions.h"
 #import "base/metrics/user_metrics.h"
@@ -45,6 +46,7 @@
 #import "ios/chrome/browser/intents/model/intents_donation_helper.h"
 #import "ios/chrome/browser/lens_overlay/coordinator/lens_overlay_availability.h"
 #import "ios/chrome/browser/lens_overlay/model/lens_overlay_tab_helper.h"
+#import "ios/chrome/browser/menu/ui_bundled/action_factory.h"
 #import "ios/chrome/browser/ntp/shared/metrics/feed_metrics_recorder.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_presenter.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_presenter_observer_bridge.h"
@@ -68,10 +70,9 @@
 #import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/search_engines/model/search_engines_util.h"
 #import "ios/chrome/browser/settings/model/sync/utils/identity_error_util.h"
-#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/features.h"
-#import "ios/chrome/browser/settings/ui_bundled/password/password_manager_ui_features.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
+#import "ios/chrome/browser/shared/model/web_state_list/tab_group_utils.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_commands.h"
@@ -93,6 +94,7 @@
 #import "ios/chrome/browser/shared/public/commands/reading_list_add_command.h"
 #import "ios/chrome/browser/shared/public/commands/reminder_notifications_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
+#import "ios/chrome/browser/shared/public/commands/tab_groups_commands.h"
 #import "ios/chrome/browser/shared/public/commands/text_zoom_commands.h"
 #import "ios/chrome/browser/shared/public/commands/whats_new_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -191,6 +193,9 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   std::unique_ptr<PrefChangeRegistrar> _prefChangeRegistrar;
   // Search engine observer.
   std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
+
+  // Whether or not model initialization has finished.
+  BOOL _modelInitialized;
 }
 
 // The current web state.
@@ -234,6 +239,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
 @property(nonatomic, strong) OverflowMenuAction* clearBrowsingDataAction;
 @property(nonatomic, strong) OverflowMenuAction* readerModeAction;
+@property(nonatomic, strong) OverflowMenuAction* tabGroupAction;
 @property(nonatomic, strong) OverflowMenuAction* addBookmarkAction;
 @property(nonatomic, strong) OverflowMenuAction* editBookmarkAction;
 @property(nonatomic, strong) OverflowMenuAction* readLaterAction;
@@ -490,6 +496,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 #pragma mark - Model Creation
 
 - (void)initializeModel {
+  _modelInitialized = NO;
+
   __weak __typeof(self) weakSelf = self;
 
   // Bookmarks destination.
@@ -588,6 +596,11 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
                                  }];
 
   self.clearBrowsingDataAction = [self newClearBrowsingDataAction];
+
+  if (base::FeatureList::IsEnabled(kTabGroupInOverflowMenu)) {
+    self.tabGroupAction = [self dynamicTabGroupAction];
+  }
+
   self.addBookmarkAction = [self newAddBookmarkAction];
 
   NSString* editBookmarkHideItemText =
@@ -734,6 +747,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     self.appActionsGroup, self.pageActionsGroup, self.editActionsGroup,
     self.helpActionsGroup
   ];
+  _modelInitialized = YES;
 }
 
 - (OverflowMenuAction*)toggleReaderModeAction {
@@ -769,6 +783,68 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   }
 
   return action;
+}
+
+- (OverflowMenuAction*)dynamicTabGroupAction {
+  __weak __typeof(self) weakSelf = self;
+
+  std::set<const TabGroup*> groups = self.webStateList->GetGroups();
+  const TabGroup* currentGroup = self.webStateList->GetGroupOfWebStateAt(
+      self.webStateList->GetIndexOfWebState(self.webState));
+  ActionFactory* actionFactory = [[ActionFactory alloc]
+      initWithScenario:kMenuScenarioHistogramTabGroupOverflowMenu];
+
+  // If there are no tab groups, display the "New Tab Group" button.
+  if (groups.empty()) {
+    return [self
+        createOverflowMenuActionWithName:
+            l10n_util::GetPluralNSStringF(
+                IDS_IOS_CONTENT_CONTEXT_ADDTABTONEWTABGROUP, 1)
+                              actionType:overflow_menu::ActionType::TabGroup
+                              symbolName:kNewTabGroupActionSymbol
+                            systemSymbol:YES
+                        monochromeSymbol:YES
+                         accessibilityID:kToolsMenuNewTabGroupId
+                            hideItemText:nil
+                                 handler:^{
+                                   [weakSelf createNewTabGroup];
+                                 }];
+  } else if (currentGroup) {
+    // If the current tab is in a group, display the "Move to Tab Group" button.
+    OverflowMenuAction* action = [self
+        createOverflowMenuActionWithNameID:
+            IDS_IOS_CONTENT_CONTEXT_MOVETABTOGROUP
+                                actionType:overflow_menu::ActionType::TabGroup
+                                symbolName:kOpenImageActionSymbol
+                              systemSymbol:YES
+                          monochromeSymbol:YES
+                           accessibilityID:kToolsMenuMoveTabToGroupId
+                              hideItemText:nil
+                                   handler:^{
+                                   }];
+    action.menu = [self createMoveTabToGroupMenu:groups
+                                    currentGroup:currentGroup
+                               withActionFactory:actionFactory];
+    return action;
+  } else {
+    // If the current tab is not in a group but groups exist, display the "Add
+    // to Tab Group" button.
+    OverflowMenuAction* action = [self
+        createOverflowMenuActionWithName:
+            l10n_util::GetPluralNSStringF(
+                IDS_IOS_CONTENT_CONTEXT_ADDTABTOTABGROUP, 1)
+                              actionType:overflow_menu::ActionType::TabGroup
+                              symbolName:kOpenImageActionSymbol
+                            systemSymbol:YES
+                        monochromeSymbol:YES
+                         accessibilityID:kToolsMenuAddTabToGroupId
+                            hideItemText:nil
+                                 handler:^{
+                                 }];
+    action.menu = [self createAddTabToGroupMenu:groups
+                              withActionFactory:actionFactory];
+    return action;
+  }
 }
 
 - (OverflowMenuAction*)newAddBookmarkAction {
@@ -1423,6 +1499,9 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
 // Updates the model to match the current page state.
 - (void)updateModel {
+  if (!_modelInitialized) {
+    return;
+  }
   // First update the items' states, and then update all the orders.
   [self updateModelItemsState];
   [self updateModelOrdering];
@@ -1470,6 +1549,9 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   self.readLaterAction.enabled =
       !self.webContentAreaShowingOverlay && [self isCurrentURLWebURL];
 
+  if (base::FeatureList::IsEnabled(kTabGroupInOverflowMenu)) {
+    self.tabGroupAction.enabled = YES;
+  }
   BOOL bookmarkEnabled =
       [self isCurrentURLWebURL] && [self isEditBookmarksEnabled];
   self.addBookmarkAction.enabled = bookmarkEnabled;
@@ -1497,7 +1579,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   }
 
   if ([self isGeminiAvailable]) {
-    self.askBWGAction.enabled = !_webState->IsLoading();
+    self.askBWGAction.enabled =
+        IsGeminiImmediateOverlayEnabled() || !_webState->IsLoading();
   }
 
   if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
@@ -1571,8 +1654,10 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
 // Returns whether translate is enabled on the current page.
 - (BOOL)isTranslateEnabled {
-  return [self canManuallyTranslate:NO] && ![self isLensOverlayVisible] &&
-         ![self isReaderModeActive];
+  return
+      [self canManuallyTranslate:NO] && ![self isLensOverlayVisible] &&
+      (![self isReaderModeActive] ||
+       base::FeatureList::IsEnabled(kEnableReaderModeTranslationWithInfobar));
 }
 
 - (BOOL)isLensOverlayEnabled {
@@ -1958,9 +2043,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       return self.readingListModel->loaded() ? self.readingListDestination
                                              : nil;
     case overflow_menu::Destination::Passwords:
-      if ([self shouldIndicateMissingTrustedVaultKeyForPasswordsError] &&
-          password_manager::features::
-              IsPasswordManagerTrustedVaultWidgetEnabled()) {
+      if ([self shouldIndicateMissingTrustedVaultKeyForPasswordsError]) {
         self.passwordsDestination.badge = BadgeTypeError;
       }
       return self.passwordsDestination;
@@ -2059,6 +2142,9 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     actions.push_back(overflow_menu::ActionType::SetTabReminder);
   }
 
+  if (base::FeatureList::IsEnabled(kTabGroupInOverflowMenu)) {
+    actions.push_back(overflow_menu::ActionType::TabGroup);
+  }
   actions.push_back(overflow_menu::ActionType::Bookmark);
   actions.push_back(overflow_menu::ActionType::ReadingList);
   actions.push_back(overflow_menu::ActionType::ClearBrowsingData);
@@ -2100,6 +2186,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       return self.openIncognitoTabAction;
     case overflow_menu::ActionType::NewWindow:
       return self.openNewWindowAction;
+    case overflow_menu::ActionType::TabGroup:
+      return self.tabGroupAction;
     case overflow_menu::ActionType::Bookmark: {
       BOOL pageIsBookmarked =
           self.webState && self.bookmarkModel &&
@@ -2155,7 +2243,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 - (OverflowMenuAction*)customizationActionForActionType:
     (overflow_menu::ActionType)actionType {
   switch (actionType) {
-    // These actions should not be customizable.
+      // These actions should not be customizable.
     case overflow_menu::ActionType::Reload:
     case overflow_menu::ActionType::NewTab:
     case overflow_menu::ActionType::NewIncognitoTab:
@@ -2191,6 +2279,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       return [self openAskBWGAction];
     case overflow_menu::ActionType::HideToolbars:
       return [self hideToolbarsAction];
+    case overflow_menu::ActionType::TabGroup:
+      return [self dynamicTabGroupAction];
   }
 }
 
@@ -2247,12 +2337,95 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
           kMenuItemEntryPointSelected);
 
   [self dismissMenu];
-  if (IsIosQuickDeleteEnabled()) {
-    [self.quickDeleteHandler
-        showQuickDeleteAndCanPerformTabsClosureAnimation:YES];
-  } else {
-    [self.settingsHandler showClearBrowsingDataSettings];
+  [self.quickDeleteHandler
+      showQuickDeleteAndCanPerformTabsClosureAnimation:YES];
+}
+
+// Creates a new tab group with the current tab.
+- (void)createNewTabGroup {
+  web::WebState* currentWebState = self.webState;
+  [self dismissMenu];
+  if (!currentWebState) {
+    return;
   }
+
+  std::set<web::WebStateID> identifiers;
+  identifiers.insert(currentWebState->GetUniqueIdentifier());
+
+  [self.tabGroupsHandler showTabGroupCreationForTabs:identifiers];
+}
+
+// Creates a submenu to move the active tab from the group to a
+// different tab group.
+- (UIMenu*)createMoveTabToGroupMenu:(const std::set<const TabGroup*>&)groups
+                       currentGroup:(const TabGroup*)currentGroup
+                  withActionFactory:(ActionFactory*)actionFactory {
+  UIMenuElement* moveToGroupMenuElement = [actionFactory
+      menuToMoveTabToGroupWithGroups:groups
+                        currentGroup:currentGroup
+                           moveBlock:[self moveTabToGroupBlock]
+                         removeBlock:[self removeTabFromGroupBlock]];
+
+  return base::apple::ObjCCast<UIMenu>(moveToGroupMenuElement);
+}
+
+// Returns a Move Tab to Group block for the Move Tab to Group menu.
+- (void (^)(const TabGroup*))moveTabToGroupBlock {
+  return ^(const TabGroup* group) {
+    __weak __typeof(self) weakSelf = self;
+    int tabIndex = weakSelf.webStateList->GetIndexOfWebState(self.webState);
+    if (tabIndex == WebStateList::kInvalidIndex) {
+      return;
+    }
+    std::set<int> tabIndices = {tabIndex};
+    weakSelf.webStateList->MoveToGroup(tabIndices, group);
+    [self dismissMenu];
+  };
+}
+
+// Returns a Remove Tab from Group block for the Move Tab to Group menu.
+- (ProceduralBlock)removeTabFromGroupBlock {
+  return ^{
+    __weak __typeof(self) weakSelf = self;
+    int tabIndex = weakSelf.webStateList->GetIndexOfWebState(self.webState);
+    if (tabIndex == WebStateList::kInvalidIndex) {
+      return;
+    }
+    std::set<int> tabIndices = {tabIndex};
+    weakSelf.webStateList->RemoveFromGroups(tabIndices);
+    [self dismissMenu];
+  };
+}
+
+// Creates a submenu to add the active tab to an existing tab group.
+- (UIMenu*)createAddTabToGroupMenu:(const std::set<const TabGroup*>&)groups
+                 withActionFactory:(ActionFactory*)actionFactory {
+  UIMenuElement* addToGroupMenuElement =
+      [actionFactory menuToAddTabToGroupWithGroups:groups
+                                      numberOfTabs:1
+                                             block:[self addTabToGroupBlock]];
+
+  return base::apple::ObjCCast<UIMenu>(addToGroupMenuElement);
+}
+
+// Returns an Add Tab to Group block for the Add Tab to Group menu.
+- (void (^)(const TabGroup*))addTabToGroupBlock {
+  return ^(const TabGroup* group) {
+    __weak __typeof(self) weakSelf = self;
+    int tabIndex = weakSelf.webStateList->GetIndexOfWebState(self.webState);
+    if (tabIndex == WebStateList::kInvalidIndex) {
+      return;
+    }
+
+    std::set<int> tabIndices = {tabIndex};
+
+    if (group) {
+      weakSelf.webStateList->MoveToGroup(tabIndices, group);
+    } else {
+      [self createNewTabGroup];
+    }
+    [self dismissMenu];
+  };
 }
 
 // Dismisses the menu and adds the current page as a bookmark or opens the
@@ -2509,12 +2682,6 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 // Dismisses the menu and opens settings.
 - (void)openSettings {
   if (self.engagementTracker) {
-    if (!IsBlueDotOnToolsMenuButtoneEnabled() &&
-        self.settingsDestination.badge == BadgeTypePromo) {
-      self.engagementTracker->NotifyEvent(
-          feature_engagement::events::kBlueDotPromoOverflowMenuDismissed);
-      [self.popupMenuHandler updateToolsMenuBlueDotVisibility];
-    }
     self.engagementTracker->NotifyEvent(
         feature_engagement::events::kSettingsOnOverflowMenuUsed);
   }

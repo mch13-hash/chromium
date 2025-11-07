@@ -118,6 +118,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/v8_script_value_serializer.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_focus_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_pointer_event_init.h"
 #include "third_party/blink/renderer/core/clipboard/data_transfer.h"
@@ -1643,14 +1644,14 @@ TEST_F(WebFrameTest, PostMessageEvent) {
   // Send a message with the correct origin.
   scoped_refptr<SecurityOrigin> correct_origin =
       SecurityOrigin::Create(ToKURL(base_url_));
-  frame->PostMessageEvent(std::nullopt, g_empty_string,
-                          correct_origin->ToString(), make_message());
+  frame->PostMessageEvent(std::nullopt, nullptr, std::move(correct_origin),
+                          make_message());
 
   // Send another message with incorrect origin.
   scoped_refptr<SecurityOrigin> incorrect_origin =
       SecurityOrigin::Create(ToKURL(chrome_url_));
-  frame->PostMessageEvent(std::nullopt, g_empty_string,
-                          incorrect_origin->ToString(), make_message());
+  frame->PostMessageEvent(std::nullopt, nullptr, std::move(incorrect_origin),
+                          make_message());
 
   // Verify that only the first addition is in the body of the page.
   std::string content = TestWebFrameContentDumper::DumpWebViewAsText(
@@ -1783,6 +1784,8 @@ void UpdateScreenInfoAndResizeView(
 }  // namespace
 
 TEST_F(WebFrameTest, ChangeInFixedLayoutResetsTextAutosizingMultipliers) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(blink::features::kForceOffTextAutosizing);
   RegisterMockedHttpURLLoad("fixed_layout.html");
 
   int viewport_width = 640;
@@ -1814,6 +1817,8 @@ TEST_F(WebFrameTest, ChangeInFixedLayoutResetsTextAutosizingMultipliers) {
 }
 
 TEST_F(WebFrameTest, WorkingTextAutosizingMultipliers_VirtualViewport) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(blink::features::kForceOffTextAutosizing);
   const std::string html_file = "fixed_layout.html";
   RegisterMockedHttpURLLoad(html_file);
 
@@ -1835,6 +1840,8 @@ TEST_F(WebFrameTest, WorkingTextAutosizingMultipliers_VirtualViewport) {
 
 TEST_F(WebFrameTest,
        VisualViewportSetSizeInvalidatesTextAutosizingMultipliers) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(blink::features::kForceOffTextAutosizing);
   RegisterMockedHttpURLLoad("iframe_reload.html");
   RegisterMockedHttpURLLoad("visible_iframe.html");
 
@@ -7296,17 +7303,19 @@ class TestAccessInitialDocumentLocalFrameHost
                      SetWindowRectCallback callback) override {
     std::move(callback).Run();
   }
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   void Minimize() override {}
   void Maximize() override {}
   void Restore() override {}
   void SetResizable(bool resizable) override {}
+#endif
   void DidFirstVisuallyNonEmptyPaint() override {}
   void DidAccessInitialMainDocument() override {
     ++did_access_initial_main_document_;
   }
   void DraggableRegionsChanged(
       Vector<mojom::blink::DraggableRegionPtr> regions) override {}
-  void OnFirstContentfulPaint(base::TimeDelta load_time) override {}
+  void OnFirstContentfulPaint(base::TimeDelta duration) override {}
 
   // !!!!!!!!!!!!!!!!!! IMPORTANT !!!!!!!!!!!!!!!!!!
   // If the actual counts in the tests below increase, this could be an
@@ -7975,6 +7984,32 @@ TEST_F(WebFrameTest, WebNodeImageContents) {
   EXPECT_EQ(image.width(), 10);
   EXPECT_EQ(image.height(), 10);
   EXPECT_EQ(image.getColor(0, 0), SK_ColorBLUE);
+}
+
+TEST_F(WebFrameTest, WebNodeImageContentsNoIntrinsicSize) {
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.InitializeAndLoad("about:blank");
+  WebLocalFrame* frame = web_view_helper.LocalMainFrame();
+
+  static const char kSVGWithNoIntrinsicSize[] =
+      "<img "
+      "style=\"width:100px;height:100px\" "
+      "src=\"data:image/"
+      "svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg'>"
+      "<circle cx='50' cy='50' r='40' fill='blue' /></svg>\">";
+
+  // Load up the image and test that we can extract the contents.
+  KURL test_url = ToKURL("about:blank");
+  frame_test_helpers::LoadHTMLString(frame, kSVGWithNoIntrinsicSize, test_url);
+
+  WebNode node = frame->GetDocument().Body().FirstChild();
+  EXPECT_TRUE(node.IsElementNode());
+  WebElement element = node.To<WebElement>();
+  SkBitmap image = element.ImageContents();
+  ASSERT_FALSE(image.isNull());
+  EXPECT_EQ(image.width(), 100);
+  EXPECT_EQ(image.height(), 100);
+  EXPECT_EQ(image.getColor(50, 50), SK_ColorBLUE);
 }
 
 TEST_F(WebFrameTest, WebNodeImageContentsWithOrientation) {
@@ -9674,8 +9709,7 @@ TEST_F(WebFrameSwapTest, AdHighlightEarlyApply) {
             SkColorSetARGB(128, 255, 0, 0));
 }
 
-// TODO(crbug.com/1314493): This test is flaky with the TimedHTMLParserBudget
-// feature enabled.
+// TODO(crbug.com/1314493): This test is flaky.
 TEST_F(WebFrameSwapTest, DISABLED_DoNotPropagateDisplayNonePropertyOnSwap) {
   WebFrameSwapTestClient* main_frame_client =
       static_cast<WebFrameSwapTestClient*>(MainFrame()->Client());
@@ -12720,6 +12754,79 @@ TEST_F(WebFrameSimTest, ScrollToEndBubblingCrash) {
   key_event.SetType(WebInputEvent::Type::kKeyUp);
   WebView().MainFrameWidget()->HandleInputEvent(
       WebCoalescedInputEvent(key_event, ui::LatencyInfo()));
+}
+
+// https://crbug.com/41492445
+TEST_F(WebFrameSimTest, TestFocusPreventScrollNotScrollElementIntoView) {
+  UseAndroidSettings();
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 400));
+  WebView().EnableFakePageScaleAnimationForTesting(true);
+  WebView().GetPage()->GetSettings().SetTextAutosizingEnabled(false);
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      ::-webkit-scrollbar {
+        width: 0px;
+        height: 0px;
+      }
+      body,html {
+        width: 100%;
+        height: 100%;
+        margin: 0px;
+      }
+      input {
+        border: 0;
+        padding: 0;
+        margin-top: 1000px;
+        width: 100px;
+        height: 20px;
+      }
+    </style>
+    <input id="target" type="text" value="test" />
+  )HTML");
+
+  Compositor().BeginFrame();
+
+  ScrollableArea* area = GetDocument().View()->LayoutViewport();
+  Element* input = GetDocument().getElementById(AtomicString("target"));
+  gfx::Rect input_rect(0, 1000, 100, 20);
+
+  // Focus the element with `preventScroll: true` to ensure it does not scroll
+  // into view.
+  FocusOptions* focus_options = FocusOptions::Create();
+  focus_options->setPreventScroll(true);
+  input->Focus(focus_options);
+  ASSERT_TRUE(input->GetLayoutObject());
+  ASSERT_EQ(input, WebView().FocusedElement());
+  ASSERT_EQ(ScrollOffset(), area->GetScrollOffset());
+  ASSERT_FALSE(area->VisibleContentRect().Contains(input_rect));
+  ASSERT_EQ(WebView().FakePageScaleAnimationPageScaleForTesting(), 0.f);
+  // Simulate the keyboard being shown and resizing the widget. Cause a scroll
+  // into view after.
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(400, 300));
+  WebView()
+      .MainFrameImpl()
+      ->FrameWidget()
+      ->ScrollFocusedEditableElementIntoView();
+  // Verify that `preventScroll: true` prevents the page from scrolling.
+  ASSERT_EQ(0.f, WebView().FakePageScaleAnimationPageScaleForTesting());
+  EXPECT_EQ(gfx::Point(),
+            WebView().FakePageScaleAnimationTargetPositionForTesting());
+
+  // Reset focus to ensure the next focus call triggers scroll behavior.
+  GetDocument().ClearFocusedElement();
+  ASSERT_EQ(nullptr, GetDocument().FocusedElement());
+
+  // Focus the element again without `preventScroll` to ensure it is scrolled
+  // into view.
+  input->Focus();
+  ASSERT_TRUE(input->GetLayoutObject());
+  ASSERT_EQ(input, WebView().FocusedElement());
+  ASSERT_NE(ScrollOffset(), area->GetScrollOffset());
+  ASSERT_TRUE(area->VisibleContentRect().Contains(input_rect));
 }
 
 TEST_F(WebFrameSimTest, TestScrollFocusedEditableElementIntoView) {

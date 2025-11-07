@@ -1431,6 +1431,12 @@ public class WebContentsAccessibilityTreeTest {
 
     @Test
     @SmallTest
+    public void test_audio() {
+        performHtmlTest("audio.html");
+    }
+
+    @Test
+    @SmallTest
     public void test_b() {
         performHtmlTest("b.html");
     }
@@ -1844,6 +1850,12 @@ public class WebContentsAccessibilityTreeTest {
     @SmallTest
     public void test_html() {
         performHtmlTest("html.html");
+    }
+
+    @Test
+    @SmallTest
+    public void test_htmlVsAriaAttributes() {
+        performHtmlTest("html-vs-aria-attributes.html");
     }
 
     @Test

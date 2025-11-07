@@ -16,7 +16,6 @@
 #include "base/functional/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/sequence_bound.h"
@@ -129,8 +128,8 @@ class SessionStorageImpl : public base::trace_event::MemoryDumpProvider,
   void FlushAreaForTesting(const std::string& namespace_id,
                            const blink::StorageKey& storage_key);
 
-  // Access the underlying DomStorageDatabase. May be null if the database is
-  // not yet open.
+  // Access the underlying DomStorageDatabaseLevelDB. May be null if the
+  // database is not yet open.
   base::SequenceBound<DomStorageDatabase>& GetDatabaseForTesting() {
     return database_->database();
   }
@@ -223,12 +222,13 @@ class SessionStorageImpl : public base::trace_event::MemoryDumpProvider,
     OpenResult open_result;
     const char* histogram_name;
   };
-  MetadataParseResult ParseDatabaseVersion(
-      ValueAndStatus version,
-      std::vector<AsyncDomStorageDatabase::BatchDatabaseTask>* migration_tasks);
-  MetadataParseResult ParseNamespaces(
-      KeyValuePairsAndStatus namespaces,
-      std::vector<AsyncDomStorageDatabase::BatchDatabaseTask> migration_tasks);
+  struct DatabaseVersionParseResult : public MetadataParseResult {
+    // `nullopt` for new databases, read errors, and parsing errors.
+    std::optional<int64_t> database_version;
+  };
+  DatabaseVersionParseResult ParseDatabaseVersion(
+      ValueAndStatus version_texts_bytes);
+  MetadataParseResult ParseNamespaces(KeyValuePairsAndStatus namespaces);
   MetadataParseResult ParseNextMapId(ValueAndStatus next_map_id);
 
   void OnConnectionFinished();
@@ -261,7 +261,6 @@ class SessionStorageImpl : public base::trace_event::MemoryDumpProvider,
     CONNECTION_FINISHED,
     CONNECTION_SHUTDOWN
   } connection_state_ = NO_CONNECTION;
-  bool database_initialized_ = false;
 
   const base::FilePath partition_directory_;
   const scoped_refptr<base::SequencedTaskRunner> database_task_runner_;

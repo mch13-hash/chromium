@@ -13,7 +13,7 @@
 #include "chrome/browser/save_to_drive/save_to_drive_recorder.h"
 #include "chrome/browser/save_to_drive/time_remaining_calculator.h"
 #include "chrome/common/extensions/api/pdf_viewer_private.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/base/chrome_test_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -70,7 +70,7 @@ class SaveToDriveEventDispatcherBrowserTest
   void SetUpOnMainThread() override {
     PDFExtensionTestBase::SetUpOnMainThread();
 
-    GURL page_url = ui_test_utils::GetTestUrl(
+    GURL page_url = chrome_test_utils::GetTestUrl(
         base::FilePath(FILE_PATH_LITERAL("pdf")),
         base::FilePath(FILE_PATH_LITERAL("test.pdf")));
     auto* extension_frame = LoadPdfGetExtensionHost(page_url);
@@ -91,6 +91,16 @@ class SaveToDriveEventDispatcherBrowserTest
   }
 
   void TearDownOnMainThread() override {
+    // At the end of a Save to Drive upload test, send a completed progress to
+    // disable the beforeunload dialog in the UI.
+    pdf_api::SaveToDriveProgress progress;
+    progress.status = pdf_api::SaveToDriveStatus::kUploadCompleted;
+    progress.error_type = pdf_api::SaveToDriveErrorType::kNoError;
+    progress.uploaded_bytes = 100;
+    progress.file_size_bytes = 100;
+    EXPECT_CALL(*save_to_drive_recorder_, Record);
+    dispatcher_->Notify(std::move(progress));
+
     save_to_drive_recorder_ = nullptr;
     time_remaining_calculator_ = nullptr;
     dispatcher_.reset();

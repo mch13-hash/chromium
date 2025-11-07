@@ -14,9 +14,15 @@
 #include "components/password_manager/core/browser/password_manager_interface.h"
 #include "url/gurl.h"
 
+class ActorLoginFormFinder;
+
 namespace password_manager {
 class PasswordManagerInterface;
 }  // namespace password_manager
+
+namespace tabs {
+class TabInterface;
+}
 
 namespace actor_login {
 
@@ -25,6 +31,7 @@ class ActorLoginCredentialFiller {
  public:
   ActorLoginCredentialFiller(const url::Origin& main_frame_origin,
                              const Credential& credential,
+                             bool should_store_permission,
                              password_manager::PasswordManagerClient* client,
                              LoginStatusResultOrErrorReply callback);
   ~ActorLoginCredentialFiller();
@@ -35,8 +42,12 @@ class ActorLoginCredentialFiller {
 
   // Attempts to fill the credential provided in the constructor.
   // `password_manager` is used to find the signin form.
+  // `tab` is used if the user needs to re-authenticate. In this case the tab
+  // must be in foreground, otherwise this will result in
+  // `kErrorDeviceReauthRequired`.
   void AttemptLogin(
-      password_manager::PasswordManagerInterface* password_manager);
+      password_manager::PasswordManagerInterface* password_manager,
+      const tabs::TabInterface& tab);
 
  private:
   enum class FieldType { kUsername, kPassword };
@@ -63,8 +74,11 @@ class ActorLoginCredentialFiller {
                 std::u16string username,
                 std::u16string password);
 
-  // Fills all eligible fields with `username` and `password`.
-  void FillAllEligibleFields(std::u16string username, std::u16string password);
+  // Fills all eligible fields with `stored_credential.password_value` and
+  // `stored_credential.username_value`.
+  void FillAllEligibleFields(
+      const password_manager::PasswordForm& stored_credential,
+      bool should_fill_iframes);
 
   // Fills the field of `type` identified by `field_renderer_id` within the
   // `driver`'s frame with `value`. `closure` will be called to signal
@@ -91,12 +105,18 @@ class ActorLoginCredentialFiller {
   // matching the `origin_`.
   const Credential credential_;
 
+  // Whether user chose to always allow actor login to use `credential_`
+  const bool should_store_permission_ = false;
+
   // Populated with the aggregated results of the calls to fill.
   bool username_filled_ = false;
   bool password_filled_ = false;
 
   // Safe to access from everywhere apart from the destructor.
   raw_ptr<password_manager::PasswordManagerClient> client_ = nullptr;
+
+  // Helper object for finding login forms.
+  std::unique_ptr<ActorLoginFormFinder> login_form_finder_;
 
   // The callback to call with the result of the login attempt.
   LoginStatusResultOrErrorReply callback_;

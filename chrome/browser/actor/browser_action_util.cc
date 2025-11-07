@@ -21,10 +21,12 @@
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/aggregated_journal.h"
 #include "chrome/browser/actor/shared_types.h"
+#include "chrome/browser/actor/tools/attempt_form_filling_tool_request.h"
 #include "chrome/browser/actor/tools/attempt_login_tool_request.h"
 #include "chrome/browser/actor/tools/click_tool_request.h"
 #include "chrome/browser/actor/tools/drag_and_release_tool_request.h"
 #include "chrome/browser/actor/tools/history_tool_request.h"
+#include "chrome/browser/actor/tools/media_control_tool_request.h"
 #include "chrome/browser/actor/tools/move_mouse_tool_request.h"
 #include "chrome/browser/actor/tools/navigate_tool_request.h"
 #include "chrome/browser/actor/tools/script_tool_request.h"
@@ -60,6 +62,7 @@ using apc::Action;
 using apc::ActionTarget;
 using apc::ActivateTabAction;
 using apc::ActivateWindowAction;
+using apc::AttemptFormFillingAction;
 using apc::AttemptLoginAction;
 using apc::ClickAction;
 using apc::CloseTabAction;
@@ -69,6 +72,7 @@ using apc::CreateWindowAction;
 using apc::DragAndReleaseAction;
 using apc::HistoryBackAction;
 using apc::HistoryForwardAction;
+using apc::MediaControlAction;
 using apc::MoveMouseAction;
 using apc::NavigateAction;
 using apc::ScriptToolAction;
@@ -433,7 +437,10 @@ std::unique_ptr<ToolRequest> CreateWaitRequest(const WaitAction& action) {
   const base::TimeDelta wait_time =
       action.has_wait_time_ms() ? base::Milliseconds(action.wait_time_ms())
                                 : base::Seconds(3);
-  return std::make_unique<WaitToolRequest>(wait_time);
+  const tabs::TabHandle observe_tab_handle =
+      action.has_observe_tab_id() ? TabHandle(action.observe_tab_id())
+                                  : TabHandle::Null();
+  return std::make_unique<WaitToolRequest>(wait_time, observe_tab_handle);
 }
 
 std::unique_ptr<ToolRequest> CreateAttemptLoginRequest(
@@ -444,6 +451,70 @@ std::unique_ptr<ToolRequest> CreateAttemptLoginRequest(
   }
 
   return std::make_unique<AttemptLoginToolRequest>(tab_handle);
+}
+
+std::unique_ptr<ToolRequest> CreateAttemptFormFillingRequest(
+    const AttemptFormFillingAction& action) {
+  const tabs::TabHandle tab_handle = GetTabHandle(action);
+  if (tab_handle == TabHandle::Null()) {
+    return nullptr;
+  }
+
+  if (action.form_filling_requests_size() == 0) {
+    return nullptr;
+  }
+
+  auto requested_data_enum_converter = [](optimization_guide::proto::
+                                              FormFillingRequest_RequestedData
+                                                  proto_enum) {
+    switch (proto_enum) {
+      case optimization_guide::proto::FormFillingRequest_RequestedData_ADDRESS:
+        return AttemptFormFillingToolRequest::RequestedData::kAddress;
+      case optimization_guide::proto::
+          FormFillingRequest_RequestedData_BILLING_ADDRESS:
+        return AttemptFormFillingToolRequest::RequestedData::kBillingAddress;
+      case optimization_guide::proto::
+          FormFillingRequest_RequestedData_SHIPPING_ADDRESS:
+        return AttemptFormFillingToolRequest::RequestedData::kShippingAddress;
+      case optimization_guide::proto::
+          FormFillingRequest_RequestedData_WORK_ADDRESS:
+        return AttemptFormFillingToolRequest::RequestedData::kWorkAddress;
+      case optimization_guide::proto::
+          FormFillingRequest_RequestedData_HOME_ADDRESS:
+        return AttemptFormFillingToolRequest::RequestedData::kHomeAddress;
+      case optimization_guide::proto::
+          FormFillingRequest_RequestedData_CREDIT_CARD:
+        return AttemptFormFillingToolRequest::RequestedData::kCreditCard;
+      default:
+        // A default is needed:
+        // 1. To ease importing the actions_data.proto from an external
+        //    repository. Otherwise, the actions_data.proto import would be
+        //    blocked by the implementation here.
+        // 2. Since an old build may receive a yet unimported enum value in a
+        //    new proto message.
+        NOTIMPLEMENTED();
+        return AttemptFormFillingToolRequest::RequestedData::kUnknown;
+    }
+  };
+
+  std::vector<AttemptFormFillingToolRequest::FormFillingRequest> requests;
+  for (const auto& request_proto : action.form_filling_requests()) {
+    AttemptFormFillingToolRequest::FormFillingRequest request;
+    request.requested_data =
+        requested_data_enum_converter(request_proto.requested_data());
+    for (const auto& trigger_field : request_proto.trigger_fields()) {
+      std::optional<PageTarget> page_target = ToPageTarget(trigger_field);
+      if (!page_target) {
+        // One of the targets is invalid.
+        return nullptr;
+      }
+      request.trigger_fields.push_back(*page_target);
+    }
+    requests.push_back(request);
+  }
+
+  return std::make_unique<AttemptFormFillingToolRequest>(tab_handle,
+                                                         std::move(requests));
 }
 
 std::unique_ptr<ToolRequest> CreateScriptToolRequest(
@@ -467,9 +538,35 @@ std::unique_ptr<ToolRequest> CreateScriptToolRequest(
 
   return std::make_unique<ScriptToolRequest>(
       tab_handle,
-      PageTarget(DomNode{.node_id = kRootElementDomNodeId,
-                         .document_identifier = document_identifier}),
+      DomNode{.node_id = kRootElementDomNodeId,
+              .document_identifier = document_identifier},
       action.tool_name(), action.input_arguments());
+}
+
+std::unique_ptr<ToolRequest> CreateMediaControlRequest(
+    const MediaControlAction& action) {
+  const tabs::TabHandle tab_handle = GetTabHandle(action);
+  if (tab_handle == TabHandle::Null()) {
+    return nullptr;
+  }
+
+  MediaControl media_control;
+  switch (action.media_control_action_case()) {
+    case MediaControlAction::kPlay:
+      media_control = PlayMedia();
+      break;
+    case MediaControlAction::kPause:
+      media_control = PauseMedia();
+      break;
+    case MediaControlAction::kSeek:
+      media_control = SeekMedia{.seek_time_microseconds =
+                                    action.seek().seek_time_microseconds()};
+      break;
+    default:
+      return nullptr;
+  }
+
+  return std::make_unique<MediaControlToolRequest>(tab_handle, media_control);
 }
 
 class ActorJournalFetchPageProgressListener
@@ -485,7 +582,8 @@ class ActorJournalFetchPageProgressListener
 
   void BeginScreenshot() override {
     screenshot_entry_ = journal_->CreatePendingAsyncEntry(
-        url_, task_id_, mojom::JournalTrack::kActor, "GrabScreenshot", {});
+        url_, task_id_, journal_->AllocateDynamicTrackUUID(), "GrabScreenshot",
+        {});
   }
 
   void EndScreenshot(std::optional<std::string> error) override {
@@ -499,7 +597,7 @@ class ActorJournalFetchPageProgressListener
 
   void BeginAPC() override {
     apc_entry_ = journal_->CreatePendingAsyncEntry(
-        url_, task_id_, mojom::JournalTrack::kActor, "GrabAPC", {});
+        url_, task_id_, journal_->AllocateDynamicTrackUUID(), "GrabAPC", {});
   }
 
   void EndAPC(std::optional<std::string> error) override {
@@ -579,6 +677,11 @@ std::unique_ptr<ToolRequest> CreateToolRequest(
       const AttemptLoginAction& attempt_login_action = action.attempt_login();
       return CreateAttemptLoginRequest(attempt_login_action);
     }
+    case optimization_guide::proto::Action::kAttemptFormFilling: {
+      const AttemptFormFillingAction& attempt_form_fill_action =
+          action.attempt_form_filling();
+      return CreateAttemptFormFillingRequest(attempt_form_fill_action);
+    }
     case optimization_guide::proto::Action::kScriptTool: {
       const ScriptToolAction& script_tool_action = action.script_tool();
       return CreateScriptToolRequest(script_tool_action);
@@ -586,6 +689,10 @@ std::unique_ptr<ToolRequest> CreateToolRequest(
     case optimization_guide::proto::Action::kScrollTo: {
       const ScrollToAction& scroll_to_action = action.scroll_to();
       return CreateScrollToRequest(scroll_to_action);
+    }
+    case optimization_guide::proto::Action::kMediaControl: {
+      const MediaControlAction& media_control_action = action.media_control();
+      return CreateMediaControlRequest(media_control_action);
     }
     case optimization_guide::proto::Action::kCreateWindow: {
       const CreateWindowAction& create_window_action = action.create_window();
@@ -639,9 +746,9 @@ void FillInTabObservation(
     apc::TabObservation& tab_observation) {
   TRACE_EVENT0("actor", "FillInTabObservation");
   if (fetch_result.screenshot_result.has_value()) {
-    auto& data = fetch_result.screenshot_result->jpeg_data;
+    auto& data = fetch_result.screenshot_result->screenshot_data;
     if (data.size() != 0) {
-      tab_observation.set_screenshot_mime_type(kMimeTypeJpeg);
+      tab_observation.set_screenshot_mime_type(fetch_result.screenshot_result->mime_type);
       // TODO(bokan): Can we avoid a copy here?
       tab_observation.set_screenshot(data.data(), data.size());
     }
@@ -691,7 +798,7 @@ void FetchCallback(
   if (!result.has_value()) {
     auto* actor_service = actor::ActorKeyedService::Get(profile.get());
     actor_service->GetJournal().Log(
-        GURL(), task_id, actor::mojom::JournalTrack::kActor, result.error(),
+        GURL(), task_id, result.error(),
         JournalDetailsBuilder().Add("tabId", tab_observation->id()).Build());
     // For now record everything as a timeout.
     tab_observation->set_result(
@@ -755,6 +862,7 @@ void BuildActionsResultWithObservations(
     std::optional<size_t> index_of_failed_action,
     std::vector<actor::ActionResultWithLatencyInfo> action_results,
     const ActorTask& task,
+    bool skip_async_observation_information,
     base::OnceCallback<
         void(std::unique_ptr<apc::ActionsResult>,
              std::unique_ptr<actor::AggregatedJournal::PendingAsyncEntry>)>
@@ -766,8 +874,16 @@ void BuildActionsResultWithObservations(
 
   std::unique_ptr<actor::AggregatedJournal::PendingAsyncEntry> journal_entry =
       actor_service->GetJournal().CreatePendingAsyncEntry(
-          GURL(), task.id(), actor::mojom::JournalTrack::kActor,
-          "BuildActionsResultWithObservations", {});
+          GURL(), task.id(), MakeBrowserTrackUUID(task.id()),
+          "BuildActionsResultWithObservations",
+          JournalDetailsBuilder()
+              .Add("result_code", base::ToString(result_code))
+              .Add("index_of_failed_action",
+                   (index_of_failed_action.has_value() ? *index_of_failed_action : -1))
+              .Add("skip_async_observation_information",
+                   skip_async_observation_information)
+              .Add("action_results", action_results.size())
+              .Build());
 
   auto response = std::make_unique<apc::ActionsResult>();
 
@@ -792,7 +908,9 @@ void BuildActionsResultWithObservations(
           (*action_result.result->execution_end_time - actions_start_time)
               .InMilliseconds());
     }
-    {
+    // Don't report a page stabilization time if the start and end
+    // are the same. Not every tool needs stabilization.
+    if (*action_result.result->execution_end_time != action_result.end_time) {
       apc::ActionsResult_LatencyInformation_LatencyStep* latency_step =
           latency_info->add_latency_steps();
       latency_step->mutable_page_stabilization()->set_action_index(i);
@@ -804,8 +922,8 @@ void BuildActionsResultWithObservations(
     }
   }
 
-  std::vector<Browser*> browsers = chrome::FindAllTabbedBrowsersWithProfile(
-      profile, /*ignore_closing_browsers=*/true);
+  std::vector<Browser*> browsers =
+      chrome::FindAllTabbedBrowsersWithProfile(profile);
 
   for (Browser* browser : browsers) {
     apc::WindowObservation* window_observation = response->add_windows();
@@ -821,9 +939,10 @@ void BuildActionsResultWithObservations(
     }
   }
 
-  absl::flat_hash_set<tabs::TabInterface*> tabs_to_fetch;
+  absl::flat_hash_map<tabs::TabInterface*, apc::TabObservation*> tabs_to_fetch;
 
-  for (const tabs::TabHandle& handle : task.GetLastActedTabs()) {
+  ActorTask::TabHandleSet last_acted_tabs = task.GetLastActedTabs();
+  for (const tabs::TabHandle& handle : last_acted_tabs) {
     // Include a TabObservation entry for acted on tabs. If the tab no longer
     // exists or the fetch context failed, the observation will be empty.
     // TODO(crbug.com/434263095): We should probably avoid capturing
@@ -836,7 +955,6 @@ void BuildActionsResultWithObservations(
       tab_observation->set_result(
           apc::TabObservation::TAB_OBSERVATION_TAB_WENT_AWAY);
       actor_service->GetJournal().Log(GURL(), task.id(),
-                                      actor::mojom::JournalTrack::kActor,
                                       "TabObservationFailed",
                                       JournalDetailsBuilder()
                                           .Add("tabId", handle.raw_value())
@@ -852,38 +970,49 @@ void BuildActionsResultWithObservations(
       tab_observation->set_result(
           apc::TabObservation::TAB_OBSERVATION_PAGE_CRASHED);
       actor_service->GetJournal().Log(GURL(), task.id(),
-                                      actor::mojom::JournalTrack::kActor,
                                       "TabObservationFailed",
                                       JournalDetailsBuilder()
                                           .Add("tabId", handle.raw_value())
                                           .AddError("Page crashed")
                                           .Build());
     } else {
-      tabs_to_fetch.insert(tab);
+      apc::TabObservation* tab_observation = response->add_tabs();
+      tabs_to_fetch.emplace(tab, tab_observation);
+      tab_observation->set_id(tab->GetHandle().raw_value());
+      if (skip_async_observation_information) {
+        tab_observation->set_result(apc::TabObservation::TAB_OBSERVATION_OK);
+      }
     }
   }
 
-  apc::ActionsResult* raw_response = response.get();
+  actor_service->GetJournal().Log(
+      GURL(), TaskId(), "Observing Tabs",
+      JournalDetailsBuilder()
+          .Add("tab_observations", last_acted_tabs.size())
+          .Add("tabs_to_fetch", tabs_to_fetch.size())
+          .Build());
+
+  base::UmaHistogramCounts1000("Actor.PageContext.TabCount",
+                               tabs_to_fetch.size());
+
+  if (skip_async_observation_information) {
+    std::move(callback).Run(std::move(response), std::move(journal_entry));
+    return;
+  }
   base::RepeatingClosure barrier = base::BarrierClosure(
       tabs_to_fetch.size(),
       base::BindOnce(std::move(callback), std::move(response),
                      std::move(journal_entry)));
-
-  for (tabs::TabInterface* tab : tabs_to_fetch) {
-    apc::TabObservation* tab_observation = raw_response->add_tabs();
-    tab_observation->set_id(tab->GetHandle().raw_value());
-
-    // tab_observation can be Unretained because the underlying APC is owned by
-    // the barrier which is ref-counted.
+  for (auto& [tab, tab_observation] : tabs_to_fetch) {
+    // tab_observation can be Unretained because the underlying APC is owned
+    // by the barrier which is ref-counted.
     actor_service->RequestTabObservation(
         *tab, task.id(),
         base::BindOnce(FetchCallback, profile->GetWeakPtr(), task.id(), barrier,
-                       base::Unretained(tab_observation), action_results,
-                       actions_start_time, base::TimeTicks::Now(),
-                       base::Unretained(latency_info)));
+                       base::Unretained(tab_observation),
+                       action_results, actions_start_time,
+                       base::TimeTicks::Now(), base::Unretained(latency_info)));
   }
-  base::UmaHistogramCounts1000("Actor.PageContext.TabCount",
-                               tabs_to_fetch.size());
 }
 
 apc::ActionsResult BuildErrorActionsResult(

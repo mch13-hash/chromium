@@ -47,8 +47,8 @@ chrome_ios_eg2_test("ios_chrome_bookmarks_eg2tests_module") {
   xcode_test_application_name = "ios_chrome_eg2tests"
 
   deps = [
-    "//ios/chrome/browser/bookmarks/ui_bundled:eg2_tests",
-    "//ios/chrome/browser/bookmarks/ui_bundled/folder_chooser:eg2_tests",
+    "//ios/chrome/browser/bookmarks/folder_chooser/test:eg2_tests",
+    "//ios/chrome/browser/bookmarks/test:eg2_tests",
     "//ios/chrome/browser/bookmarks/ui_bundled/home:eg2_tests",
   ]
   data_deps = [ ":ios_chrome_eg2tests" ]
@@ -102,6 +102,7 @@ chrome_ios_eg2_test("ios_chrome_integration_eg2tests_module") {
     "//ios/chrome/browser/policy_url_blocking/model:eg2_tests",
     "//ios/chrome/browser/prerender/model:eg2_tests",
     "//ios/chrome/browser/push_notification/ui_bundled:eg2_tests",
+    "//ios/chrome/browser/safari_data_import/test:eg2_tests",
     "//ios/chrome/browser/safe_browsing/model:eg2_tests",
     "//ios/chrome/browser/snapshots/model:eg2_tests",
     "//ios/chrome/browser/ssl/model:eg2_tests",
@@ -203,12 +204,14 @@ chrome_ios_eg2_test("ios_chrome_ui_eg2tests_module") {
     "//ios/chrome/browser/download/ui:eg2_tests",
     "//ios/chrome/browser/drive_file_picker/test:eg2_tests",
     "//ios/chrome/browser/explain_with_gemini/coordinator:eg2_tests",
+    "//ios/chrome/browser/file_upload_panel/test:eg2_tests",
     "//ios/chrome/browser/first_run/ui_bundled:eg2_tests",
     "//ios/chrome/browser/first_run/ui_bundled/best_features/ui:eg2_tests",
     "//ios/chrome/browser/first_run/ui_bundled/default_browser:eg2_tests",
     "//ios/chrome/browser/first_run/ui_bundled/omnibox_position:eg2_tests",
     "//ios/chrome/browser/fullscreen/ui_bundled:eg2_tests",
     "//ios/chrome/browser/history/ui_bundled:eg2_tests",
+    "//ios/chrome/browser/home_customization/test:eg2_tests",
     "//ios/chrome/browser/incognito_interstitial/ui_bundled:eg2_tests",
     "//ios/chrome/browser/infobars/ui_bundled:eg2_tests",
     "//ios/chrome/browser/intelligence/bwg/ui:eg2_tests",
@@ -224,7 +227,6 @@ chrome_ios_eg2_test("ios_chrome_ui_eg2tests_module") {
     "//ios/chrome/browser/passwords/ui_bundled/bottom_sheet:eg2_tests",
     "//ios/chrome/browser/permissions/ui_bundled:eg2_tests",
     "//ios/chrome/browser/phone_number/ui_bundled:eg2_tests",
-    "//ios/chrome/browser/plus_addresses/ui:eg2_tests",
     "//ios/chrome/browser/policy/ui_bundled/idle:eg2_tests",
     "//ios/chrome/browser/popup_menu/ui_bundled:eg2_tests",
     "//ios/chrome/browser/popup_menu/ui_bundled/overflow_menu:eg2_tests",
@@ -233,14 +235,13 @@ chrome_ios_eg2_test("ios_chrome_ui_eg2tests_module") {
     "//ios/chrome/browser/qr_scanner/ui_bundled:eg2_tests",
     "//ios/chrome/browser/reader_mode/ui:eg2_tests",
     "//ios/chrome/browser/reading_list/ui_bundled:eg2_tests",
-    "//ios/chrome/browser/recent_tabs/ui_bundled:eg2_tests",
+    "//ios/chrome/browser/recent_tabs/test:eg2_tests",
     "//ios/chrome/browser/sad_tab/ui_bundled:eg2_tests",
-    "//ios/chrome/browser/safari_data_import/test:eg2_tests",
     "//ios/chrome/browser/safe_mode/ui_bundled:eg2_tests",
     "//ios/chrome/browser/save_to_drive/ui_bundled:eg2_tests",
     "//ios/chrome/browser/search_engine_choice/coordinator:eg2_tests",
     "//ios/chrome/browser/search_with/ui_bundled:eg2_tests",
-    "//ios/chrome/browser/send_tab_to_self/ui_bundled:eg2_tests",
+    "//ios/chrome/browser/send_tab_to_self/test:eg2_tests",
     "//ios/chrome/browser/settings/model/sync/utils:eg2_tests",
     "//ios/chrome/browser/settings/ui_bundled/address_bar_preference:eg2_tests",
     "//ios/chrome/browser/shared/ui/util:eg2_tests",
@@ -301,7 +302,7 @@ source_set("eg2_tests") {
 
   deps = [
     "//ios/chrome/app/strings",
-    "//ios/chrome/browser/bookmarks/ui_bundled:eg_test_support+eg2",
+    "//ios/chrome/browser/bookmarks/test:eg_test_support+eg2",
     "//ios/chrome/browser/settings/ui_bundled:settings_root_constants",
     "//ios/chrome/browser/settings/ui_bundled/password:eg_test_support+eg2",
     "//ios/chrome/browser/settings/ui_bundled/password:password_constants",

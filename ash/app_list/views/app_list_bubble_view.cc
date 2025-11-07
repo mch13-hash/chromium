@@ -47,7 +47,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/time/time.h"
-#include "chromeos/ash/services/assistant/public/cpp/assistant_enums.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
@@ -103,8 +102,8 @@ class SeparatorWithLayer : public views::View {
 
  public:
   SeparatorWithLayer() {
-    SetPaintToLayer(ui::LAYER_SOLID_COLOR);
-    // Color is set in OnThemeChanged().
+    SetBackground(
+        views::CreateLayerBasedSolidBackground(cros_tokens::kSeparatorColor));
   }
   SeparatorWithLayer(const SeparatorWithLayer&) = delete;
   SeparatorWithLayer& operator=(const SeparatorWithLayer&) = delete;
@@ -115,12 +114,6 @@ class SeparatorWithLayer : public views::View {
       const views::SizeBounds& available_size) const override {
     // The parent's layout manager will stretch it horizontally.
     return gfx::Size(1, 1);
-  }
-
-  void OnThemeChanged() override {
-    views::View::OnThemeChanged();
-    layer()->SetColor(ColorProvider::Get()->GetContentLayerColor(
-        ColorProvider::ContentLayerType::kSeparatorColor));
   }
 };
 

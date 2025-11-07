@@ -85,6 +85,8 @@ ManifestUpdateManager::ScopedBypassWindowCloseWaitingForTesting::
 // TODO(crbug.com/40272003): Also handle DidFinishNavigation() and
 // do not start the ManifestUpdateCheckCommand if different origin
 // navigation happens.
+// TODO(https://crbug.com/452053908): Replace this completely with
+// content::PageManifestManager usage in the command.
 class ManifestUpdateManager::PreUpdateWebContentsObserver
     : public content::WebContentsObserver {
  public:
@@ -312,34 +314,43 @@ void ManifestUpdateManager::StartCheckAfterPageAndManifestUrlLoad(
   update_stage.observer.reset();
   update_stage.stage = UpdateStage::Stage::kCheckingManifestDiff;
 
-  if (load_finished_callback_) {
-    std::move(load_finished_callback_).Run();
-  }
-
   // TODO(crbug.com/442643377): Don't do this here, and instead use a per-page
   // class to be notified when a valid manifest is attached to a page.
   if (base::FeatureList::IsEnabled(features::kWebAppPredictableAppUpdating) &&
       base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon)) {
+    auto update_time_it = update_check_for_silent_updates_.find(app_id);
+    std::optional<base::Time> previous_time_for_silent_icon_update =
+        (update_time_it != update_check_for_silent_updates_.end())
+            ? std::make_optional(update_time_it->second)
+            : std::nullopt;
+
     provider_->scheduler().ScheduleManifestSilentUpdate(
-        *web_contents,
+        *web_contents, previous_time_for_silent_icon_update,
         base::BindOnce(&ManifestUpdateManager::OnManifestSilentUpdateComplete,
                        weak_factory_.GetWeakPtr(), web_contents, url, app_id));
-    return;
+  } else {
+    auto app_window_close_await_callback = base::BindOnce(
+        &ManifestUpdateManager::OnManifestCheckAwaitAppWindowClose,
+        weak_factory_.GetWeakPtr(), web_contents, url, app_id);
+    provider_->scheduler().ScheduleManifestUpdateCheck(
+        url, app_id, check_time, web_contents,
+        std::move(app_window_close_await_callback));
   }
 
-  auto app_window_close_await_callback =
-      base::BindOnce(&ManifestUpdateManager::OnManifestCheckAwaitAppWindowClose,
-                     weak_factory_.GetWeakPtr(), web_contents, url, app_id);
-  provider_->scheduler().ScheduleManifestUpdateCheck(
-      url, app_id, check_time, web_contents,
-      std::move(app_window_close_await_callback));
+  // Run the `load_finished_callback_` after it is guaranteed that the command
+  // has been scheduled, to prevent flakiness in case the callback runs before
+  // the command is scheduled, and any subsequent
+  // `AwaitAllCommandsCompleteForTesting()` ends instantly.
+  if (load_finished_callback_) {
+    std::move(load_finished_callback_).Run();
+  }
 }
 
 void ManifestUpdateManager::OnManifestSilentUpdateComplete(
     base::WeakPtr<content::WebContents> contents,
     const GURL& url,
     const webapps::AppId& app_id,
-    ManifestSilentUpdateCheckResult result) {
+    ManifestSilentUpdateCompletionInfo completion_info) {
   auto update_stage_it = update_stages_.find(app_id);
   if (update_stage_it == update_stages_.end()) {
     // If the web_app has already been uninstalled after the manifest update
@@ -348,7 +359,7 @@ void ManifestUpdateManager::OnManifestSilentUpdateComplete(
   }
   update_stages_.erase(update_stage_it);
   bool update_silent_or_pending;
-  switch (result) {
+  switch (completion_info.result) {
     case ManifestSilentUpdateCheckResult::kAppNotInstalled:
     case ManifestSilentUpdateCheckResult::kAppUpdateFailedDuringInstall:
     case ManifestSilentUpdateCheckResult::kSystemShutdown:
@@ -365,6 +376,7 @@ void ManifestUpdateManager::OnManifestSilentUpdateComplete(
     case ManifestSilentUpdateCheckResult::kAppOnlyHasSecurityUpdate:
     case ManifestSilentUpdateCheckResult::kAppSilentlyUpdated:
     case ManifestSilentUpdateCheckResult::kAppHasNonSecurityAndSecurityChanges:
+    case ManifestSilentUpdateCheckResult::kAppHasSecurityUpdateDueToThrottle:
       update_silent_or_pending = true;
       break;
   }
@@ -375,6 +387,13 @@ void ManifestUpdateManager::OnManifestSilentUpdateComplete(
     page_load_metrics::MetricsWebContentsObserver::RecordFeatureUsage(
         contents->GetPrimaryMainFrame(),
         blink::mojom::WebFeature::kWebAppManifestUpdate);
+  }
+
+  // Track time for throttling future silent icon updates if the current update
+  // triggered a silent icon update.
+  if (completion_info.time_for_icon_diff_check.has_value()) {
+    update_check_for_silent_updates_[app_id] =
+        *completion_info.time_for_icon_diff_check;
   }
 }
 
@@ -418,13 +437,17 @@ void ManifestUpdateManager::OnManifestCheckAwaitAppWindowClose(
   CHECK(install_info);
 
   Profile* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
-  auto keep_alive = std::make_unique<ScopedKeepAlive>(
-      KeepAliveOrigin::APP_MANIFEST_UPDATE, KeepAliveRestartOption::DISABLED);
   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive;
   if (!profile->IsOffTheRecord()) {
-    profile_keep_alive = std::make_unique<ScopedProfileKeepAlive>(
+    profile_keep_alive = ScopedProfileKeepAlive::TryAcquire(
         profile, ProfileKeepAliveOrigin::kWebAppUpdate);
+    if (!profile_keep_alive) {
+      // Profile is scheduled for destruction, abort.
+      return;
+    }
   }
+  auto keep_alive = std::make_unique<ScopedKeepAlive>(
+      KeepAliveOrigin::APP_MANIFEST_UPDATE, KeepAliveRestartOption::DISABLED);
 
   provider_->scheduler().ScheduleManifestUpdateFinalize(
       url, app_id, std::move(install_info), std::move(keep_alive),
@@ -461,7 +484,10 @@ void ManifestUpdateManager::OnWebAppWillBeUninstalled(
     update_stages_.erase(it);
   }
   CHECK(!base::Contains(update_stages_, app_id));
+
+  // Clear any data necessary for throttling updates for the current web app.
   last_update_check_.erase(app_id);
+  update_check_for_silent_updates_.erase(app_id);
 }
 
 void ManifestUpdateManager::OnWebAppInstallManagerDestroyed() {

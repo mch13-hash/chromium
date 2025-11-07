@@ -47,6 +47,7 @@ class MockActorLoginService : public actor_login::ActorLoginService {
   void AttemptLogin(
       tabs::TabInterface* tab,
       const actor_login::Credential& credential,
+      bool should_store_permission,
       actor_login::LoginStatusResultOrErrorReply callback) override;
 
   void SetCredentials(const actor_login::CredentialsOrError& credentials);
@@ -56,11 +57,13 @@ class MockActorLoginService : public actor_login::ActorLoginService {
   void SetLoginStatus(actor_login::LoginStatusResultOrError login_status);
 
   const std::optional<actor_login::Credential>& last_credential_used() const;
+  bool last_permission_was_permanent() const;
 
  private:
   actor_login::CredentialsOrError credentials_;
   actor_login::LoginStatusResultOrError login_status_;
   std::optional<actor_login::Credential> last_credential_used_;
+  bool last_permission_was_permanent_ = false;
 };
 
 inline constexpr int32_t kNonExistentContentNodeId =
@@ -90,6 +93,10 @@ class ActorToolsTest : public InProcessBrowserTest {
   virtual std::unique_ptr<ExecutionEngine> CreateExecutionEngine(
       Profile* profile);
 
+  // Returns true if actuation should always be enabled for the test (regardless
+  // of policy / opt-in status).
+  virtual bool ShouldForceActOnWeb();
+
   TaskId task_id_;
 
  private:
@@ -98,31 +105,8 @@ class ActorToolsTest : public InProcessBrowserTest {
   base::ScopedTempDir temp_dir_;
 };
 
-class ActorToolsGeneralPageStabilityTest
-    : public ActorToolsTest,
-      public ::testing::WithParamInterface<
-          ::features::ActorGeneralPageStabilityMode> {
- public:
-  static std::string DescribeParam(
-      const testing::TestParamInfo<ParamType>& info);
-  ActorToolsGeneralPageStabilityTest();
-  ~ActorToolsGeneralPageStabilityTest() override;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
 gfx::RectF GetBoundingClientRect(content::RenderFrameHost& rfh,
                                  std::string_view query);
-
-std::string DescribeGeneralPageStabilityMode(
-    features::ActorGeneralPageStabilityMode mode);
-
-inline constexpr features::ActorGeneralPageStabilityMode
-    kActorGeneralPageStabilityModeValues[] = {
-        features::ActorGeneralPageStabilityMode::kDisabled,
-        features::ActorGeneralPageStabilityMode::kAllEnabled,
-};
 
 std::string DescribePaintStabilityMode(features::ActorPaintStabilityMode mode);
 

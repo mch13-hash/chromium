@@ -21,7 +21,7 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &features::kPostPowerMonitorBroadcastReceiverInitToBackground,
     &features::kPostGetMyMemoryStateToBackground,
     &features::kRebindingChildServiceConnectionController,
-    &features::kUpdateStateBeforeUnbinding,
+    &features::kRebindServiceBatchApi,
     &features::kUseIsUnboundCheck,
     &features::kUseSharedRebindServiceConnection,
 };

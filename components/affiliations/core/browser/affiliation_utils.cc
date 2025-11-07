@@ -55,10 +55,9 @@ bool CanonicalizeWebFacetURI(const std::string& input_uri,
   url::Parsed canonical_parsed;
   url::StdStringCanonOutput canonical_output(canonical_uri);
 
-  bool canonicalization_succeeded = url::CanonicalizeStandardURL(
-      input_uri.c_str(), input_parsed,
-      url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION, nullptr,
-      &canonical_output, &canonical_parsed);
+  bool canonicalization_succeeded = url::CanonicalizeStandardUrl(
+      input_uri, input_parsed, url::SCHEME_WITH_HOST_PORT_AND_USER_INFORMATION,
+      nullptr, &canonical_output, &canonical_parsed);
   canonical_output.Complete();
 
   if (canonicalization_succeeded && canonical_parsed.host.is_nonempty() &&
@@ -175,7 +174,7 @@ bool ParseAndCanonicalizeFacetURI(const std::string& input_uri,
   canonical_uri->clear();
   canonical_uri->reserve(input_uri.size() + 32);
 
-  url::Parsed input_parsed = url::ParseStandardURL(input_uri);
+  url::Parsed input_parsed = url::ParseStandardUrl(input_uri);
   std::string_view scheme = ComponentString(input_uri, input_parsed.scheme);
   if (base::EqualsCaseInsensitiveASCII(scheme, url::kHttpsScheme)) {
     return CanonicalizeWebFacetURI(input_uri, input_parsed, canonical_uri);
@@ -338,7 +337,7 @@ FacetURI::FacetURI(const std::string& canonical_spec, bool is_valid)
     : is_valid_(is_valid), canonical_spec_(canonical_spec) {
   // TODO(engedy): Refactor code in order to avoid to avoid parsing the URL
   // twice.
-  parsed_ = url::ParseStandardURL(canonical_spec_);
+  parsed_ = url::ParseStandardUrl(canonical_spec_);
 }
 
 // Facet

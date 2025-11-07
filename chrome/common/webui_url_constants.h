@@ -83,6 +83,9 @@ inline constexpr char kChromeUIConnectorsInternalsHost[] =
     "connectors-internals";
 inline constexpr char kChromeUIConstrainedHTMLTestURL[] =
     "chrome://constrained-test/";
+inline constexpr char kChromeUIContextualTasksHost[] = "contextual-tasks";
+inline constexpr char kChromeUIContextualTasksURL[] =
+    "chrome://contextual-tasks/";
 inline constexpr char kChromeUIContentSettingsURL[] =
     "chrome://settings/content";
 inline constexpr char16_t kChromeUIContentSettingsURL16[] =
@@ -208,6 +211,8 @@ inline constexpr char kChromeUIOmniboxHost[] = "omnibox";
 inline constexpr char kChromeUIOmniboxPopupHost[] = "omnibox-popup.top-chrome";
 inline constexpr char kChromeUIOmniboxPopupURL[] =
     "chrome://omnibox-popup.top-chrome/";
+inline constexpr char kChromeUIOmniboxPopupAimURL[] =
+    "chrome://omnibox-popup.top-chrome/omnibox_popup_aim.html";
 inline constexpr char kChromeUIOmniboxURL[] = "chrome://omnibox/";
 inline constexpr char kChromeUIOnDeviceTranslationInternalsHost[] =
     "on-device-translation-internals";
@@ -300,6 +305,9 @@ inline constexpr char kChromeUISystemInfoHost[] = "system";
 inline constexpr char kChromeUITermsHost[] = "terms";
 inline constexpr char kChromeUITermsURL[] = "chrome://terms/";
 inline constexpr char kChromeUIThemeHost[] = "theme";
+inline constexpr char kChromeUIReloadButtonURL[] =
+    "chrome://reload-button.top-chrome";
+inline constexpr char kChromeUIReloadButtonHost[] = "reload-button.top-chrome";
 inline constexpr char kChromeUIThemeURL[] = "chrome://theme/";
 inline constexpr char kChromeUITopChromeDomain[] = "top-chrome";
 inline constexpr char kChromeUITranslateInternalsHost[] = "translate-internals";
@@ -375,6 +383,7 @@ inline constexpr char kChromeUIHistoryClustersSidePanelHost[] =
     "history-clusters-side-panel.top-chrome";
 inline constexpr char kChromeUIHistoryClustersSidePanelURL[] =
     "chrome://history-clusters-side-panel.top-chrome/";
+inline constexpr char kChromeUILegionInternalsHost[] = "legion-internals";
 inline constexpr char kChromeUILensHost[] = "lens";
 inline constexpr char kChromeUILensSidePanelHost[] = "lens";
 inline constexpr char kChromeUILensUntrustedSidePanelAPIURL[] =
@@ -665,7 +674,6 @@ inline constexpr char kGoogleServicesSubpage[] = "googleServices";
 inline constexpr char kHandlerSettingsSubPage[] = "handlers";
 inline constexpr char kHistorySearchSubpage[] = "ai/historySearch";
 inline constexpr char kImportDataSubPage[] = "importData";
-inline constexpr char kIncognitoSettingsSubPage[] = "incognito";
 inline constexpr char kLanguageOptionsSubPage[] = "languages";
 inline constexpr char kLanguagesSubPage[] = "languages/details";
 inline constexpr char kManageProfileSubPage[] = "manageProfile";

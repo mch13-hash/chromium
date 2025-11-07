@@ -7,6 +7,7 @@
 #import "base/apple/foundation_util.h"
 #import "base/check.h"
 #import "base/i18n/rtl.h"
+#import "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/search_engine_choice/ui/search_engine_choice_constants.h"
@@ -67,7 +68,8 @@ const char* const kLearnMoreURL = "internal://choice-screen-learn-more";
 SnippetSearchEngineButton* CreateSnippetSearchEngineButtonWithElement(
     SnippetSearchEngineElement* element) {
   CHECK(element.keyword);
-  SnippetSearchEngineButton* button = [[SnippetSearchEngineButton alloc] init];
+  SnippetSearchEngineButton* button = [[SnippetSearchEngineButton alloc]
+      initWithCurrentDefaultState:element.currentDefaultState];
   button.faviconImage = element.faviconImage;
   button.searchEngineName = element.name;
   button.snippetText = element.snippetDescription;

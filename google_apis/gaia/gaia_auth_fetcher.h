@@ -12,15 +12,14 @@
 #include "base/component_export.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth_multilogin_result.h"
-#include "net/http/http_request_headers.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_request_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "url/gurl.h"
@@ -43,6 +42,17 @@ namespace gaia {
 enum class MultiloginMode {
   MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER = 0,
   MULTILOGIN_PRESERVE_COOKIE_ACCOUNTS_ORDER
+};
+
+// Mode determining the cookie binding mode for a multilogin request. This does
+// not have any effect if none of the tokens used in the request are bound.
+//
+// This parameter is only going to be used during a gradual feature rollout.
+// TODO(crbug.com/452551212): remove this parameter after the full launch.
+enum class MultiloginCookieBindingMode {
+  kDisabled,
+  kEnabledUnenforced,
+  kEnabledEnforced
 };
 
 // Specifies the "source" parameter for Gaia calls.
@@ -130,7 +140,8 @@ class COMPONENT_EXPORT(GOOGLE_APIS) GaiaAuthFetcher {
       const std::string& external_cc_result,
       OAuthMultiloginResult::CookieDecryptor cookie_decryptor =
           base::NullCallback(),
-      bool enable_oaml_cookie_binding = false);
+      gaia::MultiloginCookieBindingMode cookie_binding_mode =
+          gaia::MultiloginCookieBindingMode::kDisabled);
 
   // Starts a request to list the accounts in the GAIA cookie.
   void StartListAccounts();

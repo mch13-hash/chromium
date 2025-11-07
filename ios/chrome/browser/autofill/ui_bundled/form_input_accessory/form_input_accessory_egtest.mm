@@ -26,7 +26,7 @@
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/manual_fill_matchers.h"
 #import "ios/chrome/browser/metrics/model/metrics_app_interface.h"
 #import "ios/chrome/browser/passwords/model/password_manager_app_interface.h"
-#import "ios/chrome/browser/passwords/ui_bundled/bottom_sheet/password_suggestion_bottom_sheet_app_interface.h"
+#import "ios/chrome/browser/passwords/ui_bundled/bottom_sheet/credential_suggestion_bottom_sheet_app_interface.h"
 #import "ios/chrome/browser/passwords/ui_bundled/password_constants.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/common/ui/elements/form_input_accessory_view.h"
@@ -223,6 +223,13 @@ void SlowlyTypeText(NSString* text) {
 
 @implementation FormInputAccessoryEGTest
 
+// Returns whether the two-bubble feature should be enabled for the current
+// test. `NO` is returned to verify all tests pass when the two-bubble feature
+// is disabled.
+- (BOOL)shouldEnableTwoBubbleFeature {
+  return NO;
+}
+
 - (void)setUp {
   [super setUp];
 
@@ -305,6 +312,12 @@ void SlowlyTypeText(NSString* text) {
   if ([self isRunningTest:@selector(testUseBackupPassword)]) {
     config.features_enabled.push_back(
         password_manager::features::kIOSFillRecoveryPassword);
+  }
+
+  if ([self shouldEnableTwoBubbleFeature]) {
+    config.features_enabled.push_back(kIOSKeyboardAccessoryTwoBubble);
+  } else {
+    config.features_disabled.push_back(kIOSKeyboardAccessoryTwoBubble);
   }
 
   return config;
@@ -488,8 +501,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
 // with the proper suggestion visible and that tapping on that suggestion
 // properly fills the related fields on the form.
 - (void)testFillPasswordFieldsOnForm {
-  // Disable the password bottom sheet.
-  [PasswordSuggestionBottomSheetAppInterface disableBottomSheet];
+  // Disable the credential bottom sheet.
+  [CredentialSuggestionBottomSheetAppInterface disableBottomSheet];
 
   [FormInputAccessoryAppInterface setUpMockReauthenticationModule];
   [FormInputAccessoryAppInterface mockReauthenticationModuleExpectedResult:
@@ -524,8 +537,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
 // Tests that the username field is filled when it is the only field in the
 // sign-in form.
 - (void)testFillFieldOnFormWithSingleUsername {
-  // Disable the password bottom sheet.
-  [PasswordSuggestionBottomSheetAppInterface disableBottomSheet];
+  // Disable the credential bottom sheet.
+  [CredentialSuggestionBottomSheetAppInterface disableBottomSheet];
 
   [FormInputAccessoryAppInterface setUpMockReauthenticationModule];
   [FormInputAccessoryAppInterface mockReauthenticationModuleExpectedResult:
@@ -557,8 +570,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
 // Tests that the password field is filled when it is the only field in the
 // sign-in form.
 - (void)testFillFieldOnFormWithSinglePassword {
-  // Disable the password bottom sheet.
-  [PasswordSuggestionBottomSheetAppInterface disableBottomSheet];
+  // Disable the credential bottom sheet.
+  [CredentialSuggestionBottomSheetAppInterface disableBottomSheet];
 
   [FormInputAccessoryAppInterface setUpMockReauthenticationModule];
   [FormInputAccessoryAppInterface mockReauthenticationModuleExpectedResult:
@@ -1062,8 +1075,8 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
 // Tests that a backup password appears as expected in the keyboard accessory
 // and that it can be used to fill the form.
 - (void)testUseBackupPassword {
-  // Disable the password bottom sheet.
-  [PasswordSuggestionBottomSheetAppInterface disableBottomSheet];
+  // Disable the credential bottom sheet.
+  [CredentialSuggestionBottomSheetAppInterface disableBottomSheet];
 
   // Set up the reauthentication module.
   [FormInputAccessoryAppInterface setUpMockReauthenticationModule];
@@ -1095,6 +1108,23 @@ id<GREYMatcher> PaymentsBottomSheetUseKeyboardButton() {
 
   [self verifyFieldsHaveBeenFilledWithUsername:username
                                       password:backupPassword];
+}
+
+@end
+
+// Reruns all the tests in this file but with the two-bubble feature enabled by
+// default.
+@interface FormInputAccessoryTwoBubbleTestCase : FormInputAccessoryEGTest
+
+@end
+
+@implementation FormInputAccessoryTwoBubbleTestCase
+
+// Returns whether the two-bubble feature should be enabled for the current
+// test. It returns `YES` to rerun tests defined in
+// `FormInputAccessoryEGTest`.
+- (BOOL)shouldEnableTwoBubbleFeature {
+  return YES;
 }
 
 @end

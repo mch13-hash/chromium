@@ -95,15 +95,16 @@ consoles.console_view(
     ("clang-tot-device", "iOS|internal", "dev"),
 )]
 
-def tot_mac_builder(*, name, cores = 12, is_rust = False, **kwargs):
+def tot_mac_builder(*, name, is_rust = False, **kwargs):
     if "gn_args" in kwargs:
         kwargs["gn_args"].configs.append("mac")
     desc_tool = "Rust" if is_rust else "Clang"
     return ci.builder(
         name = name,
-        cores = cores,
         os = os.MAC_DEFAULT,
         ssd = True,
+        cores = None,
+        cpu = cpu.ARM64,
         properties = {
             # The Chromium build doesn't need system Xcode, but the ToT
             # bots also build clang and llvm and that build does need system
@@ -261,7 +262,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -311,7 +312,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -913,6 +914,7 @@ clang_tot_linux_builder(
             "shared",
             "release",
             "x64",
+            "remoteexec",
         ],
     ),
     targets = targets.bundle(
@@ -927,6 +929,7 @@ clang_tot_linux_builder(
         ],
     ),
     short_name = "rel",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 clang_tot_linux_builder(
@@ -952,6 +955,7 @@ clang_tot_linux_builder(
             "shared",
             "debug",
             "x64",
+            "remoteexec",
         ],
     ),
     targets = targets.bundle(
@@ -965,6 +969,7 @@ clang_tot_linux_builder(
         ],
     ),
     short_name = "dbg",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 clang_tot_linux_builder(
@@ -991,6 +996,7 @@ clang_tot_linux_builder(
             "lsan",
             "release_builder",
             "x64",
+            "remoteexec",
         ],
     ),
     targets = targets.bundle(
@@ -1010,6 +1016,7 @@ clang_tot_linux_builder(
         ],
     ),
     short_name = "asn",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 clang_tot_linux_builder(
@@ -1032,6 +1039,7 @@ clang_tot_linux_builder(
         configs = [
             "libfuzzer",
             "asan",
+            "remoteexec",
             "clang_tot_gn",
             "no_treat_warnings_as_errors",
             "shared",
@@ -1056,6 +1064,7 @@ clang_tot_linux_builder(
     # Requires a large disk, so has a machine specifically devoted to it
     builderless = False,
     short_name = "fuz",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 clang_tot_linux_builder(
@@ -1098,6 +1107,7 @@ clang_tot_linux_builder(
             "msan",
             "release",
             "x64",
+            # TODO(crbug.com/450862240) enable "remoteexec" here
         ],
     ),
     targets = targets.bundle(
@@ -1111,6 +1121,8 @@ clang_tot_linux_builder(
             "linux-jammy",
         ],
     ),
+    builderless = False,
+    ssd = True,
     short_name = "msn",
 )
 
@@ -1138,6 +1150,7 @@ clang_tot_linux_builder(
             "no_symbols",
             "pgo_phase_1",
             "x64",
+            "remoteexec",
         ],
     ),
     targets = targets.bundle(
@@ -1152,6 +1165,7 @@ clang_tot_linux_builder(
         ],
     ),
     short_name = "pgo",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 clang_tot_linux_builder(
@@ -1177,6 +1191,7 @@ clang_tot_linux_builder(
             "tsan",
             "release",
             "x64",
+            "remoteexec",
         ],
     ),
     targets = targets.bundle(
@@ -1191,6 +1206,7 @@ clang_tot_linux_builder(
         ],
     ),
     short_name = "tsn",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 clang_tot_linux_builder(
@@ -1216,6 +1232,7 @@ clang_tot_linux_builder(
             "ubsan_vptr_no_recover_hack",
             "release_builder",
             "x64",
+            "remoteexec",
         ],
     ),
     targets = targets.bundle(
@@ -1230,6 +1247,7 @@ clang_tot_linux_builder(
         ],
     ),
     short_name = "usn",
+    siso_remote_jobs = min(siso.remote_jobs.HIGH_JOBS_FOR_CI, 400),
 )
 
 ci.builder(
@@ -1269,7 +1287,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1277,6 +1295,11 @@ ci.builder(
         short_name = "rel",
     ),
     contact_team_email = "lexan@google.com",
+    # Clang ToT Win compiles get timeouts often.
+    siso_configs = [
+        "builder",
+        "no-remote-timeout",
+    ],
 )
 
 ci.builder(
@@ -1317,7 +1340,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1366,7 +1389,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1414,7 +1437,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1462,7 +1485,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1511,7 +1534,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1558,7 +1581,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1608,7 +1631,7 @@ ci.builder(
             "win11",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     gardener_rotations = args.ignore_default(None),
@@ -1633,7 +1656,7 @@ ci.builder(
             "x64",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1681,7 +1704,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -1844,6 +1867,7 @@ ci.builder(
             "gfx_unittests",
             "google_apis_unittests",
             "ios_chrome_unittests",
+            "ios_credential_provider_extension_unittests",
             "ios_net_unittests",
             "ios_web_inttests",
             "ios_web_unittests",
@@ -1859,7 +1883,6 @@ ci.builder(
             "has_native_resultdb_integration",
             "ios_restart_device",
             "limited_capacity_bot",
-            "mac_default_x64",
             "mac_toolchain",
             "out_dir_arg",
             "xcode_26_main",
@@ -1920,8 +1943,6 @@ tot_mac_builder(
             "mac_default_x64",
         ],
     ),
-    cores = None,
-    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Mac",
         short_name = "rel",
@@ -1961,8 +1982,6 @@ tot_mac_builder(
             "mac_default_x64",
         ],
     ),
-    cores = None,
-    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Mac",
         short_name = "dbg",
@@ -2011,8 +2030,6 @@ tot_mac_builder(
             "mac_default_x64",
         ],
     ),
-    cores = None,
-    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Mac",
         short_name = "asn",
@@ -2160,8 +2177,6 @@ tot_mac_builder(
             "arm64",
         ],
     ),
-    cores = None,
-    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Code Coverage",
         short_name = "mac",
@@ -2256,7 +2271,7 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = "32",
+    cores = "64",
     os = os.WINDOWS_DEFAULT,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
@@ -2298,8 +2313,6 @@ tot_mac_builder(
             "mac_default_x64",
         ],
     ),
-    cores = None,
-    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "Rust ToT",
         short_name = "mac",

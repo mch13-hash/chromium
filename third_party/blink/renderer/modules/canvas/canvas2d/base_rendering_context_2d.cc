@@ -40,7 +40,6 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_canvas_font_variant_caps.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_canvas_text_rendering.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_gpu_texture_format.h"
-#include "third_party/blink/renderer/core/canvas_interventions/canvas_interventions_helper.h"
 #include "third_party/blink/renderer/core/css/properties/computed_style_utils.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -272,7 +271,7 @@ void BaseRenderingContext2D::TryRestoreContextEvent(TimerBase* timer) {
       (!SharedGpuContext::IsGpuCompositingEnabled() &&
        SharedGpuContext::SharedImageInterfaceProvider())) {
     RestoreGuard context_is_being_restored(*this);
-    if (GetOrCreateCanvas2DResourceProvider()) {
+    if (GetOrCreateResourceProvider()) {
       try_restore_context_event_timer_.Stop();
       DispatchContextRestoredEvent(nullptr);
       return;
@@ -393,10 +392,6 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
     exception_state.ThrowDOMException(
         DOMExceptionCode::kIndexSizeError,
         String::Format("The source %s is 0.", sw ? "height" : "width"));
-  } else if (RuntimeEnabledFeatures::BlockCanvasReadbackEnabled(
-                 GetTopExecutionContext())) {
-    exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
-                                      String(kBlockCanvasReadbackErrorMessage));
   }
 
   if (exception_state.HadException())
@@ -487,11 +482,6 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
   scoped_refptr<StaticBitmapImage> snapshot =
       GetImage(FlushReason::kGetImageData);
 
-  bool noised = false;
-  if (snapshot) {
-    noised = CanvasInterventionsHelper::MaybeNoiseSnapshot(
-        GetTopExecutionContext(), snapshot);
-  }
   TRACE_EVENT_INSTANT(
       TRACE_DISABLED_BY_DEFAULT("identifiability.high_entropy_api"),
       "CanvasReadback", perfetto::Flow::FromPointer(this),
@@ -506,7 +496,6 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
           }
         }
         ctx.AddDebugAnnotation("data_url", data.Utf8());
-        ctx.AddDebugAnnotation("noised", noised);
       });
 
   // Determine if the array should be zero initialized, or if it will be
@@ -592,7 +581,7 @@ void BaseRenderingContext2D::putImageData(ImageData* data,
     return;
   }
 
-  if (isContextLost() || !CanCreateCanvas2dResourceProvider()) [[unlikely]] {
+  if (isContextLost() || !CanCreateResourceProvider()) [[unlikely]] {
     return;
   }
 
@@ -806,13 +795,17 @@ scoped_refptr<StaticBitmapImage>
 BaseRenderingContext2D::PaintRenderingResultsToSnapshot(
     SourceDrawingBuffer source_buffer,
     FlushReason reason) {
-  if (!IsCanvas2DResourceProviderValid()) {
+  if (!IsResourceProviderValid()) {
     return nullptr;
   }
 
   CanvasResourceProvider* provider = GetResourceProvider();
   provider->FlushCanvas(reason);
   return provider->Snapshot(reason);
+}
+
+bool BaseRenderingContext2D::IsResourceProviderValid() {
+  return GetResourceProvider() && GetResourceProvider()->IsValid();
 }
 
 void BaseRenderingContext2D::WillUseCurrentFont() const {
@@ -1111,7 +1104,7 @@ void BaseRenderingContext2D::DrawTextInternal(
       computed_style ? IsOverride(computed_style->GetUnicodeBidi()) : false;
 
   PlainTextPainter& text_painter = host->GetPlainTextPainter();
-  TextRun text_run(text, direction, bidi_override, /* normalize_space */ true);
+  TextRun text_run(text, direction, bidi_override);
   // Draw the item text at the correct point.
   gfx::PointF location(ClampTo<float>(x), ClampTo<float>(y));
   gfx::RectF bounds;
@@ -1168,8 +1161,7 @@ void BaseRenderingContext2D::DrawTextInternal(
       [font, text = std::move(text), direction, bidi_override, location,
        run_start, run_end, canvas, &text_painter,
        paint_type](MemoryManagedPaintCanvas* c, const cc::PaintFlags* flags) {
-        TextRun text_run(text, direction, bidi_override,
-                         /* normalize_space */ true);
+        TextRun text_run(text, direction, bidi_override);
         // Font::DrawType::kGlyphsAndClusters is required for printing to PDF,
         // otherwise the character to glyph mapping will not be reversible,
         // which prevents text data from being extracted from PDF files or
@@ -1477,7 +1469,7 @@ GPUTexture* BaseRenderingContext2D::transferToGPUTexture(
   // accelerated SharedImage provider, we won't be able to transfer the canvas.
   // In that case, WebGPU access is not possible.
   CanvasResourceProviderSharedImage* provider =
-      GetOrCreateCanvas2DResourceProvider()->AsSharedImageProvider();
+      GetOrCreateResourceProvider()->AsSharedImageProvider();
   if (!provider || !provider->IsAccelerated()) {
     exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "Unable to transfer canvas to GPU.");
@@ -1535,7 +1527,7 @@ GPUTexture* BaseRenderingContext2D::transferToGPUTexture(
   // canvas to be treated as a brand new surface if additional draws occur.
   // It also gives us a mechanism to detect post-transfer-out draws, which is
   // used in `transferBackFromWebGPU` to raise an exception.
-  auto owned_provider = ReplaceResourceProviderForCanvas2D(nullptr);
+  auto owned_provider = ReplaceResourceProvider(nullptr);
 
   // Note: This must be a CRPSI since this method would have bailed out earlier
   // otherwise.
@@ -1600,8 +1592,7 @@ void BaseRenderingContext2D::transferBackFromGPUTexture(
   // surrendering our temporary ownership of the provider.
   CanvasResourceProviderSharedImage* resource_provider =
       resource_provider_from_webgpu_access_.get();
-  ReplaceResourceProviderForCanvas2D(
-      std::move(resource_provider_from_webgpu_access_));
+  ReplaceResourceProvider(std::move(resource_provider_from_webgpu_access_));
   resource_provider->SetDelegate(host);
 
   // Disassociate the WebGPU texture from the SharedImage to end its

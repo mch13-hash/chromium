@@ -15,6 +15,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/types/expected.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
+#include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "components/password_manager/core/browser/actor_login/internal/actor_login_credential_filler.h"
 #include "components/password_manager/core/browser/actor_login/internal/actor_login_get_credentials_helper.h"
 #include "components/password_manager/core/browser/features/password_features.h"
@@ -22,6 +23,7 @@
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -72,7 +74,8 @@ ActorLoginDelegateImpl::ActorLoginDelegateImpl(
     content::WebContents* web_contents,
     password_manager::PasswordManagerClient* client,
     PasswordDriverSupplierForPrimaryMainFrame driver_supplier)
-    : content::WebContentsUserData<ActorLoginDelegateImpl>(*web_contents),
+    : content::WebContentsObserver(web_contents),
+      content::WebContentsUserData<ActorLoginDelegateImpl>(*web_contents),
       driver_supplier_(std::move(driver_supplier)),
       client_(client) {}
 
@@ -110,6 +113,7 @@ void ActorLoginDelegateImpl::GetCredentials(CredentialsOrErrorReply callback) {
 
 void ActorLoginDelegateImpl::AttemptLogin(
     const Credential& credential,
+    bool should_store_permission,
     LoginStatusResultOrErrorReply callback) {
   CHECK(callback);
 
@@ -142,11 +146,22 @@ void ActorLoginDelegateImpl::AttemptLogin(
       GetWebContents().GetPrimaryMainFrame()->GetLastCommittedOrigin();
 
   credential_filler_ = std::make_unique<ActorLoginCredentialFiller>(
-      origin, credential, client_,
+      origin, credential, should_store_permission, client_,
       base::BindPostTaskToCurrentDefault(
           base::BindOnce(&ActorLoginDelegateImpl::OnAttemptLoginCompleted,
                          weak_ptr_factory_.GetWeakPtr())));
-  credential_filler_->AttemptLogin(password_manager);
+  credential_filler_->AttemptLogin(
+      password_manager,
+      // This `WebContents` comes from the `TabInterface` that
+      // `ActorLoginService` is invoked with, so we know the `WebContents` is
+      // attached to a tab.
+      *tabs::TabInterface::GetFromContents(&GetWebContents()));
+}
+
+void ActorLoginDelegateImpl::WebContentsDestroyed() {
+  get_credentials_helper_.reset();
+  credential_filler_.reset();
+  client_ = nullptr;
 }
 
 void ActorLoginDelegateImpl::OnGetCredentialsCompleted(

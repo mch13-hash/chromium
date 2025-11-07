@@ -14,6 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/gtest_util.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "components/content_settings/core/common/pref_names.h"
@@ -159,9 +160,9 @@ class PermissionActionHistoryTest : public testing::Test {
  protected:
   content::BrowserTaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
+  content::TestBrowserContext browser_context_;
 
  private:
-  content::TestBrowserContext browser_context_;
   TestPermissionsClient permissions_client_;
 };
 
@@ -298,7 +299,7 @@ TEST_F(PermissionActionHistoryTest, EntryFilterTest) {
   auto loud_entries =
       GetHistory(std::nullopt,
                  PermissionActionsHistory::EntryFilter::WANT_LOUD_PROMPTS_ONLY);
-  EXPECT_EQ(5u, loud_entries.size());
+  EXPECT_EQ(6u, loud_entries.size());
 
   auto quiet_entries = GetHistory(
       std::nullopt, PermissionActionsHistory::PermissionActionsHistory::
@@ -345,8 +346,12 @@ TEST_F(PermissionActionHistoryTest, FillInActionCountsTest) {
 class PermissionActionHistoryHeuristicGrantTest
     : public PermissionActionHistoryTest {
  public:
-  PermissionActionHistoryHeuristicGrantTest()
-      : scoped_feature_list_(blink::features::kGeolocationElement) {}
+  PermissionActionHistoryHeuristicGrantTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {blink::features::kGeolocationElement,
+         permissions::features::kPermissionHeuristicAutoGrant},
+        {});
+  }
   PermissionActionHistoryHeuristicGrantTest(
       const PermissionActionHistoryHeuristicGrantTest&) = delete;
   ~PermissionActionHistoryHeuristicGrantTest() override = default;
@@ -364,21 +369,18 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest, HeuristicGrant) {
   history->AddObserver(&observer);
 
   for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
-    EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-        url, permission));
+    EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
     EXPECT_EQ(0, observer.call_count());
   }
 
   // The next time should trigger auto-grant.
-  EXPECT_TRUE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
   EXPECT_EQ(1, observer.call_count());
   EXPECT_EQ(url, observer.origin());
   EXPECT_EQ(permission, observer.content_setting());
 
   // Subsequent calls should also return true.
-  EXPECT_TRUE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
   // The observer is notified again.
   EXPECT_EQ(2, observer.call_count());
 
@@ -391,22 +393,18 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest, HeuristicGrantReset) {
   auto* history = GetPermissionActionsHistory();
 
   // Grant twice.
-  EXPECT_FALSE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
-  EXPECT_FALSE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
 
   // Reset.
   history->ResetHeuristicData(url, permission);
 
   for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
-    EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-        url, permission));
+    EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
   }
 
   // Next time after reset should trigger auto-grant.
-  EXPECT_TRUE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
 }
 
 TEST_F(PermissionActionHistoryHeuristicGrantTest,
@@ -417,26 +415,22 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
   auto* history = GetPermissionActionsHistory();
 
   for (int i = 0; i < kHeuristicGrantThreshold - 1; ++i) {
-    history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url1, permission1);
-    history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url2, permission1);
+    history->RecordTemporaryGrant(url1, permission1);
+    history->RecordTemporaryGrant(url2, permission1);
   }
 
   // Grant url1/permission1 one more time. Should not auto-grant.
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url1, permission1));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url1, permission1));
 
   // Grant url1/permission1 another time. Next check will auto-grant.
-  EXPECT_TRUE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url1, permission1));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url1, permission1));
 
   // The other permissions should not be auto-granted yet.
   // The next call will increment to counter and not auto-grant.
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url2, permission1));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url2, permission1));
 
   // The next call for these will auto-grant.
-  EXPECT_TRUE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url2, permission1));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url2, permission1));
 }
 
 TEST_F(PermissionActionHistoryHeuristicGrantTest,
@@ -445,41 +439,16 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
   auto* history = GetPermissionActionsHistory();
 
   // GEOLOCATION should work.
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url, ContentSettingsType::GEOLOCATION));
+  EXPECT_FALSE(
+      history->RecordTemporaryGrant(url, ContentSettingsType::GEOLOCATION));
 
   // NOTIFICATIONS should crash.
   EXPECT_DEATH_IF_SUPPORTED(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-          url, ContentSettingsType::NOTIFICATIONS),
+      history->RecordTemporaryGrant(url, ContentSettingsType::NOTIFICATIONS),
       "");
-  EXPECT_DEATH_IF_SUPPORTED(history->SetAutoGrantHeuristically(
-                                url, ContentSettingsType::NOTIFICATIONS),
-                            "");
   EXPECT_DEATH_IF_SUPPORTED(history->CheckHeuristicallyAutoGranted(
                                 url, ContentSettingsType::NOTIFICATIONS),
                             "");
-}
-
-TEST_F(PermissionActionHistoryHeuristicGrantTest, HeuristicGrantExpiration) {
-  GURL url("https://www.example.com");
-  ContentSettingsType permission = ContentSettingsType::GEOLOCATION;
-  auto* history = GetPermissionActionsHistory();
-
-  for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
-    history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission);
-  }
-
-  // Trigger auto-grant.
-  EXPECT_TRUE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
-
-  // Advance clock past expiration date.
-  task_environment_.AdvanceClock(base::Days(8));
-
-  // The count should be reset, so the next grant is not an auto-grant.
-  EXPECT_FALSE(history->CheckHeuristicallyAutoGranted(url, permission,
-                                                      /*needs_update*/ false));
 }
 
 TEST_F(PermissionActionHistoryHeuristicGrantTest,
@@ -492,18 +461,16 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
                                                       /*needs_update*/ false));
 
   for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
-    history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission);
+    history->RecordTemporaryGrant(url, permission);
   }
 
   // Trigger auto-grant.
-  EXPECT_TRUE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
   EXPECT_TRUE(history->CheckHeuristicallyAutoGranted(url, permission,
                                                      /*needs_update*/ false));
 
   // Advance clock past expiration date.
-  task_environment_.AdvanceClock(base::Days(8));
-
+  task_environment_.AdvanceClock(base::Days(29));
   EXPECT_FALSE(history->CheckHeuristicallyAutoGranted(url, permission,
                                                       /*needs_update*/ false));
 }
@@ -520,10 +487,9 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
 
   // Trigger auto-grant.
   for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
-    history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission);
+    history->RecordTemporaryGrant(url, permission);
   }
-  EXPECT_TRUE(
-      history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(url, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
 
   // Check with needs_update = true. Timestamp should change.
   task_environment_.AdvanceClock(base::Days(2));
@@ -531,9 +497,63 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
   task_environment_.AdvanceClock(base::Days(6));
   EXPECT_TRUE(history->CheckHeuristicallyAutoGranted(url, permission,
                                                      /*needs_update*/ false));
-  task_environment_.AdvanceClock(base::Days(2));
+  task_environment_.AdvanceClock(base::Days(20));
+  EXPECT_TRUE(history->CheckHeuristicallyAutoGranted(url, permission,
+                                                     /*needs_update*/ false));
+  task_environment_.AdvanceClock(base::Days(3));
   EXPECT_FALSE(history->CheckHeuristicallyAutoGranted(url, permission,
                                                       /*needs_update*/ false));
+}
+
+TEST_F(PermissionActionHistoryHeuristicGrantTest,
+       HeuristicGrantExpirationDecaysCount) {
+  GURL url("https://www.example.com");
+  ContentSettingsType permission = ContentSettingsType::GEOLOCATION;
+  auto* history = GetPermissionActionsHistory();
+
+  // Grant up to the threshold to enable auto-granting.
+  for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
+    history->RecordTemporaryGrant(url, permission);
+  }
+
+  // The next grant will trigger auto-grant.
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
+  EXPECT_EQ(kHeuristicGrantThreshold + 1,
+            history->GetTemporaryGrantCountForTesting(url, permission));
+  EXPECT_TRUE(history->CheckHeuristicallyAutoGranted(url, permission,
+                                                     /*needs_update*/ false));
+
+  // Advance clock past expiration date.
+  task_environment_.AdvanceClock(base::Days(29));
+
+  // The grant should have expired.
+  EXPECT_FALSE(history->CheckHeuristicallyAutoGranted(url, permission,
+                                                      /*needs_update*/ false));
+
+  // The count should have decayed to 2.
+  EXPECT_EQ(2, history->GetTemporaryGrantCountForTesting(url, permission));
+
+  // Advance clock past expiration date again.
+  task_environment_.AdvanceClock(base::Days(29));
+
+  // The grant should still be expired.
+  EXPECT_FALSE(history->CheckHeuristicallyAutoGranted(url, permission,
+                                                      /*needs_update*/ false));
+  // The count should have decayed to 0.
+  EXPECT_EQ(0, history->GetTemporaryGrantCountForTesting(url, permission));
+
+  // The next grant should not auto-grant, but increment the count to 1.
+  EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
+  EXPECT_EQ(1, history->GetTemporaryGrantCountForTesting(url, permission));
+
+  // Grant twice more to reach the threshold.
+  EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url, permission));
+  EXPECT_EQ(3, history->GetTemporaryGrantCountForTesting(url, permission));
+
+  // The next grant should now trigger auto-grant.
+  EXPECT_TRUE(history->RecordTemporaryGrant(url, permission));
+  EXPECT_EQ(4, history->GetTemporaryGrantCountForTesting(url, permission));
 }
 
 TEST_F(PermissionActionHistoryHeuristicGrantTest,
@@ -544,15 +564,11 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
   auto* history = GetPermissionActionsHistory();
 
   // Grant url1 and url2 twice.
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url1, permission));
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url1, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url1, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url1, permission));
 
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url2, permission));
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url2, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url2, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url2, permission));
 
   // Reset for urls matching "example.com".
   history->ResetHeuristicData(base::BindRepeating(
@@ -561,19 +577,141 @@ TEST_F(PermissionActionHistoryHeuristicGrantTest,
   // The counter for url1 should be reset. It should take
   // `kHeuristicGrantThreshold` more grants to trigger auto-grant.
   for (int i = 0; i < kHeuristicGrantThreshold; ++i) {
-    EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-        url1, permission));
+    EXPECT_FALSE(history->RecordTemporaryGrant(url1, permission));
   }
-  EXPECT_TRUE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url1, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url1, permission));
 
   // The counter for url2 should not be reset. It was granted twice, so it
   // needs one more grant to reach the threshold.
-  EXPECT_FALSE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url2, permission));
+  EXPECT_FALSE(history->RecordTemporaryGrant(url2, permission));
   // The next one should auto-grant.
-  EXPECT_TRUE(history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
-      url2, permission));
+  EXPECT_TRUE(history->RecordTemporaryGrant(url2, permission));
+}
+
+TEST_F(PermissionActionHistoryTest, RecordOneTimeGrant) {
+  GURL url1("https://www.example.com");
+  GURL url2("https://www.google.com");
+  auto* history = GetPermissionActionsHistory();
+  base::HistogramTester histogram_tester;
+
+  // Geolocation
+  history->RecordOneTimeGrant(url1, ContentSettingsType::GEOLOCATION);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.Geolocation.OneTimeGrant", 1, 1);
+  history->RecordOneTimeGrant(url1, ContentSettingsType::GEOLOCATION);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.Geolocation.OneTimeGrant", 2, 1);
+  history->RecordOneTimeGrant(url2, ContentSettingsType::GEOLOCATION);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.Geolocation.OneTimeGrant", 1, 2);
+
+  // Mic
+  history->RecordOneTimeGrant(url1, ContentSettingsType::MEDIASTREAM_MIC);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.AudioCapture.OneTimeGrant", 1, 1);
+  history->RecordOneTimeGrant(url1, ContentSettingsType::MEDIASTREAM_MIC);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.AudioCapture.OneTimeGrant", 2, 1);
+
+  // Camera
+  history->RecordOneTimeGrant(url1, ContentSettingsType::MEDIASTREAM_CAMERA);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.VideoCapture.OneTimeGrant", 1, 1);
+
+  // Unsupported type - should be ignored
+  history->RecordOneTimeGrant(url1, ContentSettingsType::NOTIFICATIONS);
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.Notifications.OneTimeGrant", 0);
+
+  // Check total counts
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.Geolocation.OneTimeGrant", 3);
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.AudioCapture.OneTimeGrant", 2);
+
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.VideoCapture.OneTimeGrant", 1);
+}
+
+TEST_F(PermissionActionHistoryTest, RecordOTPCountForGrant) {
+  auto* history = GetPermissionActionsHistory();
+  base::HistogramTester histogram_tester;
+
+  // Geolocation
+  history->RecordOTPCountForGrant(ContentSettingsType::GEOLOCATION, 3);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.Geolocation.GrantOTPCount", 3, 1);
+  history->RecordOTPCountForGrant(ContentSettingsType::GEOLOCATION, 0);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.Geolocation.GrantOTPCount", 0, 1);
+
+  // Mic
+  history->RecordOTPCountForGrant(ContentSettingsType::MEDIASTREAM_MIC, 1);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.AudioCapture.GrantOTPCount", 1, 1);
+
+  // Camera
+  history->RecordOTPCountForGrant(ContentSettingsType::MEDIASTREAM_CAMERA, 5);
+  histogram_tester.ExpectBucketCount(
+      "Permissions.OneTimePermission.VideoCapture.GrantOTPCount", 5, 1);
+
+  // Unsupported type - should be ignored
+  history->RecordOTPCountForGrant(ContentSettingsType::NOTIFICATIONS, 2);
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.Notifications.GrantOTPCount", 0);
+
+  // Check total counts
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.Geolocation.GrantOTPCount", 2);
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.AudioCapture.GrantOTPCount", 1);
+  histogram_tester.ExpectTotalCount(
+      "Permissions.OneTimePermission.VideoCapture.GrantOTPCount", 1);
+}
+
+TEST_F(PermissionActionHistoryTest, GetOneTimeGrantCount) {
+  GURL url1("https://www.example.com");
+  GURL url2("https://www.google.com");
+  auto* history = GetPermissionActionsHistory();
+
+  EXPECT_EQ(
+      0, history->GetOneTimeGrantCount(url1, ContentSettingsType::GEOLOCATION));
+
+  // Record some GRANTED_ONCE actions
+  history->RecordOneTimeGrant(url1, ContentSettingsType::GEOLOCATION);
+  EXPECT_EQ(
+      1, history->GetOneTimeGrantCount(url1, ContentSettingsType::GEOLOCATION));
+
+  history->RecordOneTimeGrant(url1, ContentSettingsType::GEOLOCATION);
+  EXPECT_EQ(
+      2, history->GetOneTimeGrantCount(url1, ContentSettingsType::GEOLOCATION));
+
+  history->RecordOneTimeGrant(url2, ContentSettingsType::GEOLOCATION);
+  EXPECT_EQ(
+      1, history->GetOneTimeGrantCount(url2, ContentSettingsType::GEOLOCATION));
+  EXPECT_EQ(2, history->GetOneTimeGrantCount(
+                   url1, ContentSettingsType::GEOLOCATION));  // url1 unchanged
+
+  history->RecordOneTimeGrant(url1, ContentSettingsType::MEDIASTREAM_MIC);
+  EXPECT_EQ(1, history->GetOneTimeGrantCount(
+                   url1, ContentSettingsType::MEDIASTREAM_MIC));
+  EXPECT_EQ(0, history->GetOneTimeGrantCount(
+                   url2, ContentSettingsType::MEDIASTREAM_MIC));
+
+  // Non-one-time grant actions should not affect the count
+  history->RecordAction(PermissionAction::GRANTED, RequestType::kGeolocation,
+                        PermissionPromptDisposition::ANCHORED_BUBBLE);
+  EXPECT_EQ(
+      2, history->GetOneTimeGrantCount(url1, ContentSettingsType::GEOLOCATION));
+
+  history->RecordAction(PermissionAction::DENIED, RequestType::kGeolocation,
+                        PermissionPromptDisposition::ANCHORED_BUBBLE);
+  EXPECT_EQ(
+      2, history->GetOneTimeGrantCount(url1, ContentSettingsType::GEOLOCATION));
+
+  // Unsupported type
+  EXPECT_EQ(0, history->GetOneTimeGrantCount(
+                   url1, ContentSettingsType::NOTIFICATIONS));
 }
 
 }  // namespace permissions

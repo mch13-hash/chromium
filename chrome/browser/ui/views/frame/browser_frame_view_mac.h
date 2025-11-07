@@ -75,7 +75,7 @@ class BrowserFrameViewMac : public BrowserFrameView,
   void OnAppRegistrarDestroyed() override;
 
   // Used by TabContainerOverlayView to paint the tab strip background.
-  void PaintThemedFrame(gfx::Canvas* canvas) override;
+  void PaintThemedFrame(gfx::Canvas* canvas);
 
  protected:
   // views::View:
@@ -89,9 +89,6 @@ class BrowserFrameViewMac : public BrowserFrameView,
   FRIEND_TEST_ALL_PREFIXES(BrowserFrameViewMacTest, GetCenteredTitleBounds);
   FRIEND_TEST_ALL_PREFIXES(BrowserFrameViewMacTest,
                            GetCaptionButtonPlaceholderBounds);
-
-  // Fetches the caption button bounds from the buttons themselves.
-  BoundsAndMargins GetCaptionButtonBoundsNative() const;
 
   // Creates an inset from the caption button size which controls for which edge
   // the captions buttons exists on. Used to position elements like the tabstrip

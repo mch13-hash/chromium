@@ -38,8 +38,12 @@
 namespace contextual_cueing {
 namespace {
 
-void LogNudgeInteractionHistogram(NudgeInteraction interaction) {
+void LogNudgeInteractionHistogram(NudgeInteraction interaction,
+                                  bool is_dynamic) {
   base::UmaHistogramEnumeration("ContextualCueing.NudgeInteraction",
+                                interaction);
+  std::string cue_type = is_dynamic ? "Dynamic" : "Static";
+  base::UmaHistogramEnumeration("ContextualCueing.NudgeInteraction." + cue_type,
                                 interaction);
 }
 
@@ -62,15 +66,24 @@ bool IsGlicTabContextEnabled(PrefService* pref_service) {
   return pref_service->GetBoolean(glic::prefs::kGlicTabContextEnabled);
 }
 
-void OnSuggestionsReceived(base::TimeTicks fetch_begin_time,
+void OnSuggestionsReceived(bool is_fre,
+                           base::TimeTicks fetch_begin_time,
                            GlicSuggestionsCallback callback,
                            std::vector<std::string> suggestions) {
-  base::UmaHistogramTimes(!suggestions.empty()
-                              ? "ContextualCueing.GlicSuggestions."
-                                "SuggestionsFetchLatency.ValidSuggestions"
-                              : "ContextualCueing.GlicSuggestions."
-                                "SuggestionsFetchLatency.EmptySuggestions",
-                          base::TimeTicks::Now() - fetch_begin_time);
+  base::TimeDelta suggestion_latency =
+      base::TimeTicks::Now() - fetch_begin_time;
+  std::string result_type =
+      suggestions.empty() ? "EmptySuggestions" : "ValidSuggestions";
+  std::string engagement_type = is_fre ? "FRE" : "Reengagement";
+  // Continue logging the original histogram.
+  base::UmaHistogramTimes(
+      "ContextualCueing.GlicSuggestions.SuggestionsFetchLatency." + result_type,
+      suggestion_latency);
+  // Add another split by engagement type.
+  base::UmaHistogramTimes(
+      "ContextualCueing.GlicSuggestions.SuggestionsFetchLatency." +
+          result_type + "." + engagement_type,
+      suggestion_latency);
 
   std::move(callback).Run(suggestions);
 }
@@ -132,8 +145,6 @@ ContextualCueingService::ContextualCueingService(
       pref_service_(pref_service),
       template_url_service_(template_url_service),
       mes_url_(optimization_guide::switches::GetModelExecutionServiceURL()) {
-  CHECK(base::FeatureList::IsEnabled(contextual_cueing::kContextualCueing) ||
-        IsZeroStateSuggestionsEnabled());
   if (optimization_guide_keyed_service_ && IsZeroStateSuggestionsEnabled()) {
     optimization_guide_keyed_service_->RegisterOptimizationTypes(
         {optimization_guide::proto::GLIC_ZERO_STATE_SUGGESTIONS});
@@ -246,6 +257,7 @@ bool ContextualCueingService::IsPageTypeEligibleForContextualSuggestions(
 void ContextualCueingService::OnNudgeActivity(
     content::WebContents* web_contents,
     base::TimeTicks document_available_time,
+    bool is_dynamic,
     tabs::GlicNudgeActivity activity) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
@@ -290,7 +302,7 @@ void ContextualCueingService::OnNudgeActivity(
       log_ukm = true;
       break;
   }
-  LogNudgeInteractionHistogram(interaction);
+  LogNudgeInteractionHistogram(interaction, is_dynamic);
   // As this function is called multiple times per nudge only some of the
   // activities result in a UKM call.
   if (log_ukm) {
@@ -370,8 +382,13 @@ void ContextualCueingService::
     std::move(callback).Run({});
     return;
   }
-  if (!IsPageTypeEligibleForContextualSuggestions(
-          web_contents->GetLastCommittedURL())) {
+
+  bool page_type_eligible = IsPageTypeEligibleForContextualSuggestions(
+      web_contents->GetLastCommittedURL());
+  base::UmaHistogramBoolean(
+      "ContextualCueing.GlicSuggestions.FocusedTabEligibleForSuggestions",
+      page_type_eligible);
+  if (!page_type_eligible) {
     std::move(callback).Run({});
     return;
   }
@@ -393,8 +410,9 @@ void ContextualCueingService::
     zss_request_ptr = zss_request.get();
     zss_data->set_focused_tab_request(std::move(zss_request));
   }
-  zss_request_ptr->AddCallback(base::BindOnce(
-      &OnSuggestionsReceived, base::TimeTicks::Now(), std::move(callback)));
+  zss_request_ptr->AddCallback(base::BindOnce(&OnSuggestionsReceived, is_fre,
+                                              base::TimeTicks::Now(),
+                                              std::move(callback)));
 #else
   std::move(callback).Run({});
 #endif
@@ -426,6 +444,9 @@ bool ContextualCueingService::
     return !IsPageTypeEligibleForContextualSuggestions(
         web_contents->GetLastCommittedURL());
   });
+  base::UmaHistogramBoolean(
+      "ContextualCueing.GlicSuggestions.PinnedTabsEligibleForSuggestions",
+      !pinned_web_contents.empty());
   if (pinned_web_contents.empty()) {
     std::move(callback).Run({});
     return false;
@@ -437,8 +458,9 @@ bool ContextualCueingService::
       pinned_web_contents, is_fre, supported_tools, focused_tab);
   pinned_tabs_zero_state_suggestions_request_->AddCallback(base::BindOnce(
       &ContextualCueingService::OnPinnedTabsSuggestionsReceived,
-      weak_ptr_factory_.GetWeakPtr(), base::TimeTicks::Now(),
-      pinned_tabs_zero_state_suggestions_request_.get(), std::move(callback)));
+      weak_ptr_factory_.GetWeakPtr(), is_fre, base::TimeTicks::Now(),
+      pinned_tabs_zero_state_suggestions_request_->AsWeakPtr(),
+      std::move(callback)));
   return true;
 #else
   std::move(callback).Run({});
@@ -447,17 +469,19 @@ bool ContextualCueingService::
 }
 
 void ContextualCueingService::OnPinnedTabsSuggestionsReceived(
+    bool is_fre,
     base::TimeTicks fetch_begin_time,
-    ZeroStateSuggestionsRequest* pinned_tabs_request,
+    base::WeakPtr<ZeroStateSuggestionsRequest> pinned_tabs_request,
     GlicSuggestionsCallback callback,
     std::vector<std::string> suggestions) {
 #if BUILDFLAG(ENABLE_GLIC)
-  OnSuggestionsReceived(fetch_begin_time, std::move(callback),
+  OnSuggestionsReceived(is_fre, fetch_begin_time, std::move(callback),
                         std::move(suggestions));
 
   // Only destroy the outstanding pinned tabs request if it is the same.
-  if (pinned_tabs_request ==
-      pinned_tabs_zero_state_suggestions_request_.get()) {
+  if (pinned_tabs_request &&
+      pinned_tabs_request.get() ==
+          pinned_tabs_zero_state_suggestions_request_.get()) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostNonNestableTask(
         FROM_HERE,
         base::BindOnce(&ZeroStateSuggestionsRequest::Destroy,

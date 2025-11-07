@@ -7,6 +7,10 @@
 #include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/toasts/api/toast_id.h"
+#include "chrome/browser/ui/toasts/toast_controller.h"
 #include "content/public/browser/render_frame_host.h"
 
 namespace glic {
@@ -24,12 +28,13 @@ mojom::AdditionalContextPtr CreateAdditionalContext(
     const GURL& frame_url,
     const url::Origin& frame_origin,
     base::span<const uint8_t> thumbnail_data,
-    tabs::TabHandle handle) {
+    tabs::TabHandle handle,
+    const std::string& mime_type) {
   // TODO(b:448726704): update to use an Image part.
   auto context = glic::mojom::AdditionalContext::New();
   std::vector<glic::mojom::AdditionalContextPartPtr> parts;
   auto context_data = mojom::ContextData::New();
-  context_data->mime_type = "image/png";
+  context_data->mime_type = mime_type;
   context_data->data = mojo_base::BigBuffer(thumbnail_data);
   parts.push_back(
       mojom::AdditionalContextPart::NewData(std::move(context_data)));
@@ -58,6 +63,7 @@ void GlicShareImageHandler::ShareContextImage(
   }
 
   if (!render_frame_host) {
+    MaybeShowErrorToast(tab);
     service_->metrics()->OnShareImageComplete(ShareImageResult::kFailedNoFrame);
     return;
   }
@@ -101,11 +107,12 @@ void GlicShareImageHandler::ShareCapturedImage(
     const std::vector<uint8_t>& thumbnail_data,
     const gfx::Size& original_size,
     const gfx::Size& downscaled_size,
-    const std::string& image_extension,
+    const std::string& mime_type,
     std::vector<lens::mojom::LatencyLogPtr> log_data) {
   // Close the remote since we've received our thumbnail.
   chrome_render_frame_remote_.reset();
 
+  tab_handle_ = tab_handle;
   if (thumbnail_data.empty()) {
     ShareComplete(ShareImageResult::kFailedNoImage);
     return;
@@ -125,8 +132,7 @@ void GlicShareImageHandler::ShareCapturedImage(
 
   additional_context_ = CreateAdditionalContext(
       src_url, frame_url, frame_origin,
-      base::span<const uint8_t>(thumbnail_data), tab_handle);
-  tab_handle_ = tab_handle;
+      base::span<const uint8_t>(thumbnail_data), tab_handle, mime_type);
 
   auto* instance = service_->GetInstanceForTab(tab);
   if (!instance || !instance->IsShowing()) {
@@ -150,9 +156,23 @@ void GlicShareImageHandler::ShareComplete(ShareImageResult result) {
   if (result == ShareImageResult::kSuccess) {
     service_->SendAdditionalContext(tab_handle_,
                                     std::move(additional_context_));
+  } else {
+    MaybeShowErrorToast(tab_handle_.Get());
   }
   service_->metrics()->OnShareImageComplete(result);
   Reset();
+}
+
+void GlicShareImageHandler::MaybeShowErrorToast(tabs::TabInterface* tab) {
+  if (!tab) {
+    return;
+  }
+
+  if (BrowserWindowInterface* browser = tab->GetBrowserWindowInterface()) {
+    if (auto* controller = browser->GetFeatures().toast_controller()) {
+      controller->MaybeShowToast(ToastParams(ToastId::kGlicShareImageFailed));
+    }
+  }
 }
 
 void GlicShareImageHandler::SendAdditionalContextWhenReady() {

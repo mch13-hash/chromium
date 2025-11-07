@@ -188,6 +188,11 @@ void WaitForEntitiesOnFakeServer(int entity_count) {
 // Tests that signing out keeps groups created before syncing and deletes groups
 // created since.
 - (void)testSignOutKeepsPreviousGroupDeletesNewGroup {
+  // TODO(crbug.com/455766365): Re-enable the test.
+  if (@available(iOS 26.1, *)) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.1.");
+  }
+
   [ChromeEarlGreyUI openTabGrid];
 
   // Switch over to the tab groups page and delete existing saved groups.
@@ -316,6 +321,11 @@ void WaitForEntitiesOnFakeServer(int entity_count) {
 
 // Tests that tab groups don't get reopened after signing out and back in
 - (void)testSignOutAndBackInDoesNotReopenGroups {
+  // TODO(crbug.com/455766365): Re-enable the test.
+  if (@available(iOS 26.1, *)) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.1.");
+  }
+
   // TODO(crbug.com/415554855): Test is flaky on iPad device from 18.2.
   if (@available(iOS 18, *)) {
     if ([ChromeEarlGrey isIPadIdiom]) {
@@ -350,6 +360,11 @@ void WaitForEntitiesOnFakeServer(int entity_count) {
   // Close the second group.
   [[EarlGrey selectElementWithMatcher:TabGridCloseButtonForGroupCellAtIndex(1)]
       performAction:grey_tap()];
+  // Tap the snackbar to make it disappear.
+  id<GREYMatcher> snackbarMatcher = chrome_test_util::SnackbarViewMatcher();
+  [[EarlGrey selectElementWithMatcher:snackbarMatcher]
+      performAction:grey_tap()];
+
   [[EarlGrey selectElementWithMatcher:TabGridGroupCellWithName(kGroup2Name, 1)]
       assertWithMatcher:grey_nil()];
 

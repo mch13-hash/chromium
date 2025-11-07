@@ -34,8 +34,7 @@ bool IsAccessibilityExposeSummaryAsHeadingEnabled() {
       ::features::kAccessibilityExposeSummaryAsHeading);
 }
 
-BASE_FEATURE(kAccessibilityBlockFlowIterator,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kAccessibilityBlockFlowIterator, base::FEATURE_ENABLED_BY_DEFAULT);
 bool IsAccessibilityBlockFlowIteratorEnabled() {
   return base::FeatureList::IsEnabled(
       ::features::kAccessibilityBlockFlowIterator);
@@ -328,14 +327,14 @@ bool IsAccessibilityManifestV3EnabledForEspeakNGTts() {
 }
 
 BASE_FEATURE(kAccessibilityManifestV3GoogleTts,
-             base::FEATURE_ENABLED_BY_DEFAULT);
+             base::FEATURE_DISABLED_BY_DEFAULT);
 bool IsAccessibilityManifestV3EnabledForGoogleTts() {
   return base::FeatureList::IsEnabled(
       ::features::kAccessibilityManifestV3GoogleTts);
 }
 
 BASE_FEATURE(kAccessibilityManifestV3AccessibilityCommon,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 bool IsAccessibilityManifestV3EnabledForAccessibilityCommon() {
   return base::FeatureList::IsEnabled(
       ::features::kAccessibilityManifestV3AccessibilityCommon);
@@ -373,6 +372,13 @@ bool IsAccessibilityMagnificationFollowsInputEnabled() {
       ::features::kAccessibilityMagnificationFollowsInputFocus);
 }
 
+BASE_FEATURE(kAccessibilityMagnificationFollowsTextCursor,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+bool IsAccessibilityMagnificationFollowsTextCursorEnabled() {
+  return base::FeatureList::IsEnabled(
+      ::features::kAccessibilityMagnificationFollowsTextCursor);
+}
+
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -399,18 +405,17 @@ bool IsDataCollectionModeForScreen2xEnabled() {
       ::features::kDataCollectionModeForScreen2x);
 }
 
+BASE_FEATURE(kImmersiveReadAnything, base::FEATURE_DISABLED_BY_DEFAULT);
+bool IsImmersiveReadAnythingEnabled() {
+  return base::FeatureList::IsEnabled(::features::kImmersiveReadAnything);
+}
+
 BASE_FEATURE(kMainNodeAnnotations, base::FEATURE_DISABLED_BY_DEFAULT);
 bool IsMainNodeAnnotationsEnabled() {
   return base::FeatureList::IsEnabled(::features::kMainNodeAnnotations);
 }
 
-BASE_FEATURE(kReadAnythingReadAloud,
-#if BUILDFLAG(IS_CHROMEOS)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif  // BUILDFLAG(IS_CHROMEOS)
-);
+BASE_FEATURE(kReadAnythingReadAloud, base::FEATURE_ENABLED_BY_DEFAULT);
 
 bool IsReadAnythingReadAloudEnabled() {
   return base::FeatureList::IsEnabled(::features::kReadAnythingReadAloud);
@@ -432,6 +437,11 @@ bool IsReadAnythingReadAloudTSTextSegmentationEnabled() {
              ::features::kReadAnythingReadAloudTSTextSegmentation);
 }
 
+BASE_FEATURE(kReadAnythingOmniboxChip, base::FEATURE_DISABLED_BY_DEFAULT);
+bool IsReadAnythingOmniboxChipEnabled() {
+  return base::FeatureList::IsEnabled(::features::kReadAnythingOmniboxChip);
+}
+
 BASE_FEATURE(kReadAnythingImagesViaAlgorithm,
              base::FEATURE_DISABLED_BY_DEFAULT);
 bool IsReadAnythingImagesViaAlgorithmEnabled() {
@@ -450,6 +460,14 @@ BASE_FEATURE(kReadAnythingDocsLoadMoreButton,
 bool IsReadAnythingDocsLoadMoreButtonEnabled() {
   return base::FeatureList::IsEnabled(
       ::features::kReadAnythingDocsLoadMoreButton);
+}
+
+BASE_FEATURE(kReadAnythingWithReadability, base::FEATURE_DISABLED_BY_DEFAULT);
+bool IsReadAnythingWithReadabilityEnabled() {
+  return base::FeatureList::IsEnabled(
+             ::features::kReadAnythingReadAloudTSTextSegmentation) &&
+         base::FeatureList::IsEnabled(::features::kReadAnythingWithReadability);
+  ;
 }
 
 // This feature is only for debug purposes and for security/privacy reasons,
@@ -501,13 +519,6 @@ bool IsBlockRootWindowAccessibleNameChangeEventEnabled() {
 #endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
-BASE_FEATURE(kWasmTtsComponentUpdaterV3Enabled,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-bool IsWasmTtsComponentUpdaterV3Enabled() {
-  return base::FeatureList::IsEnabled(
-      ::features::kWasmTtsComponentUpdaterV3Enabled);
-}
-
 BASE_FEATURE(kWasmTtsEngineAutoInstallDisabled,
              base::FEATURE_DISABLED_BY_DEFAULT);
 bool IsWasmTtsEngineAutoInstallDisabled() {

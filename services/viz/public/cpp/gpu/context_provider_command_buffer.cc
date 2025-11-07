@@ -35,19 +35,18 @@
 #include "gpu/command_buffer/client/raster_cmd_helper.h"
 #include "gpu/command_buffer/client/raster_implementation.h"
 #include "gpu/command_buffer/client/raster_implementation_gles.h"
+#include "gpu/command_buffer/client/shared_image_interface.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/client/webgpu_cmd_helper.h"
 #include "gpu/command_buffer/client/webgpu_implementation.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/skia_utils.h"
 #include "gpu/config/skia_limits.h"
-#include "gpu/ipc/client/client_shared_image_interface.h"
 #include "gpu/ipc/client/command_buffer_proxy_impl.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "services/viz/public/cpp/gpu/command_buffer_metrics.h"
 #include "skia/buildflags.h"
 #include "third_party/skia/include/core/SkTraceMemoryDump.h"
-#include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
 #include "ui/gl/trace_util.h"
 
 class SkDiscardableMemory;
@@ -327,7 +326,7 @@ gpu::ContextResult ContextProviderCommandBuffer::BindToCurrentSequence() {
       auto raster_impl = std::make_unique<gpu::raster::RasterImplementation>(
           raster_helper.get(), transfer_buffer.get(),
           attributes_->get_raster()->lose_context_when_out_of_memory,
-          command_buffer_.get(), channel_->image_decode_accelerator_proxy());
+          command_buffer_.get());
       bind_result_ = raster_impl->Initialize(memory_limits_);
       if (bind_result_ != gpu::ContextResult::kSuccess) {
         DLOG(ERROR) << "Failed to initialize RasterImplementation.";
@@ -472,12 +471,6 @@ gpu::ContextSupport* ContextProviderCommandBuffer::ContextSupport() {
   return impl_;
 }
 
-class GrDirectContext* ContextProviderCommandBuffer::GrContext() {
-  DCHECK(bind_tried_);
-  DCHECK_EQ(bind_result_, gpu::ContextResult::kSuccess);
-  return nullptr;
-}
-
 gpu::SharedImageInterface*
 ContextProviderCommandBuffer::SharedImageInterface() {
   return shared_image_interface_.get();
@@ -548,12 +541,6 @@ void ContextProviderCommandBuffer::AddObserver(ContextLostObserver* obs) {
 void ContextProviderCommandBuffer::RemoveObserver(ContextLostObserver* obs) {
   CheckValidSequenceOrLockAcquired();
   observers_.RemoveObserver(obs);
-}
-
-unsigned int ContextProviderCommandBuffer::GetGrGLTextureFormat(
-    SharedImageFormat format) const {
-  return SharedImageFormatRestrictedSinglePlaneUtils::ToGLTextureStorageFormat(
-      format, ContextCapabilities().angle_rgbx_internal_format);
 }
 
 gpu::webgpu::WebGPUInterface* ContextProviderCommandBuffer::WebGPUInterface() {

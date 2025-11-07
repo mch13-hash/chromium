@@ -28,7 +28,6 @@
 #include "media/base/key_systems_support_registration.h"
 #include "media/media_buildflags.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
-#include "mojo/public/cpp/bindings/remote.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/service_manager/public/cpp/local_interface_provider.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
@@ -114,11 +113,6 @@ class ChromeContentRendererClient
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
                             const blink::WebPluginParams& params,
                             blink::WebPlugin** plugin) override;
-#if BUILDFLAG(ENABLE_PLUGINS)
-  blink::WebPlugin* CreatePluginReplacement(
-      content::RenderFrame* render_frame,
-      const base::FilePath& plugin_path) override;
-#endif
   void PrepareErrorPage(content::RenderFrame* render_frame,
                         const blink::WebURLError& error,
                         const std::string& http_method,

@@ -45,9 +45,9 @@
 #endif
 
 #if BUILDFLAG(ENABLE_WEBUI_TAB_STRIP)
-#include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_api.mojom.h"
 #include "chrome/browser/ui/webui/tab_strip/tab_strip.mojom.h"
 #include "chrome/browser/ui/webui/tab_strip/tab_strip_ui.h"
+#include "components/browser_apis/tab_strip/tab_strip_api.mojom.h"
 #endif
 
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
@@ -98,8 +98,14 @@ void PopulateChromeWebUIFrameBindersPartsFeatures(
   if (glic::GlicEnabling::IsProfileEligible(Profile::FromBrowserContext(
           render_frame_host->GetProcess()->GetBrowserContext()))) {
     // Register binders for all eligible profiles.
-    RegisterWebUIControllerInterfaceBinder<glic::mojom::FrePageHandlerFactory,
-                                           glic::GlicFreUI>(map);
+    if (glic::GlicEnabling::IsUnifiedFreEnabled(Profile::FromBrowserContext(
+            render_frame_host->GetProcess()->GetBrowserContext()))) {
+      RegisterWebUIControllerInterfaceBinder<glic::mojom::FrePageHandlerFactory,
+                                             glic::GlicUI>(map);
+    } else {
+      RegisterWebUIControllerInterfaceBinder<glic::mojom::FrePageHandlerFactory,
+                                             glic::GlicFreUI>(map);
+    }
     // For GlicUI, the WebUI page will check whether Glic is policy-enabled and
     // restrict access if needed. This isn't required for the GlicFreUI.
     RegisterWebUIControllerInterfaceBinder<glic::mojom::PageHandlerFactory,

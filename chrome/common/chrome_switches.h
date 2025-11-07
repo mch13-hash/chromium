@@ -112,8 +112,6 @@ extern const char kExtensionContentVerificationBootstrap[];
 extern const char kExtensionContentVerificationEnforce[];
 extern const char kExtensionContentVerificationEnforceStrict[];
 extern const char kExtensionExperimentalActor[];
-extern const char kExtensionsInstallVerification[];
-extern const char kExtensionsNotWebstore[];
 extern const char kExtensionsToolbarZeroStateVariation[];
 extern const char kExtensionsToolbarZeroStateSingleWebStoreLink[];
 extern const char kExtensionsToolbarZeroStateExploreExtensionsByCategory[];
@@ -156,6 +154,7 @@ extern const char kNoStartupWindow[];
 extern const char kOnTheFlyMhtmlHashComputation[];
 extern const char kOpenInNewWindow[];
 extern const char kFocus[];
+extern const char kFocusResultFile[];
 extern const char kPackExtension[];
 extern const char kPackExtensionKey[];
 extern const char kPreCrashpadCrashTest[];
@@ -303,6 +302,7 @@ extern const char kGlicDev[];
 extern const char kGlicSkipReloadAfterNavigation[];
 extern const char kGlicHostLogging[];
 extern const char kGlicAdminRedirectPatterns[];
+extern const char kGlicAlwaysShowWebActuationToggle[];
 #endif
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)

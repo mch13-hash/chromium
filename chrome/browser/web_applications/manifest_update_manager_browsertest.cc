@@ -338,7 +338,10 @@ class ManifestUpdateManagerBrowserTest : public WebAppBrowserTestBase {
  public:
   ManifestUpdateManagerBrowserTest()
       : update_dialog_scope_(SetIdentityUpdateDialogActionForTesting(
-            AppIdentityUpdate::kSkipped)) {}
+            AppIdentityUpdate::kSkipped)) {
+    scoped_feature_list_.InitAndDisableFeature(
+        features::kWebAppPredictableAppUpdating);
+  }
   ManifestUpdateManagerBrowserTest(const ManifestUpdateManagerBrowserTest&) =
       delete;
   ManifestUpdateManagerBrowserTest& operator=(
@@ -5596,7 +5599,8 @@ IN_PROC_BROWSER_TEST_P(
                                         ManifestUpdateResult::kAppUpdated, 0);
   }
 
-  bool manifest_icons_considered_trusted = IsDefaultApp() || IsPolicyApp();
+  bool manifest_icons_considered_trusted =
+      IsDefaultApp() || IsPolicyApp() || IsKioskApp();
 
   // If trusted icons are enabled, the largest icon will be chosen for all OSes,
   // which is 512.

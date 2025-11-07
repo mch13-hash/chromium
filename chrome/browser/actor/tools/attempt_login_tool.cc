@@ -12,10 +12,13 @@
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/tools/observation_delay_controller.h"
 #include "chrome/browser/actor/tools/tool_callbacks.h"
+#include "chrome/browser/actor/tools/tool_delegate.h"
 #include "chrome/browser/password_manager/actor_login/actor_login_service.h"
 #include "chrome/common/actor/action_result.h"
+#include "chrome/common/actor_webui.mojom-data-view.h"
 #include "chrome/common/actor_webui.mojom.h"
 #include "components/favicon/core/favicon_service.h"
+#include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "components/password_manager/core/browser/features/password_features.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/image/image.h"
@@ -36,6 +39,8 @@ mojom::ActionResultCode LoginErrorToActorError(
       return mojom::ActionResultCode::kError;
     case actor_login::ActorLoginError::kInvalidTabInterface:
       return mojom::ActionResultCode::kTabWentAway;
+    case actor_login::ActorLoginError::kFillingNotAllowed:
+      return mojom::ActionResultCode::kLoginFillingNotAllowed;
     case actor_login::ActorLoginError::kUnknown:
     default:
       return mojom::ActionResultCode::kError;
@@ -57,8 +62,12 @@ mojom::ActionResultCode LoginResultToActorResult(
       return mojom::ActionResultCode::kLoginNoCredentialsAvailable;
     case actor_login::LoginStatusResult::kErrorNoFillableFields:
       return mojom::ActionResultCode::kLoginNoFillableFields;
-    case actor_login::LoginStatusResult::kErrorFillingNotAllowed:
-      return mojom::ActionResultCode::kLoginFillingNotAllowed;
+    case actor_login::LoginStatusResult::kErrorDeviceReauthRequired:
+      // TODO(crbug.com/449923972): Handle this error: draw attention of the
+      // user to the tab and retry once the tab is in the foreground.
+      return mojom::ActionResultCode::kLoginDeviceReauthRequired;
+    case actor_login::LoginStatusResult::kErrorDeviceReauthFailed:
+      return mojom::ActionResultCode::kLoginDeviceReauthFailed;
   }
 }
 
@@ -98,11 +107,14 @@ void AttemptLoginTool::Invoke(InvokeCallback callback) {
   // First check if there is a user selected credential for the current request
   // origin. If so, use it immediately.
   const url::Origin& current_origin = main_rfh->GetLastCommittedOrigin();
-  const std::optional<actor_login::Credential> user_selected_credential =
-      tool_delegate().GetUserSelectedCredential(current_origin);
-  if (user_selected_credential.has_value()) {
+  const std::optional<ToolDelegate::CredentialWithPermission>
+      user_selected_credential_and_pemission =
+          tool_delegate().GetUserSelectedCredential(current_origin);
+  if (user_selected_credential_and_pemission.has_value()) {
     GetActorLoginService().AttemptLogin(
-        tab, *user_selected_credential,
+        tab, user_selected_credential_and_pemission->credential,
+        user_selected_credential_and_pemission->permission_duration ==
+            webui::mojom::UserGrantedPermissionDuration::kAlwaysAllow,
         base::BindOnce(&AttemptLoginTool::OnAttemptLogin,
                        weak_ptr_factory_.GetWeakPtr()));
     return;
@@ -128,6 +140,22 @@ void AttemptLoginTool::OnGetCredentials(
         std::move(invoke_callback_),
         MakeResult(mojom::ActionResultCode::kLoginNoCredentialsAvailable));
     return;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          actor::kGlicEnableAutoLoginPersistedPermissions)) {
+    const auto it_persistent_permission =
+        std::find_if(credentials_.begin(), credentials_.end(),
+                     [](const actor_login::Credential& cred) {
+                       return cred.has_persistent_permission;
+                     });
+    if (it_persistent_permission != credentials_.end()) {
+      OnCredentialSelected(webui::mojom::SelectCredentialDialogResponse::New(
+          task_id().value(), /*error_reason=*/std::nullopt,
+          webui::mojom::UserGrantedPermissionDuration::kAlwaysAllow,
+          it_persistent_permission->id.value()));
+      return;
+    }
   }
 
   std::erase_if(credentials_, [](const actor_login::Credential& cred) {
@@ -251,7 +279,11 @@ void AttemptLoginTool::OnCredentialSelected(
   }
 
   // Cache the user selected credential for reuse.
-  tool_delegate().SetUserSelectedCredential(*selected_credential);
+  tool_delegate().SetUserSelectedCredential(
+      ToolDelegate::CredentialWithPermission(
+          *selected_credential,
+          response->permission_duration.value_or(
+              webui::mojom::UserGrantedPermissionDuration::kOneTime)));
 
   tabs::TabInterface* tab = tab_handle_.Get();
   if (!tab) {
@@ -272,6 +304,8 @@ void AttemptLoginTool::OnCredentialSelected(
 
   GetActorLoginService().AttemptLogin(
       tab, *selected_credential,
+      response->permission_duration ==
+          webui::mojom::UserGrantedPermissionDuration::kAlwaysAllow,
       base::BindOnce(&AttemptLoginTool::OnAttemptLogin,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -298,8 +332,7 @@ std::string AttemptLoginTool::JournalEvent() const {
 
 std::unique_ptr<ObservationDelayController>
 AttemptLoginTool::GetObservationDelayer(
-    std::optional<ObservationDelayController::PageStabilityConfig>
-        page_stability_config) {
+    ObservationDelayController::PageStabilityConfig page_stability_config) {
   return std::make_unique<ObservationDelayController>(
       GetPrimaryMainFrameOfTab(tab_handle_), task_id(), journal(),
       page_stability_config);

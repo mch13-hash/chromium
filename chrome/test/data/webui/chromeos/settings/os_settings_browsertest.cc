@@ -361,10 +361,6 @@ IN_PROC_BROWSER_TEST_F(OSSettingsCrostiniTest, CrostiniPageBruschettaSubpage) {
   RunSettingsTest("crostini_page/bruschetta_subpage_test.js");
 }
 
-IN_PROC_BROWSER_TEST_F(OSSettingsCrostiniTest, CrostiniPageCrostiniArcAdb) {
-  RunSettingsTest("crostini_page/crostini_arc_adb_test.js");
-}
-
 IN_PROC_BROWSER_TEST_F(OSSettingsCrostiniTest,
                        CrostiniPageCrostiniExportImport) {
   RunSettingsTest("crostini_page/crostini_export_import_test.js");
@@ -688,7 +684,15 @@ IN_PROC_BROWSER_TEST_F(OSSettingsMochaTest, InternetPageNetworkSummary) {
   RunSettingsTest("internet_page/network_summary_test.js");
 }
 
-IN_PROC_BROWSER_TEST_F(OSSettingsMochaTest, InternetPageNetworkSummaryItem) {
+// TODO(crbug.com/452098595): Test is flaky on linux-chromeos-dbg.
+#if BUILDFLAG(IS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_InternetPageNetworkSummaryItem \
+  DISABLED_InternetPageNetworkSummaryItem
+#else
+#define MAYBE_InternetPageNetworkSummaryItem InternetPageNetworkSummaryItem
+#endif
+IN_PROC_BROWSER_TEST_F(OSSettingsMochaTest,
+                       MAYBE_InternetPageNetworkSummaryItem) {
   RunSettingsTest("internet_page/network_summary_item_test.js");
 }
 

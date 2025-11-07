@@ -18,6 +18,7 @@ class PrefService;
 namespace autofill {
 
 class AddressDataManager;
+class BnplIssuer;
 class PaymentsDataManager;
 class PaymentInstrument;
 
@@ -251,9 +252,13 @@ class PersonalDataManagerAndroid : public PersonalDataManagerObserver {
   // benefits.
   jboolean IsCardEligibleForBenefits(JNIEnv* env, const std::string& guid);
 
-  // Create an object of Java BNPL Issuer from native BnplIssuer.
-  static base::android::ScopedJavaLocalRef<jobject>
-  CreateJavaBnplIssuerFromNative(JNIEnv* env, const BnplIssuer& bnpl_issuer);
+  // Returns whether the BNPL preference should be shown on the settings page.
+  jboolean ShouldShowBnplSettings(JNIEnv* env);
+
+  // Returns an array of BnplIssuerForSettings objects retrieved from the
+  // PersonalDataManager to be shown on the settings page.
+  base::android::ScopedJavaLocalRef<jobjectArray> GetBnplIssuersForSettings(
+      JNIEnv* env);
 
  private:
   ~PersonalDataManagerAndroid() override;
@@ -283,6 +288,11 @@ class PersonalDataManagerAndroid : public PersonalDataManagerObserver {
   // Shared method used when creating Java PaymentInstrument.
   static std::vector<int> GetPaymentRailsFromPaymentInstrument(
       const PaymentInstrument& payment_instrument);
+
+  // Create an object of Java BnplIssuerForSettings from native BnplIssuer.
+  static base::android::ScopedJavaLocalRef<jobject>
+  CreateBnplIssuerForSettingsFromNative(JNIEnv* env,
+                                        const BnplIssuer& bnpl_issuer);
 
   AddressDataManager& address_data_manager() {
     return pdm_observation_.GetSource()->address_data_manager();

@@ -13,7 +13,10 @@
 
 #include "base/check.h"
 #include "base/containers/heap_array.h"
+#include "base/debug/dump_without_crashing.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/task/thread_pool.h"
@@ -28,9 +31,24 @@ namespace font_data_service {
 
 namespace {
 
+// Recorded in Chrome.FontDataService.CreateResult, don't modify/reorder without
+// also changing FontDataServiceCreateResult in
+// tools/metrics/histograms/metadata/chrome/enums.xml
+enum class CreateResult {
+  kNoTypeface = 0,
+  kSuccessExistingSharedMemory = 1,
+  kFailureExistingSharedMemory = 2,
+  kSuccessSharingFileHandle = 3,
+  kSuccessSharingNewMemoryRegion = 4,
+  kFailureSharingNewMemoryRegion = 5,
+  kMaxValue = kFailureSharingNewMemoryRegion,
+};
+
 // Value is arbitrary. The number should be small to conserve memory but large
 // enough to fit a meaningful amount of fonts.
 constexpr int kMemoryMapCacheSize = 128;
+
+BASE_FEATURE(kDumpOnOOBFontDataServiceCache, base::FEATURE_DISABLED_BY_DEFAULT);
 
 base::SequencedTaskRunner* GetFontDataServiceTaskRunner() {
   static base::NoDestructor<scoped_refptr<base::SequencedTaskRunner>>
@@ -88,17 +106,28 @@ void FontDataServiceImpl::BindReceiver(
 base::File FontDataServiceImpl::GetFileHandle(SkTypeface& typeface) {
   SkString font_path;
   typeface.getResourceName(&font_path);
+  base::UmaHistogramBoolean("Chrome.FontDataService.EmptyPathOnGetFileHandle",
+                            font_path.isEmpty());
   if (font_path.isEmpty()) {
-#if BUILDFLAG(IS_WIN)
-    base::UmaHistogramSparse("Chrome.FontDataService.WinLastError",
-                             ::GetLastError());
-#endif  // BUILDFLAG(IS_WIN)
     return {};
   }
 
-  return base::File(base::FilePath::FromUTF8Unsafe(font_path.c_str()),
-                    base::File::FLAG_OPEN | base::File::FLAG_READ |
-                        base::File::FLAG_WIN_EXCLUSIVE_WRITE);
+  auto font_file_path = base::FilePath::FromUTF8Unsafe(font_path.c_str());
+  base::UmaHistogramBoolean(
+      "Chrome.FontDataService.FileHandlePathReferencesParent",
+      font_file_path.ReferencesParent());
+
+  auto font_file =
+      base::File(font_file_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
+                                     base::File::FLAG_WIN_EXCLUSIVE_WRITE);
+#if BUILDFLAG(IS_WIN)
+  if (!font_file.IsValid()) {
+    base::UmaHistogramSparse("Chrome.FontDataService.WinLastError",
+                             ::GetLastError());
+  }
+#endif  // BUILDFLAG(IS_WIN)
+
+  return font_file;
 }
 
 void FontDataServiceImpl::MatchFamilyName(const std::string& family_name,
@@ -225,6 +254,8 @@ mojom::MatchFamilyNameResultPtr
 FontDataServiceImpl::CreateMatchFamilyNameResult(sk_sp<SkTypeface> typeface) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  CreateResult result_status = CreateResult::kNoTypeface;
+
   auto result = mojom::MatchFamilyNameResult::New();
 
   if (typeface) {
@@ -237,6 +268,9 @@ FontDataServiceImpl::CreateMatchFamilyNameResult(sk_sp<SkTypeface> typeface) {
       if (region.IsValid()) {
         result->typeface_data =
             mojom::TypefaceData::NewRegion(std::move(region));
+        result_status = CreateResult::kSuccessExistingSharedMemory;
+      } else {
+        result_status = CreateResult::kFailureExistingSharedMemory;
       }
     } else {
       // While the stream is not necessary for file handles, fetch the ttc_index
@@ -251,6 +285,7 @@ FontDataServiceImpl::CreateMatchFamilyNameResult(sk_sp<SkTypeface> typeface) {
         TRACE_EVENT("fonts", "FontDataServiceImpl - sharing file handle");
         result->typeface_data =
             mojom::TypefaceData::NewFontFile(std::move(font_file));
+        result_status = CreateResult::kSuccessSharingFileHandle;
       } else {
         TRACE_EVENT("fonts", "FontDataServiceImpl - sharing memory region");
         // If it failed to share as an base::File, try sharing with shared
@@ -260,7 +295,13 @@ FontDataServiceImpl::CreateMatchFamilyNameResult(sk_sp<SkTypeface> typeface) {
         // return an invalid memory map region.
         // TODO(crbug.com/335680565): Improve cache by transitioning to LRU.
         if (stream && stream->hasLength() && (stream->getLength() > 0u) &&
-            stream->getMemoryBase() && assets_.size() < kMemoryMapCacheSize) {
+            stream->getMemoryBase()) {
+          UMA_HISTOGRAM_COUNTS_10000(
+              "Chrome.FontDataService.MemoryMapCacheSize", assets_.size());
+          if (assets_.size() >= kMemoryMapCacheSize &&
+              base::FeatureList::IsEnabled(kDumpOnOOBFontDataServiceCache)) {
+            base::debug::DumpWithoutCrashing();
+          }
           const size_t asset_index = GetOrCreateAssetIndex(std::move(stream));
           base::ReadOnlySharedMemoryRegion region =
               assets_[asset_index]->shared_memory.region.Duplicate();
@@ -269,23 +310,28 @@ FontDataServiceImpl::CreateMatchFamilyNameResult(sk_sp<SkTypeface> typeface) {
           if (region.IsValid()) {
             result->typeface_data =
                 mojom::TypefaceData::NewRegion(std::move(region));
+            result_status = CreateResult::kSuccessSharingNewMemoryRegion;
+          } else {
+            result_status = CreateResult::kFailureSharingNewMemoryRegion;
           }
         }
       }
     }
   }
 
+  UMA_HISTOGRAM_ENUMERATION("Chrome.FontDataService.CreateResult",
+                            result_status);
+
   if (!result->typeface_data) {
     return nullptr;
   }
 
-  const int axis_count = typeface->getVariationDesignPosition(nullptr, 0);
+  const int axis_count = typeface->getVariationDesignPosition({});
   if (axis_count > 0) {
     auto coordinate_list =
         base::HeapArray<SkFontArguments::VariationPosition::Coordinate>::Uninit(
             axis_count);
-    if (typeface->getVariationDesignPosition(coordinate_list.data(),
-                                             coordinate_list.size()) > 0) {
+    if (typeface->getVariationDesignPosition(coordinate_list) > 0) {
       result->variation_position = mojom::VariationPosition::New();
       result->variation_position->coordinates.reserve(coordinate_list.size());
       result->variation_position->coordinateCount = axis_count;

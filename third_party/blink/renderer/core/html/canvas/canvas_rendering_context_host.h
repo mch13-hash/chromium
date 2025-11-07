@@ -65,6 +65,7 @@ class CORE_EXPORT CanvasRenderingContextHost
   void DidDraw() { DidDraw(SkIRect::MakeWH(width(), height())); }
 
   virtual void PostFinalizeFrame(FlushReason) = 0;
+  void NotifyCachesOfSwitchingFrame();
   virtual bool PushFrame(scoped_refptr<CanvasResource>&& frame,
                          const SkIRect& damage_rect) = 0;
   virtual bool OriginClean() const = 0;
@@ -79,7 +80,7 @@ class CORE_EXPORT CanvasRenderingContextHost
 
   void UpdateMemoryUsage();
   base::ByteCount GetMemoryUsage() const {
-    return base::ByteCount(externally_allocated_memory_);
+    return externally_allocated_memory_;
   }
 
   // Initialize the indicated cc::Layer with the HTMLCanvasElement's CSS
@@ -177,7 +178,7 @@ class CORE_EXPORT CanvasRenderingContextHost
   RasterModeHint preferred_2d_raster_mode_ = RasterModeHint::kPreferCPU;
 
   // GPU Memory Management
-  intptr_t externally_allocated_memory_;
+  base::ByteCount externally_allocated_memory_;
   // NO_UNIQUE_ADDRESS allows making this member empty in production.
   NO_UNIQUE_ADDRESS V8ExternalMemoryAccounterBase external_memory_accounter_;
 };

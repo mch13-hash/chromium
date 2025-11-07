@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/views/extensions/security_dialog_tracker.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/interaction/browser_elements_views.h"
 #include "chrome/browser/ui/views/webid/account_selection_bubble_view.h"
 #include "chrome/browser/ui/views/webid/account_selection_modal_view.h"
 #include "chrome/browser/ui/views/webid/account_selection_view_base.h"
@@ -114,6 +115,14 @@ void FedCmAccountSelectionView::ShowDialogWidget() {
     params->disable_input = false;
     params->get_dialog_bounds = base::BindRepeating(
         &FedCmAccountSelectionView::GetDialogBounds, base::Unretained(this));
+    // Features may not be available under some unit tests. Check first.
+    if (auto* features = tab_->GetTabFeatures()) {
+      if (auto* inactive_event_controller =
+              features->inactive_window_mouse_event_controller()) {
+        tab_accept_mouse_events_ =
+            inactive_event_controller->AcceptMouseEventsWhileWindowInactive();
+      }
+    }
   }
   ShowDialog(GetDialogWidget(), std::move(params));
 
@@ -1028,7 +1037,8 @@ FedCmAccountSelectionView::GetURLLoaderFactory() {
 }
 
 views::View* FedCmAccountSelectionView::GetAnchorView() {
-  return tab_->GetBrowserWindowInterface()->GetWebView();
+  return BrowserElementsViews::From(tab_->GetBrowserWindowInterface())
+      ->RetrieveView(kActiveContentsWebViewRetrievalId);
 }
 
 AccountSelectionViewBase* FedCmAccountSelectionView::CreateDialogView(

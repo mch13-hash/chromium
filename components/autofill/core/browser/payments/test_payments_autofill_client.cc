@@ -8,14 +8,17 @@
 
 #include "base/android/device_info.h"
 #include "base/check_deref.h"
+#include "base/containers/span.h"
 #include "base/functional/callback.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/data_manager/personal_data_manager.h"
+#include "components/autofill/core/browser/data_model/payments/bnpl_issuer.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
 #include "components/autofill/core/browser/integrators/touch_to_fill/touch_to_fill_delegate.h"
 #include "components/autofill/core/browser/payments/autofill_offer_manager.h"
 #include "components/autofill/core/browser/payments/bnpl_strategy.h"
+#include "components/autofill/core/browser/payments/bnpl_util.h"
 #include "components/autofill/core/browser/payments/credit_card_cvc_authenticator.h"
 #include "components/autofill/core/browser/payments/credit_card_otp_authenticator.h"
 #include "components/autofill/core/browser/payments/mandatory_reauth_manager.h"
@@ -44,6 +47,8 @@ namespace autofill::payments {
 
 TestPaymentsAutofillClient::TestPaymentsAutofillClient(AutofillClient* client)
     : client_(CHECK_DEREF(client)),
+      mock_save_and_fill_manager_(
+          std::make_unique<testing::NiceMock<MockSaveAndFillManager>>()),
       mock_merchant_promo_code_manager_(
           &client_->GetPersonalDataManager().payments_data_manager()) {}
 
@@ -296,6 +301,10 @@ bool TestPaymentsAutofillClient::IsRiskBasedAuthEffectivelyAvailable() const {
   return true;
 }
 
+bool TestPaymentsAutofillClient::IsMandatoryReauthEnabled() {
+  return GetPaymentsDataManager().IsPaymentMethodsMandatoryReauthEnabled();
+}
+
 void TestPaymentsAutofillClient::ShowMandatoryReauthOptInPrompt(
     base::OnceClosure accept_mandatory_reauth_callback,
     base::OnceClosure cancel_mandatory_reauth_callback,
@@ -361,29 +370,39 @@ bool TestPaymentsAutofillClient::ShowTouchToFillLoyaltyCard(
 }
 
 bool TestPaymentsAutofillClient::UpdateTouchToFillBnplPaymentMethod(
-    std::optional<uint64_t> extracted_amount,
+    std::optional<int64_t> extracted_amount,
     bool is_amount_supported_by_any_issuer) {
   return false;
 }
 
 bool TestPaymentsAutofillClient::ShowTouchToFillProgress(
-    base::WeakPtr<TouchToFillDelegate> delegate) {
+    base::OnceClosure cancel_callback) {
   return false;
 }
 
 bool TestPaymentsAutofillClient::ShowTouchToFillBnplIssuers(
-    base::WeakPtr<TouchToFillDelegate> delegate,
-    base::span<const BnplIssuer> bnpl_issuers_to_suggest) {
+    base::span<const payments::BnplIssuerContext> bnpl_issuer_contexts,
+    const std::string& app_locale,
+    base::OnceCallback<void(BnplIssuer)> selected_issuer_callback,
+    base::OnceClosure cancel_callback) {
   return false;
 }
 
 bool TestPaymentsAutofillClient::ShowTouchToFillError(
-    base::WeakPtr<TouchToFillDelegate> delegate,
     const AutofillErrorDialogContext& context) {
   return false;
 }
 
+bool TestPaymentsAutofillClient::ShowTouchToFillBnplTos(
+    BnplTosModel bnpl_tos_model,
+    base::OnceClosure accept_callback,
+    base::OnceClosure cancel_callback) {
+  return false;
+}
+
 void TestPaymentsAutofillClient::HideTouchToFillPaymentMethod() {}
+
+void TestPaymentsAutofillClient::SetTouchToFillVisible(bool visible) {}
 
 PaymentsDataManager& TestPaymentsAutofillClient::GetPaymentsDataManager() {
   return client_->GetPersonalDataManager().payments_data_manager();
@@ -407,10 +426,6 @@ TestPaymentsAutofillClient::GetOrCreatePaymentsMandatoryReauthManager() {
 }
 
 MockSaveAndFillManager* TestPaymentsAutofillClient::GetSaveAndFillManager() {
-  if (!mock_save_and_fill_manager_) {
-    mock_save_and_fill_manager_ =
-        std::make_unique<testing::NiceMock<MockSaveAndFillManager>>();
-  }
   return mock_save_and_fill_manager_.get();
 }
 

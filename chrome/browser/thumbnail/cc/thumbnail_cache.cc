@@ -18,7 +18,6 @@
 #include "base/feature_list.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
@@ -91,10 +90,9 @@ ThumbnailCache::ThumbnailCache(size_t default_cache_size,
       cache_(default_cache_size),
       ui_resource_provider_(nullptr) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  memory_pressure_ = std::make_unique<base::MemoryPressureListener>(
-      FROM_HERE, base::MemoryPressureListenerTag::kThumbnailCache,
-      base::BindRepeating(&ThumbnailCache::OnMemoryPressure,
-                          base::Unretained(this)));
+  memory_pressure_listener_registration_ =
+      std::make_unique<base::MemoryPressureListenerRegistration>(
+          FROM_HERE, base::MemoryPressureListenerTag::kThumbnailCache, this);
   ScheduleRecordCacheMetrics(base::Minutes(1));
 }
 
@@ -618,9 +616,8 @@ ThumbnailCache::ThumbnailMetaData::ThumbnailMetaData(
     GURL url)
     : capture_time_(current_time), url_(std::move(url)) {}
 
-void ThumbnailCache::OnMemoryPressure(
-    base::MemoryPressureListener::MemoryPressureLevel level) {
-  if (level == base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
+void ThumbnailCache::OnMemoryPressure(base::MemoryPressureLevel level) {
+  if (level == base::MEMORY_PRESSURE_LEVEL_CRITICAL) {
     cache_.Clear();
   }
 }

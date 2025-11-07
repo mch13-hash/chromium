@@ -63,7 +63,7 @@ void ProcessQueryToConditions(
     const std::string& query,
     bool allow,
     std::set<URLQueryElementMatcherCondition>* query_conditions) {
-  url::Component query_left = url::MakeRange(0, query.length());
+  url::Component query_left{std::string_view(query)};
   url::Component key;
   url::Component value;
   // Depending on the filter type being block-list or allow-list, the matcher
@@ -386,8 +386,7 @@ bool FilterToComponents(const std::string& filter,
   } else {
     url::RawCanonOutputT<char> output;
     url::CanonHostInfo host_info;
-    url::CanonicalizeHostVerbose(filter.c_str(), parsed.host, &output,
-                                 &host_info);
+    url::CanonicalizeHostVerbose(filter, parsed.host, &output, &host_info);
     if (host_info.family == url::CanonHostInfo::NEUTRAL) {
       // We want to match subdomains. Add a dot in front to make sure we only
       // match at domain component boundaries.

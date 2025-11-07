@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/animation/css_aspect_ratio_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_basic_shape_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_border_image_length_box_interpolation_type.h"
+#include "third_party/blink/renderer/core/animation/css_border_shape_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_clip_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_color_interpolation_type.h"
 #include "third_party/blink/renderer/core/animation/css_content_visibility_interpolation_type.h"
@@ -134,6 +135,14 @@ const InterpolationTypes* InterpolationTypesMap::Get(
       case CSSPropertyID::kBorderRightWidth:
       case CSSPropertyID::kBorderTopWidth:
       case CSSPropertyID::kBottom:
+      case CSSPropertyID::kColumnRuleEdgeEndOutset:
+      case CSSPropertyID::kRowRuleEdgeEndOutset:
+      case CSSPropertyID::kColumnRuleEdgeStartOutset:
+      case CSSPropertyID::kRowRuleEdgeStartOutset:
+      case CSSPropertyID::kColumnRuleInteriorEndOutset:
+      case CSSPropertyID::kRowRuleInteriorEndOutset:
+      case CSSPropertyID::kColumnRuleInteriorStartOutset:
+      case CSSPropertyID::kRowRuleInteriorStartOutset:
       case CSSPropertyID::kCx:
       case CSSPropertyID::kCy:
       case CSSPropertyID::kFlexBasis:
@@ -151,7 +160,6 @@ const InterpolationTypes* InterpolationTypesMap::Get(
       case CSSPropertyID::kOffsetDistance:
       case CSSPropertyID::kOutlineOffset:
       case CSSPropertyID::kOutlineWidth:
-      case CSSPropertyID::kColumnRuleOutset:
       case CSSPropertyID::kRowRuleOutset:
       case CSSPropertyID::kPaddingBottom:
       case CSSPropertyID::kPaddingLeft:
@@ -425,6 +433,10 @@ const InterpolationTypes* InterpolationTypesMap::Get(
       case CSSPropertyID::kWebkitMaskBoxImageSlice:
         applicable_types->push_back(
             MakeGarbageCollected<CSSImageSliceInterpolationType>(property));
+        break;
+      case CSSPropertyID::kBorderShape:
+        applicable_types->push_back(
+            MakeGarbageCollected<CSSBorderShapeInterpolationType>(property));
         break;
       case CSSPropertyID::kClipPath:
         applicable_types->push_back(

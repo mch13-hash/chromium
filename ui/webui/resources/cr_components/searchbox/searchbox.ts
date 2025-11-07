@@ -9,6 +9,10 @@ import './searchbox_thumbnail.js';
 import '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import '//resources/cr_components/composebox/error_scrim.js';
 
+import type {ComposeboxFile} from '//resources/cr_components/composebox/common.js';
+import type {ContextualEntrypointAndCarouselElement} from '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
+import {ComposeboxMode} from '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
+import type {ErrorScrimElement} from '//resources/cr_components/composebox/error_scrim.js';
 import {I18nMixinLit} from '//resources/cr_elements/i18n_mixin_lit.js';
 import {WebUiListenerMixinLit} from '//resources/cr_elements/web_ui_listener_mixin_lit.js';
 import {assert} from '//resources/js/assert.js';
@@ -20,7 +24,7 @@ import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 import {NavigationPredictor} from '//resources/mojo/components/omnibox/browser/omnibox.mojom-webui.js';
 import type {AutocompleteMatch, AutocompleteResult, PageCallbackRouter, PageHandlerInterface, TabInfo} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import {SideType} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-import type {BigBuffer} from '//resources/mojo/mojo/public/mojom/base/big_buffer.mojom-webui.js';
+import {FileUploadStatus} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 import type {Url} from '//resources/mojo/url/mojom/url.mojom-webui.js';
 
@@ -29,11 +33,6 @@ import {getHtml} from './searchbox.html.js';
 import {SearchboxBrowserProxy} from './searchbox_browser_proxy.js';
 import type {SearchboxDropdownElement} from './searchbox_dropdown.js';
 import type {SearchboxIconElement} from './searchbox_icon.js';
-import type {ComposeboxFile} from '//resources/cr_components/composebox/common.js';
-import type {FileUploadErrorType} from '//resources/cr_components/composebox/composebox_query.mojom-webui.js';
-import {FileUploadStatus} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
-import type {ContextualEntrypointAndCarouselElement} from '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
-import type {ErrorScrimElement} from '//resources/cr_components/composebox/error_scrim.js';
 
 // LINT.IfChange(GhostLoaderTagName)
 const LENS_GHOST_LOADER_TAG_NAME = 'cr-searchbox-ghost-loader';
@@ -270,18 +269,38 @@ export class SearchboxElement extends SearchboxElementBase {
         reflect: true,
       },
 
-      realboxLayoutMode: {
+      searchboxLayoutMode: {
         type: String,
         reflect: true,
+      },
+
+      ntpRealboxNextEnabled: {
+        type: Boolean,
+        reflect: true,
+      },
+
+      cyclingPlaceholders: {
+        type: Boolean,
       },
 
       composeboxEnabled: {type: Boolean},
 
       composeButtonEnabled: {type: Boolean},
 
+      placeholderText: {
+        type: String,
+        reflect: true,
+        notify: true,
+      },
+
       //========================================================================
       // Private properties
       //========================================================================
+
+      inputFocused_: {
+        type: Boolean,
+        reflect: true,
+      },
 
       isLensSearchbox_: {
         type: Boolean,
@@ -319,12 +338,6 @@ export class SearchboxElement extends SearchboxElementBase {
        * match from offering inline autocompletion.
        */
       pastedInInput_: {type: Boolean},
-
-      placeholderText: {
-        type: String,
-        reflect: true,
-        notify: true,
-      },
 
       /** Searchbox default icon (i.e., Google G icon or the search loupe). */
       searchboxIcon_: {type: String},
@@ -368,11 +381,7 @@ export class SearchboxElement extends SearchboxElementBase {
         type: Boolean,
         reflect: true,
       },
-
-      hasContextFiles_: {
-        type: Boolean,
-        reflect: true,
-      },
+      tabSuggestions_: {type: Array},
     };
   }
 
@@ -391,12 +400,15 @@ export class SearchboxElement extends SearchboxElementBase {
       loadTimeData.getBoolean('searchboxCr23Theming');
   accessor searchboxSteadyStateShadow: boolean =
       loadTimeData.getBoolean('searchboxCr23SteadyStateShadow');
-  accessor realboxLayoutMode: string =
-      loadTimeData.getString('realboxLayoutMode');
+  accessor searchboxLayoutMode: string = '';
+  accessor ntpRealboxNextEnabled: boolean = false;
+  accessor cyclingPlaceholders: boolean = false;
   accessor composeboxEnabled: boolean = false;
   accessor composeButtonEnabled: boolean = false;
   accessor showThumbnail: boolean = false;
+  accessor placeholderText: string = '';
   protected accessor inputAriaLive_: string = '';
+  protected accessor inputFocused_: boolean = false;
   private accessor isLensSearchbox_: boolean =
       loadTimeData.getBoolean('isLensSearchbox');
   protected accessor enableThumbnailSizingTweaks_: boolean =
@@ -406,7 +418,6 @@ export class SearchboxElement extends SearchboxElementBase {
   private accessor lastInput_: Input = {text: '', inline: ''};
   private accessor lastQueriedInput_: string|null = null;
   private accessor pastedInInput_: boolean = false;
-  private accessor placeholderText: string = '';
   protected accessor searchboxIcon_: string =
       loadTimeData.getString('searchboxDefaultIcon');
   protected accessor searchboxVoiceSearchEnabled_: boolean =
@@ -419,14 +430,20 @@ export class SearchboxElement extends SearchboxElementBase {
   protected accessor thumbnailUrl_: string = '';
   protected accessor isThumbnailDeletable_: boolean = false;
   private accessor useWebkitSearchIcons_: boolean = false;
-  protected accessor hasContextFiles_: boolean = false;
+  protected accessor tabSuggestions_: TabInfo[] = [];
+  protected showVoiceSearchInExpandedRealbox: boolean =
+      loadTimeData.getBoolean('expandedSearchboxShowVoiceSearch');
+
+  protected get shouldShowVoiceSearch_(): boolean {
+    return this.dropdownIsVisible && this.showVoiceSearchInExpandedRealbox;
+  }
 
   private pageHandler_: PageHandlerInterface;
   private callbackRouter_: PageCallbackRouter;
   private autocompleteResultChangedListenerId_: number|null = null;
   private inputTextChangedListenerId_: number|null = null;
   private thumbnailChangedListenerId_: number|null = null;
-  private contextStatusChangedListenerId_: number|null = null;
+  private onTabStripChangedListenerId_: number|null = null;
   private placeholderCycler_: PlaceholderTextCycler|null = null;
 
   constructor() {
@@ -448,11 +465,11 @@ export class SearchboxElement extends SearchboxElementBase {
     this.thumbnailChangedListenerId_ =
         this.callbackRouter_.setThumbnail.addListener(
             this.onSetThumbnail_.bind(this));
-    this.contextStatusChangedListenerId_ =
-        this.callbackRouter_.onContextualInputStatusChanged.addListener(
-            this.onContextualInputStatusChanged_.bind(this));
+    this.onTabStripChangedListenerId_ =
+        this.callbackRouter_.onTabStripChanged.addListener(
+            this.refreshTabSuggestions_.bind(this));
 
-    if (loadTimeData.getBoolean('searchboxCyclingPlaceholders')) {
+    if (this.cyclingPlaceholders) {
       const {config} = await this.pageHandler_.getPlaceholderConfig();
       const texts = config.texts;
       assert(texts[0]);
@@ -464,17 +481,13 @@ export class SearchboxElement extends SearchboxElementBase {
       this.placeholderCycler_.start();
     }
 
-    if (this.realboxLayoutMode === 'Tall') {
-      this.pageHandler_.notifySessionStarted();
+    if (this.ntpRealboxNextEnabled) {
+      this.refreshTabSuggestions_();
     }
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-
-    if (this.realboxLayoutMode === 'Tall') {
-      this.pageHandler_.notifySessionAbandoned();
-    }
 
     assert(this.autocompleteResultChangedListenerId_);
     this.callbackRouter_.removeListener(
@@ -483,8 +496,8 @@ export class SearchboxElement extends SearchboxElementBase {
     this.callbackRouter_.removeListener(this.inputTextChangedListenerId_);
     assert(this.thumbnailChangedListenerId_);
     this.callbackRouter_.removeListener(this.thumbnailChangedListenerId_);
-    assert(this.contextStatusChangedListenerId_);
-    this.callbackRouter_.removeListener(this.contextStatusChangedListenerId_);
+    assert(this.onTabStripChangedListenerId_);
+    this.callbackRouter_.removeListener(this.onTabStripChangedListenerId_);
 
     this.placeholderCycler_?.stop();
   }
@@ -517,6 +530,12 @@ export class SearchboxElement extends SearchboxElementBase {
 
     if (changedPrivateProperties.has('thumbnailUrl_')) {
       this.showThumbnail = !!this.thumbnailUrl_;
+    }
+
+    if (this.ntpRealboxNextEnabled) {
+      if (changedPrivateProperties.has('inputFocused_')) {
+        this.fire('searchbox-input-focus-changed', {value: this.inputFocused_});
+      }
     }
   }
 
@@ -618,15 +637,6 @@ export class SearchboxElement extends SearchboxElementBase {
     this.isThumbnailDeletable_ = isDeletable;
   }
 
-  private onContextualInputStatusChanged_(
-      token: UnguessableToken, status: FileUploadStatus,
-      errorType: FileUploadErrorType) {
-    const result = this.$.context.updateFileStatus(token, status, errorType);
-    if (result.errorMessage) {
-      this.$.errorScrim.setErrorMessage(result.errorMessage);
-    }
-  }
-
   //============================================================================
   // Event handlers
   //============================================================================
@@ -651,6 +661,7 @@ export class SearchboxElement extends SearchboxElementBase {
   }
 
   protected onInputFocus_() {
+    this.inputFocused_ = true;
     this.pageHandler_.onFocusChanged(true);
     this.placeholderCycler_?.stop();
   }
@@ -758,7 +769,18 @@ export class SearchboxElement extends SearchboxElementBase {
     this.queryAutocomplete_(this.$.input.value);
   }
 
-  protected onInputPaste_() {
+  protected onInputPaste_(e: ClipboardEvent) {
+    if (e.clipboardData?.files && e.clipboardData.files.length > 0) {
+      const files = Array.from(e.clipboardData.files);
+      if (files.length > 0) {
+        e.preventDefault();
+        const dataTransfer = new DataTransfer();
+        files.forEach(file => dataTransfer.items.add(file));
+        this.$.context.addFiles(dataTransfer.files);
+        return;
+      }
+    }
+
     this.pastedInInput_ = true;
   }
 
@@ -780,6 +802,8 @@ export class SearchboxElement extends SearchboxElementBase {
         newlyFocusedEl?.tagName.toLowerCase() === LENS_GHOST_LOADER_TAG_NAME) {
       return;
     }
+
+    this.inputFocused_ = false;
 
     if (this.lastQueriedInput_ === '') {
       // Clear the input as well as the matches if the input was empty when
@@ -1010,72 +1034,64 @@ export class SearchboxElement extends SearchboxElementBase {
     this.dispatchEvent(new Event('open-lens-search'));
   }
 
-  protected async addFileContext_(e: CustomEvent<{
+  protected addFileContext_(e: CustomEvent<{
       files: File[], isImage: boolean,
       onContextAdded: (files: Map<UnguessableToken, ComposeboxFile>) => void,
   }>) {
-    const composeboxFiles: Map<UnguessableToken, ComposeboxFile> = new Map();
+    const composeboxFiles: ComposeboxFile[] = [];
     for (const file of e.detail.files) {
-      const fileBuffer = await file.arrayBuffer();
-      const bigBuffer:
-            BigBuffer = {bytes: Array.from(new Uint8Array(fileBuffer))};
-      const {token} = await this.pageHandler_.addFileContext(
-          {
-            fileName: file.name,
-            mimeType: file.type,
-            selectionTime: new Date(),
-          },
-          bigBuffer);
-
       const attachment: ComposeboxFile = {
-          uuid: token,
-          name: file.name,
-          objectUrl: e.detail.isImage ? URL.createObjectURL(file) : null,
-          type: file.type,
-          status: FileUploadStatus.kNotUploaded,
-          url: null,
-        };
-      composeboxFiles.set(token, attachment);
+        uuid: 'fake-uuid',
+        name: file.name,
+        dataUrl: null,
+        objectUrl: e.detail.isImage ? URL.createObjectURL(file) : null,
+        type: file.type,
+        status: FileUploadStatus.kNotUploaded,
+        url: null,
+        file: file,
+        tabId: null,
+        isDeletable: true,
+      };
+      composeboxFiles.push(attachment);
     }
-    e.detail.onContextAdded(composeboxFiles);
+    this.openComposebox_(composeboxFiles);
   }
 
-  protected async addTabContext_(e: CustomEvent<{
+  protected addTabContext_(e: CustomEvent<{
       id: number, title: string, url: Url,
       onContextAdded: (file: ComposeboxFile) => void,
   }>) {
-    const {token} = await this.pageHandler_.addTabContext(e.detail.id);
-    if (!token) {
-      return;
-    }
-
     const attachment: ComposeboxFile = {
-      uuid: token,
+      uuid: 'fake-uuid',
       name: e.detail.title,
+      dataUrl: null,
       objectUrl: null,
       type: 'tab',
       status: FileUploadStatus.kNotUploaded,
       url: e.detail.url,
+      file: null,
+      tabId: e.detail.id,
+      isDeletable: true,
     };
-    e.detail.onContextAdded(attachment);
+    this.openComposebox_([attachment]);
   }
 
-  protected deleteContext_(e: CustomEvent<{uuid: UnguessableToken}>) {
-    this.pageHandler_.deleteContext(e.detail.uuid);
-  }
-
-  protected async refreshTabSuggestions_(
-      e: CustomEvent<{onRefreshComplete: (tabs: TabInfo[]) => void}>) {
+  protected async refreshTabSuggestions_() {
     const {tabs} = await this.pageHandler_.getRecentTabs();
-    e.detail.onRefreshComplete(tabs);
-  }
-
-  protected onContextFilesChanged_(e: CustomEvent<{files: number}>) {
-    this.hasContextFiles_ = e.detail.files > 0;
+    this.tabSuggestions_ = [...tabs];
   }
 
   protected onFileValidationError_(e: CustomEvent<{errorMessage: string}>) {
     this.$.errorScrim.setErrorMessage(e.detail.errorMessage);
+  }
+
+  protected async getTabPreview_(e: CustomEvent<{
+    tabId: number,
+    onPreviewFetched: (previewDataUrl: string) => void,
+  }>) {
+    const {previewDataUrl} =
+        await this.pageHandler_.getTabPreview(e.detail.tabId);
+    e.detail.onPreviewFetched(previewDataUrl || '');
   }
 
   protected onComposeButtonClick_(e: CustomEvent<ComposeClickEventDetail>) {
@@ -1103,12 +1119,35 @@ export class SearchboxElement extends SearchboxElementBase {
         window.open(href, '_self');
       }
     } else {
-      this.dispatchEvent(new CustomEvent('open-composebox'));
+      this.openComposebox_();
     }
 
     chrome.metricsPrivate.recordBoolean(
         'NewTabPage.ComposeEntrypoint.Click.UserTextPresent',
         !this.isInputEmpty());
+  }
+
+  protected setDeepSearchMode_() {
+    this.openComposebox_([], ComposeboxMode.DEEP_SEARCH);
+  }
+
+  protected setCreateImageMode_() {
+    this.openComposebox_([], ComposeboxMode.CREATE_IMAGE);
+  }
+
+  protected openComposebox_(
+      files: ComposeboxFile[] = [],
+      mode: ComposeboxMode = ComposeboxMode.DEFAULT) {
+    this.dispatchEvent(new CustomEvent('open-composebox', {
+      detail: {
+        searchboxText: this.$.input.value,
+        contextFiles: files,
+        mode: mode,
+      },
+      bubbles: true,
+      composed: true,
+    }));
+    this.setInputText('');
   }
 
   hasThumbnail(): boolean {
@@ -1140,9 +1179,9 @@ export class SearchboxElement extends SearchboxElementBase {
     return this.result_.matches[this.selectedMatchIndex_] || null;
   }
 
-  protected computePlaceholderText_(): string {
-    if (this.placeholderText) {
-      return this.placeholderText;
+  protected computePlaceholderText_(placeholderText: string): string {
+    if (placeholderText) {
+      return placeholderText;
     }
     return this.showThumbnail ? this.i18n('searchBoxHintMultimodal') :
                                 this.i18n('searchBoxHint');
@@ -1170,7 +1209,7 @@ export class SearchboxElement extends SearchboxElementBase {
         (e as MouseEvent).button || 0, e.altKey, e.ctrlKey, e.metaKey,
         e.shiftKey);
     this.updateInput_({
-      text: this.selectedMatch_!.fillIntoEdit,
+      text: match.fillIntoEdit,
       inline: '',
       moveCursorToEnd: true,
     });

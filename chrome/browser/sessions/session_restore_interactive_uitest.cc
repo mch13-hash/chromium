@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
+#include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -44,7 +45,7 @@ class SessionRestoreInteractiveTest : public InProcessBrowserTest {
   }
 
   bool SetUpUserDataDirectory() override {
-    url1_ = ui_test_utils::GetTestUrl(
+    url1_ = chrome_test_utils::GetTestUrl(
         base::FilePath().AppendASCII("session_history"),
         base::FilePath().AppendASCII("bot1.html"));
 
@@ -113,16 +114,19 @@ class SessionRestoreInteractiveTest : public InProcessBrowserTest {
         profile, nullptr,
         SessionRestore::SYNCHRONOUS | SessionRestore::RESTORE_BROWSER, {});
 
-    for (Browser* browser : *(BrowserList::GetInstance())) {
-      if (wait_for_tab_loading) {
-        WaitForTabsToLoad(browser);
-      }
-      if (browser->window()->IsMinimized()) {
-        minimized_window_counter--;
-      } else {
-        normal_window_counter--;
-      }
-    }
+    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+        [&wait_for_tab_loading, &minimized_window_counter,
+         &normal_window_counter, this](BrowserWindowInterface* browser) {
+          if (wait_for_tab_loading) {
+            WaitForTabsToLoad(browser);
+          }
+          if (browser->GetWindow()->IsMinimized()) {
+            minimized_window_counter--;
+          } else {
+            normal_window_counter--;
+          }
+          return true;
+        });
 
     keep_alive.reset();
     profile_keep_alive.reset();
@@ -131,10 +135,10 @@ class SessionRestoreInteractiveTest : public InProcessBrowserTest {
     EXPECT_EQ(0, minimized_window_counter);
   }
 
-  void WaitForTabsToLoad(Browser* browser) {
-    for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
-      content::WebContents* contents =
-          browser->tab_strip_model()->GetWebContentsAt(i);
+  void WaitForTabsToLoad(BrowserWindowInterface* browser) {
+    TabStripModel* const tab_model = browser->GetTabStripModel();
+    for (int i = 0; i < tab_model->count(); ++i) {
+      content::WebContents* const contents = tab_model->GetWebContentsAt(i);
       contents->GetController().LoadIfNecessary();
       EXPECT_TRUE(content::WaitForLoadStop(contents));
     }
@@ -275,31 +279,35 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreAshInteractiveTest, MultiWindowTabLoad) {
   // Checks that only the active tab in "window 2" starts to load immediately.
   int load_count = 0;
   GURL last_loading_tab_url;
-  for (Browser* browser : *(BrowserList::GetInstance())) {
-    for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
-      content::WebContents* contents =
-          browser->tab_strip_model()->GetWebContentsAt(i);
-      if (contents->IsLoading()) {
-        ++load_count;
-        last_loading_tab_url = contents->GetLastCommittedURL();
-      }
-    }
-  }
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [&load_count, &last_loading_tab_url](BrowserWindowInterface* browser) {
+        TabStripModel* const tab_model = browser->GetTabStripModel();
+        for (int i = 0; i < tab_model->count(); ++i) {
+          content::WebContents* const contents = tab_model->GetWebContentsAt(i);
+          if (contents->IsLoading()) {
+            ++load_count;
+            last_loading_tab_url = contents->GetLastCommittedURL();
+          }
+        }
+        return true;
+      });
   EXPECT_EQ(1, load_count);
   EXPECT_EQ(kUrlWindow2, last_loading_tab_url);
 
   // Waits for "window 1" to finish load.
   content::WebContents* contents_window1 = nullptr;
-  for (Browser* browser : *(BrowserList::GetInstance())) {
-    for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
-      content::WebContents* contents =
-          browser->tab_strip_model()->GetWebContentsAt(i);
-      if (contents->GetLastCommittedURL() == kUrlWindow1) {
-        contents_window1 = contents;
-        break;
-      }
-    }
-  }
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [&contents_window1, &kUrlWindow1](BrowserWindowInterface* browser) {
+        TabStripModel* const tab_model = browser->GetTabStripModel();
+        for (int i = 0; i < tab_model->count(); ++i) {
+          content::WebContents* const contents = tab_model->GetWebContentsAt(i);
+          if (contents->GetLastCommittedURL() == kUrlWindow1) {
+            contents_window1 = contents;
+            return false;
+          }
+        }
+        return true;
+      });
   EXPECT_TRUE(content::WaitForLoadStop(contents_window1));
 
   // "window 1" should be in occluded state after load.

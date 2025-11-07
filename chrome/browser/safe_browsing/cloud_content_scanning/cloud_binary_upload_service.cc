@@ -42,6 +42,12 @@
 namespace safe_browsing {
 namespace {
 
+// The default maximum number of concurrent active requests. This is used to
+// limit the number of requests that are actively being uploaded. This is set to
+// default of 15 because it was determined to be a good value through
+// experiments. See http://crbug.com/329293309.
+constexpr int kDefaultMaxParallelActiveRequests = 15;
+
 constexpr base::TimeDelta kAuthTimeout = base::Seconds(10);
 constexpr base::TimeDelta kScanningTimeout = base::Minutes(5);
 
@@ -191,12 +197,20 @@ bool IgnoreErrorResultForResumableUpload(BinaryUploadService::Request* request,
 
 // static
 size_t CloudBinaryUploadService::GetParallelActiveRequestsMax() {
-  size_t max_value =
-      enterprise_connectors::kParallelContentAnalysisRequestCount.Get();
-  return max_value > 0
-             ? max_value
-             : enterprise_connectors::kParallelContentAnalysisRequestCount
-                   .default_value;
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kWpMaxParallelActiveRequests)) {
+    int parsed_max;
+    if (base::StringToInt(command_line->GetSwitchValueASCII(
+                              switches::kWpMaxParallelActiveRequests),
+                          &parsed_max) &&
+        parsed_max > 0) {
+      return parsed_max;
+    } else {
+      DVLOG(1) << "wp-max-parallel-active-requests had invalid value";
+    }
+  }
+
+  return kDefaultMaxParallelActiveRequests;
 }
 
 CloudBinaryUploadService::CloudBinaryUploadService(Profile* profile)
@@ -332,9 +346,7 @@ void CloudBinaryUploadService::PrepareRequestForUpload(Request::Id request_id) {
     request->GetRequestData(
         base::BindOnce(&CloudBinaryUploadService::OnGetRequestData,
                        weakptr_factory_.GetWeakPtr(), request_id));
-  } else if (!IsConsumerScanRequest(*request) &&
-             base::FeatureList::IsEnabled(
-                 safe_browsing::kLocalIpAddressInEvents)) {
+  } else if (!IsConsumerScanRequest(*request)) {
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
         base::BindOnce(&::enterprise_connectors::GetLocalIpAddresses),
@@ -432,6 +444,9 @@ void CloudBinaryUploadService::OnGetRequestData(Request::Id request_id,
     // encrypted.
     if (result == Result::FILE_ENCRYPTED) {
       request->set_is_content_encrypted(true);
+    }
+    if (result == Result::FILE_TOO_LARGE) {
+      request->set_is_content_too_large(true);
     }
   }
 
@@ -619,10 +634,17 @@ void CloudBinaryUploadService::MaybeFinishRequest(Request::Id request_id) {
     *response.add_results() = std::move(tag_and_result.second);
   }
 
-  // Set `result` to be unknown, if the request is terminated with incomplete
+  // Set `result` to be INCOMPLETE_RESPONSE, if the request is terminated with incomplete
   // response.
-  Result result = ResponseIsComplete(request_id) ? Result::SUCCESS
-                                                 : Result::INCOMPLETE_RESPONSE;
+  Result result = Result::SUCCESS;
+  if (!ResponseIsComplete(request_id)) {
+    result = Result::INCOMPLETE_RESPONSE;
+  } else if (request->is_content_too_large()) {
+    result = Result::FILE_TOO_LARGE;
+  } else if (request->is_content_encrypted()) {
+    result = Result::FILE_ENCRYPTED;
+  }
+
   FinishRequest(request, result, std::move(response));
 }
 

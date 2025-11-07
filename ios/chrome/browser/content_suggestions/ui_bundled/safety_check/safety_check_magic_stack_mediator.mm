@@ -11,6 +11,7 @@
 #import "components/pref_registry/pref_registry_syncable.h"
 #import "components/prefs/ios/pref_observer_bridge.h"
 #import "components/prefs/pref_service.h"
+#import "components/safety_check/safety_check_pref_names.h"
 #import "ios/chrome/app/profile/profile_init_stage.h"
 #import "ios/chrome/app/profile/profile_state.h"
 #import "ios/chrome/app/profile/profile_state_observer.h"
@@ -18,6 +19,7 @@
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_consumer.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_view_controller_audience.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/magic_stack/magic_stack_module.h"
+#import "ios/chrome/browser/content_suggestions/ui_bundled/safety_check/constants.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/safety_check/safety_check_audience.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/safety_check/safety_check_consumer_source.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/safety_check/safety_check_magic_stack_consumer.h"
@@ -134,7 +136,7 @@ int ImpressionsCount(const base::Value::List& impressions,
       _userPrefChangeRegistrar.Init(userState);
 
       _prefObserverBridge->ObserveChangesForPreference(
-          prefs::kHomeCustomizationMagicStackSafetyCheckEnabled,
+          safety_check::prefs::kSafetyCheckHomeModuleEnabled,
           &_userPrefChangeRegistrar);
 
       _safetyCheckState = [self initialSafetyCheckState];
@@ -359,9 +361,9 @@ int ImpressionsCount(const base::Value::List& impressions,
     // has changed.
     [self runningStateChanged:_safetyCheckState.runningState];
   } else if (preferenceName ==
-                 prefs::kHomeCustomizationMagicStackSafetyCheckEnabled &&
+                 safety_check::prefs::kSafetyCheckHomeModuleEnabled &&
              !_userState->GetBoolean(
-                 prefs::kHomeCustomizationMagicStackSafetyCheckEnabled)) {
+                 safety_check::prefs::kSafetyCheckHomeModuleEnabled)) {
     [self.delegate removeSafetyCheckModule];
   }
 }
@@ -468,7 +470,7 @@ int ImpressionsCount(const base::Value::List& impressions,
   base::TimeDelta lastRunAge = base::Time::Now() - lastRunTime;
 
   // Only return the Last Run Time if the run happened within the last 24hr.
-  if (lastRunAge <= TimeDelayForSafetyCheckAutorun()) {
+  if (lastRunAge <= safety_check::kTimeDelayForSafetyCheckAutorun) {
     return lastRunTime;
   }
 

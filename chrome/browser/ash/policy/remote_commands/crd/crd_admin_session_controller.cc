@@ -253,29 +253,24 @@ class HostLaunchObserver : public CrdSessionObserver {
   base::OnceClosure launch_done_;
 };
 
-class SessionDurationObserver : public CrdSessionObserver {
+class SessionDisconnectObserver : public CrdSessionObserver {
  public:
-  explicit SessionDurationObserver(SessionEndCallback callback)
+  explicit SessionDisconnectObserver(SessionEndCallback callback)
       : callback_(std::move(callback)) {}
-  SessionDurationObserver(const SessionDurationObserver&) = delete;
-  SessionDurationObserver& operator=(const SessionDurationObserver&) = delete;
-  ~SessionDurationObserver() override = default;
+  SessionDisconnectObserver(const SessionDisconnectObserver&) = delete;
+  SessionDisconnectObserver& operator=(const SessionDisconnectObserver&) =
+      delete;
+  ~SessionDisconnectObserver() override = default;
 
   // `CrdSessionObserver` implementation:
-  void OnClientConnected() override {
-    session_connected_time_ = base::Time::Now();
-  }
-
   void OnClientDisconnected() override {
-    if (session_connected_time_.has_value() && callback_) {
-      std::move(callback_).Run(base::Time::Now() -
-                               session_connected_time_.value());
+    if (callback_) {
+      std::move(callback_).Run();
     }
   }
 
  private:
   SessionEndCallback callback_;
-  std::optional<base::Time> session_connected_time_;
 };
 
 // Rejects incoming sessions when there is more than 10 minutes between
@@ -375,6 +370,8 @@ remoting::ChromeOsEnterpriseParams GetEnterpriseParameters(
   params.connection_dialog_required = parameters.show_confirmation_dialog;
   params.request_origin =
       ConvertToChromeOsEnterpriseRequestOrigin(parameters.request_origin);
+  params.audio_playback =
+      ConvertToChromeOsEnterpriseAudioPlayback(parameters.audio_playback);
   params.connection_auto_accept_timeout =
       parameters.connection_auto_accept_timeout.value_or(base::TimeDelta());
   params.maximum_session_duration =
@@ -765,7 +762,7 @@ void CrdAdminSessionController::StartCrdHostAndGetCode(
 
   active_session_->AddOwnedObserver(std::make_unique<AccessCodeObserver>(
       std::move(success_callback), std::move(error_callback)));
-  active_session_->AddOwnedObserver(std::make_unique<SessionDurationObserver>(
+  active_session_->AddOwnedObserver(std::make_unique<SessionDisconnectObserver>(
       std::move(session_finished_callback)));
 
   active_session_->Launch(std::make_unique<NewSessionLauncher>(

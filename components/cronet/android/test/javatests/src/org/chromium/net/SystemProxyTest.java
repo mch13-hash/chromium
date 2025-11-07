@@ -27,7 +27,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.Batch;
-import org.chromium.net.CronetTestRule.CronetImplementation;
+import org.chromium.net.CronetTestFramework.CronetImplementation;
 import org.chromium.net.CronetTestRule.IgnoreFor;
 
 import java.util.Collections;
@@ -44,7 +44,7 @@ public final class SystemProxyTest {
     //
     // Note that we can't use "localhost" or anything similar here, because //net implicitly
     // bypasses the proxy for local names and IP addresses; see
-    // //net/docs/proxy.md and ProxyBypassRules::MatchesImplicitRules().
+    // //net/docs/proxy.md and ProxyHostMatchingRules::MatchesImplicitRules().
     private static final String TEST_HOSTNAME = "test-hostname";
 
     private static final class BroadcastContext extends ContextWrapper {

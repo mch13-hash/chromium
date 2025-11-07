@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/core/dom/css_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/dataset_dom_string_map.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
+#include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/explicitly_set_attr_elements_map.h"
 #include "third_party/blink/renderer/core/dom/has_invalidation_flags.h"
 #include "third_party/blink/renderer/core/dom/interest_invoker_target_data.h"
@@ -38,6 +39,7 @@
 #include "third_party/blink/renderer/core/resize_observer/resize_observer.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -154,6 +156,36 @@ void ElementRareDataVector::ClearColumnPseudoElements(wtf_size_t to_keep) {
     return;
   }
   data->ClearColumnPseudoElements(to_keep);
+}
+
+void ElementRareDataVector::AddOverscrollPseudoElement(PseudoElement& element) {
+  PseudoElementData* data =
+      static_cast<PseudoElementData*>(GetField(FieldId::kPseudoElementData));
+  if (!data) {
+    data = MakeGarbageCollected<PseudoElementData>();
+    SetField(FieldId::kPseudoElementData, data);
+  }
+  data->SetPseudoElement(element.GetPseudoId(), &element,
+                         element.GetPseudoArgument());
+}
+
+const OverscrollPseudoElementData*
+ElementRareDataVector::GetOverscrollPseudoElementData() const {
+  PseudoElementData* data =
+      static_cast<PseudoElementData*>(GetField(FieldId::kPseudoElementData));
+  if (!data) {
+    return nullptr;
+  }
+  return data->GetOverscrollAreaData();
+}
+
+void ElementRareDataVector::ClearOverscrollPseudoElements() {
+  PseudoElementData* data =
+      static_cast<PseudoElementData*>(GetField(FieldId::kPseudoElementData));
+  if (!data) {
+    return;
+  }
+  data->ClearOverscrollAreas();
 }
 
 CSSStyleDeclaration& ElementRareDataVector::EnsureInlineCSSStyleDeclaration(
@@ -570,6 +602,20 @@ ElementAnimationTriggerData&
 ElementRareDataVector::EnsureAnimationTriggerData() {
   return EnsureField<ElementAnimationTriggerData>(
       FieldId::kAnimationTriggerData);
+}
+
+void ElementRareDataVector::SetFocusgroupLastFocused(Element* element) {
+  // Store weak reference, this should not keep the element alive.
+  SetWrappedField<WeakMember<Element>>(FieldId::kFocusgroupLastFocused,
+                                       element);
+}
+
+Element* ElementRareDataVector::GetFocusgroupLastFocused() const {
+  if (auto* value = GetWrappedField<WeakMember<Element>>(
+          FieldId::kFocusgroupLastFocused)) {
+    return value->Get();
+  }
+  return nullptr;
 }
 
 void ElementRareDataVector::Trace(blink::Visitor* visitor) const {

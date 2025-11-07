@@ -9,17 +9,13 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/common/chrome_features.h"
 #include "components/search/ntp_features.h"
 #include "components/variations/service/variations_service.h"
 #include "components/webui/flags/feature_entry.h"
 #include "ui/base/ui_base_features.h"
 
 namespace features {
-
-// Enables the tab dragging fallback when full window dragging is not supported
-// by the platform (e.g. Wayland). See https://crbug.com/896640
-BASE_FEATURE(kAllowWindowDragUsingSystemDragDrop,
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables the use of WGC for the Eye Dropper screen capture.
 BASE_FEATURE(kAllowEyeDropperWGCScreenCapture,
@@ -44,17 +40,13 @@ BASE_FEATURE(kCreateNewTabGroupAppMenuTopLevel,
 BASE_FEATURE(kFewerUpdateConfirmations, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
-BASE_FEATURE(kDesktopNewTopAreaLayoutFeature,
-             "DesktopNewTopAreaLayout",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
-
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 
 BASE_FEATURE(kExtensionsCollapseMainMenu, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+BASE_FEATURE(kInfobarRefresh, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_WIN)
 BASE_FEATURE(kOfferPinToTaskbarWhenSettingToDefault,
@@ -123,6 +115,21 @@ BASE_FEATURE_PARAM(base::TimeDelta,
                    "drop_target_show_delay",
                    base::Milliseconds(500));
 BASE_FEATURE_PARAM(base::TimeDelta,
+                   kSideBySideShowDropTargetForLinkDelay,
+                   &kSideBySide,
+                   "drop_target_for_link_show_delay",
+                   base::Milliseconds(500));
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kSideBySideShowDropTargetForLinkAfterHideDelay,
+                   &kSideBySide,
+                   "drop_target_for_link_after_hide_show_delay",
+                   base::Milliseconds(3000));
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kSideBySideShowDropTargetForLinkAfterHideLookbackWindow,
+                   &kSideBySide,
+                   "drop_target_for_link_after_hide_lookback_window",
+                   base::Seconds(30));
+BASE_FEATURE_PARAM(base::TimeDelta,
                    kSideBySideHideDropTargetDelay,
                    &kSideBySide,
                    "drop_target_hide_delay",
@@ -147,6 +154,11 @@ BASE_FEATURE_PARAM(int,
                    &kSideBySide,
                    "drop_target_width_percentage",
                    30);
+BASE_FEATURE_PARAM(int,
+                   kSideBySideDropTargetForLinkTargetWidthPercentage,
+                   &kSideBySide,
+                   "drop_target_for_link_width_percentage",
+                   15);
 BASE_FEATURE_PARAM(int,
                    kSideBySideDropTargetHideForOSWidth,
                    &kSideBySide,
@@ -262,6 +274,8 @@ bool IsSideBySideKeyboardShortcutEnabled() {
   return base::FeatureList::IsEnabled(features::kSideBySide) &&
          base::FeatureList::IsEnabled(features::kSideBySideKeyboardShortcut);
 }
+
+BASE_FEATURE(kTabbedBrowserUseNewLayout, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabDuplicateMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -385,6 +399,7 @@ BASE_FEATURE(kTearOffWebAppTabOpensWebAppWindow,
 BASE_FEATURE(kThreeButtonPasswordSaveDialog, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
+BASE_FEATURE(kToolbarHeightSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables enterprise profile badging for managed profiles on the toolbar avatar
 // and in the profile menu. On managed profiles, a building icon will be used as
@@ -432,7 +447,7 @@ BASE_FEATURE(kWebUITabStripContextMenuAfterTap,
 );
 
 #if BUILDFLAG(IS_MAC)
-BASE_FEATURE(kViewsFirstRunDialog, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kViewsFirstRunDialog, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kViewsJSAppModalDialog, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
@@ -583,6 +598,30 @@ BASE_FEATURE_PARAM(bool,
                    "ai_mode",
                    false);
 
+BASE_FEATURE_PARAM(bool,
+                   kPageActionsMigrationVirtualCard,
+                   &kPageActionsMigration,
+                   "virtual_card",
+                   false);
+
+BASE_FEATURE_PARAM(bool,
+                   kPageActionsMigrationFilledCardInformation,
+                   &kPageActionsMigration,
+                   "filled_card_information",
+                   false);
+
+BASE_FEATURE_PARAM(bool,
+                   kPageActionsMigrationReadingMode,
+                   &kPageActionsMigration,
+                   "reading_mode",
+                   true);
+
+BASE_FEATURE_PARAM(bool,
+                   kPageActionsMigrationSavePayments,
+                   &kPageActionsMigration,
+                   "save_payments",
+                   false);
+
 BASE_FEATURE(kSavePasswordsContextualUi, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kCompositorLoadingAnimations, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -658,6 +697,11 @@ BASE_FEATURE(kNewTabAddsToActiveGroup, base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsNewTabAddsToActiveGroupEnabled() {
   return base::FeatureList::IsEnabled(kNewTabAddsToActiveGroup);
+}
+
+bool IsWebUIReloadButtonEnabled() {
+  return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         base::FeatureList::IsEnabled(features::kWebUIReloadButton);
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 

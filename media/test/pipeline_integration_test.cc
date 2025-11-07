@@ -131,23 +131,6 @@ static base::Time kLiveTimelineOffset() {
   return timeline_offset;
 }
 
-#if BUILDFLAG(IS_MAC)
-class ScopedVerboseLogEnabler {
- public:
-  ScopedVerboseLogEnabler() : old_level_(logging::GetMinLogLevel()) {
-    logging::SetMinLogLevel(-1);
-  }
-
-  ScopedVerboseLogEnabler(const ScopedVerboseLogEnabler&) = delete;
-  ScopedVerboseLogEnabler& operator=(const ScopedVerboseLogEnabler&) = delete;
-
-  ~ScopedVerboseLogEnabler() { logging::SetMinLogLevel(old_level_); }
-
- private:
-  const int old_level_;
-};
-#endif
-
 enum PromiseResult { RESOLVED, REJECTED };
 
 // Provides the test key in response to the encrypted event.
@@ -736,11 +719,6 @@ TEST_F(PipelineIntegrationTest, PlaybackStereo48000hz) {
 }
 
 TEST_F(PipelineIntegrationTest, PlaybackWithAudioTrackDisabledThenEnabled) {
-#if BUILDFLAG(IS_MAC)
-  // Enable scoped logs to help track down hangs.  http://crbug.com/1014646
-  ScopedVerboseLogEnabler scoped_log_enabler;
-#endif
-
   ASSERT_EQ(PIPELINE_OK, Start("bear-320x240.webm", kHashed | kNoClockless));
 
   // Disable audio.
@@ -770,11 +748,6 @@ TEST_F(PipelineIntegrationTest, PlaybackWithAudioTrackDisabledThenEnabled) {
 }
 
 TEST_F(PipelineIntegrationTest, PlaybackWithVideoTrackDisabledThenEnabled) {
-#if BUILDFLAG(IS_MAC)
-  // Enable scoped logs to help track down hangs.  http://crbug.com/1014646
-  ScopedVerboseLogEnabler scoped_log_enabler;
-#endif
-
   ASSERT_EQ(PIPELINE_OK, Start("bear-320x240.webm", kHashed | kNoClockless));
 
   // Disable video.
@@ -1845,6 +1818,21 @@ TEST_F(PipelineIntegrationTest, MSE_fLaCInMp4_Hashed) {
   EXPECT_AUDIO_HASH(kSfxLosslessHash);
 }
 
+TEST_F(PipelineIntegrationTest, MSE_OpusInMp4) {
+  TestMediaSource source("sfx-opus_frag.mp4", "audio/mp4; codecs=\"Opus\"",
+                         kAppendWholeFile);
+  EXPECT_EQ(PIPELINE_OK,
+            StartPipelineWithMediaSource(&source, kHashed, nullptr));
+  source.EndOfStream();
+
+  EXPECT_EQ(1u, pipeline_->GetBufferedTimeRanges().size());
+  EXPECT_EQ(0, pipeline_->GetBufferedTimeRanges().start(0).InMilliseconds());
+  EXPECT_EQ(301, pipeline_->GetBufferedTimeRanges().end(0).InMilliseconds());
+
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+}
+
 TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
   ASSERT_EQ(PIPELINE_OK, Start("sfx.mp3", kHashed));
 
@@ -2684,11 +2672,6 @@ TEST_F(PipelineIntegrationTest, MSE_BasicPlayback_VideoOnly_MP4_HEV1) {
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 TEST_F(PipelineIntegrationTest, SeekWhilePaused) {
-#if BUILDFLAG(IS_MAC)
-  // Enable scoped logs to help track down hangs.  http://crbug.com/1014646
-  ScopedVerboseLogEnabler scoped_log_enabler;
-#endif
-
   // This test is flaky without kNoClockless, see crbug.com/796250.
   ASSERT_EQ(PIPELINE_OK, Start("bear-320x240.webm", kNoClockless));
 
@@ -2713,11 +2696,6 @@ TEST_F(PipelineIntegrationTest, SeekWhilePaused) {
 }
 
 TEST_F(PipelineIntegrationTest, SeekWhilePlaying) {
-#if BUILDFLAG(IS_MAC)
-  // Enable scoped logs to help track down hangs.  http://crbug.com/1014646
-  ScopedVerboseLogEnabler scoped_log_enabler;
-#endif
-
   // This test is flaky without kNoClockless, see crbug.com/796250.
   ASSERT_EQ(PIPELINE_OK, Start("bear-320x240.webm", kNoClockless));
 

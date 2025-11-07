@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
@@ -25,10 +26,6 @@
 #include "gpu/config/gpu_feature_info.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-
-namespace skia_bindings {
-class GrContextForGLES2Interface;
-}
 
 namespace viz {
 class TestGLES2Interface;
@@ -80,13 +77,11 @@ class TestContextProvider
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::raster::RasterInterface* RasterInterface() override;
   gpu::ContextSupport* ContextSupport() override;
-  class GrDirectContext* GrContext() override;
   gpu::TestSharedImageInterface* SharedImageInterface() override;
   ContextCacheController* CacheController() override;
   base::Lock* GetLock() override;
   void AddObserver(ContextLostObserver* obs) override;
   void RemoveObserver(ContextLostObserver* obs) override;
-  unsigned int GetGrGLTextureFormat(SharedImageFormat format) const override;
 
   TestGLES2Interface* TestContextGL();
   TestRasterInterface* GetTestRasterInterface();
@@ -122,7 +117,6 @@ class TestContextProvider
   // Used for GLES2 contexts.
   std::unique_ptr<TestGLES2Interface> context_gl_;
   std::unique_ptr<gpu::raster::RasterInterface> raster_interface_gles_;
-  std::unique_ptr<skia_bindings::GrContextForGLES2Interface> gr_context_;
 
   // Used for raster contexts.
   std::unique_ptr<TestRasterInterface> raster_context_;

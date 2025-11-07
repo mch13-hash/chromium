@@ -18,6 +18,7 @@
 #include "base/test/test_future.h"
 #include "base/test/with_feature_override.h"
 #include "base/types/expected.h"
+#include "build/build_config.h"
 #include "chrome/browser/web_applications/locks/web_app_lock_manager.h"
 #include "chrome/browser/web_applications/test/fake_web_app_provider.h"
 #include "chrome/browser/web_applications/test/fake_web_contents_manager.h"
@@ -124,7 +125,15 @@ class InstallFromSyncTest : public base::test::WithFeatureOverride,
     std::optional<webapps::InstallResultCode> install_code_before_fallback;
   };
 
-  bool TrustedIconsEnabled() { return GetParam(); }
+  // On ChromeOS, even with trusted icons enabled, sync installs always fetch
+  // the manifest.
+  bool UseFallbackModeForTrustedInstalls() {
+#if BUILDFLAG(IS_CHROMEOS)
+    return false;
+#else
+    return base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon);
+#endif  // BUILDFLAG(IS_CHROMEOS)
+  }
 
   InstallFromSyncCommand::Params CreateParams(webapps::AppId app_id,
                                               webapps::ManifestId manifest_id,
@@ -225,7 +234,7 @@ TEST_P(InstallFromSyncTest, SuccessWithManifest) {
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_EQ(webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons,
               result.install_code_before_fallback);
   }
@@ -240,7 +249,7 @@ TEST_P(InstallFromSyncTest, SuccessWithManifest) {
   // Check that the manifest info was installed.
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
                                                    app_id, kIconSize);
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_THAT(GetAppName(app_id), Eq(base::UTF8ToUTF16(kFallbackTitle)));
     EXPECT_THAT(registrar().GetAppIconInfos(app_id),
                 ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
@@ -274,7 +283,7 @@ TEST_P(InstallFromSyncTest, SuccessWithoutManifest) {
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_EQ(webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons,
               result.install_code_before_fallback);
   }
@@ -292,7 +301,7 @@ TEST_P(InstallFromSyncTest, SuccessWithoutManifest) {
   EXPECT_THAT(registrar().GetAppShortName(app_id), Eq(kFallbackTitle));
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
                                                    app_id, kIconSize);
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_THAT(registrar().GetAppIconInfos(app_id),
                 ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
     EXPECT_THAT(icon_color, Eq(kTrustedIconColor));
@@ -328,7 +337,7 @@ TEST_P(InstallFromSyncTest, SuccessManifestNoIcons) {
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_EQ(webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons,
               result.install_code_before_fallback);
   }
@@ -344,7 +353,7 @@ TEST_P(InstallFromSyncTest, SuccessManifestNoIcons) {
 
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
                                                    app_id, kIconSize);
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_THAT(GetAppName(app_id), Eq(base::UTF8ToUTF16(kFallbackTitle)));
     EXPECT_THAT(registrar().GetAppIconInfos(app_id),
                 ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
@@ -370,15 +379,17 @@ TEST_P(InstallFromSyncTest, UrlRedirectUseFallback) {
   // Fallback icon state.
   web_contents_manager().GetOrCreateIconState(kFallbackIconUrl).bitmaps = {
       gfx::test::CreateBitmap(kIconSize, kFallbackIconColor)};
-  web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
-      gfx::test::CreateBitmap(kTrustedIconSize, kTrustedIconColor)};
+  if (UseFallbackModeForTrustedInstalls()) {
+    web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
+        gfx::test::CreateBitmap(kTrustedIconSize, kTrustedIconColor)};
+  }
 
   InstallResult result =
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
   webapps::InstallResultCode fallback_result_code =
-      TrustedIconsEnabled()
+      UseFallbackModeForTrustedInstalls()
           ? webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons
           : webapps::InstallResultCode::kInstallURLRedirected;
   EXPECT_EQ(fallback_result_code, result.install_code_before_fallback.value());
@@ -389,7 +400,6 @@ TEST_P(InstallFromSyncTest, UrlRedirectUseFallback) {
             AreAppsLocallyInstalledBySync()
                 ? proto::InstallState::INSTALLED_WITH_OS_INTEGRATION
                 : proto::InstallState::SUGGESTED_FROM_ANOTHER_DEVICE
-
   );
 
   // Check that the fallback info was installed.
@@ -398,8 +408,9 @@ TEST_P(InstallFromSyncTest, UrlRedirectUseFallback) {
               ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
                                                    app_id, kIconSize);
-  SkColor expected_icon_color =
-      TrustedIconsEnabled() ? kTrustedIconColor : kFallbackIconColor;
+  SkColor expected_icon_color = UseFallbackModeForTrustedInstalls()
+                                    ? kTrustedIconColor
+                                    : kFallbackIconColor;
   EXPECT_THAT(icon_color, Eq(expected_icon_color));
 
   // Trusted app icons are also obtained, at least as part of the fallback
@@ -420,15 +431,20 @@ TEST_P(InstallFromSyncTest, FallbackWebAppInstallInfo) {
   // Fallback icon state.
   web_contents_manager().GetOrCreateIconState(kFallbackIconUrl).bitmaps = {
       gfx::test::CreateBitmap(kIconSize, kFallbackIconColor)};
-  web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
-      gfx::test::CreateBitmap(kTrustedIconSize, kTrustedIconColor)};
+
+  // Force the test to use the fallback icon since the trusted icons won't
+  // exist.
+  if (UseFallbackModeForTrustedInstalls()) {
+    web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
+        gfx::test::CreateBitmap(kTrustedIconSize, kTrustedIconColor)};
+  }
 
   InstallResult result =
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
   webapps::InstallResultCode fallback_result_code =
-      TrustedIconsEnabled()
+      UseFallbackModeForTrustedInstalls()
           ? webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons
           : webapps::InstallResultCode::kGetWebAppInstallInfoFailed;
 
@@ -451,8 +467,9 @@ TEST_P(InstallFromSyncTest, FallbackWebAppInstallInfo) {
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
                                                    app_id, kIconSize);
 
-  SkColor expected_icon_color =
-      TrustedIconsEnabled() ? kTrustedIconColor : kFallbackIconColor;
+  SkColor expected_icon_color = UseFallbackModeForTrustedInstalls()
+                                    ? kTrustedIconColor
+                                    : kFallbackIconColor;
   EXPECT_THAT(icon_color, Eq(expected_icon_color));
 
   // Trusted app icons are also obtained, at least as part of the fallback
@@ -479,17 +496,22 @@ TEST_P(InstallFromSyncTest, FallbackManifestIdMismatch) {
   // Icon state.
   web_contents_manager().GetOrCreateIconState(kDocumentIconUrl).bitmaps = {
       gfx::test::CreateBitmap(kIconSize, kDocumentIconColor)};
-  web_contents_manager().GetOrCreateIconState(kFallbackIconUrl).bitmaps = {
-      gfx::test::CreateBitmap(kIconSize, kFallbackIconColor)};
-  web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
-      gfx::test::CreateBitmap(kTrustedIconSize, kTrustedIconColor)};
+
+  // Force the test to use the document icon when the fallback icon and the
+  // trusted icons do not exist.
+  if (UseFallbackModeForTrustedInstalls()) {
+    web_contents_manager().GetOrCreateIconState(kFallbackIconUrl).bitmaps = {
+        gfx::test::CreateBitmap(kIconSize, kFallbackIconColor)};
+    web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
+        gfx::test::CreateBitmap(kTrustedIconSize, kTrustedIconColor)};
+  }
 
   InstallResult result =
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
   webapps::InstallResultCode fallback_result_code =
-      TrustedIconsEnabled()
+      UseFallbackModeForTrustedInstalls()
           ? webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons
           : webapps::InstallResultCode::kExpectedAppIdCheckFailed;
 
@@ -510,7 +532,7 @@ TEST_P(InstallFromSyncTest, FallbackManifestIdMismatch) {
 
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
                                                    app_id, kIconSize);
-  if (TrustedIconsEnabled()) {
+  if (UseFallbackModeForTrustedInstalls()) {
     EXPECT_THAT(registrar().GetAppIconInfos(app_id),
                 ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
     EXPECT_THAT(icon_color, Eq(kTrustedIconColor));
@@ -633,7 +655,13 @@ TEST_P(InstallFromSyncTest, TwoInstalls) {
                           webapps::InstallResultCode::kSuccessNewInstall));
 }
 
-TEST_P(InstallFromSyncTest, Shutdown) {
+// TODO(crbug.com/453907861): Disabled on Linux UBSan due to failures.
+#if BUILDFLAG(IS_LINUX) && defined(UNDEFINED_SANITIZER)
+#define MAYBE_Shutdown DISABLED_Shutdown
+#else
+#define MAYBE_Shutdown Shutdown
+#endif
+TEST_P(InstallFromSyncTest, MAYBE_Shutdown) {
   const webapps::AppId app_id = GenerateAppIdFromManifestId(kWebAppManifestId);
 
   // Page with manifest, but have the manifest fetch cause the system to shut
@@ -673,7 +701,20 @@ TEST_P(InstallFromSyncTest, TrustedIconInstallsFromFallback) {
   base::test::ScopedFeatureList feature_list{features::kWebAppUsePrimaryIcon};
   const webapps::AppId app_id = GenerateAppIdFromManifestId(kWebAppManifestId);
 
-  // Only set icon states, since fallback installs only need to download icons.
+  // Set the page states so that even if the feature flag is enabled, CrOS can
+  // still do a sync install flow by fetching from the manifest.
+  auto& fake_page_state =
+      web_contents_manager().GetOrCreatePageState(kWebAppStartUrl);
+  fake_page_state.url_load_result = webapps::WebAppUrlLoaderResult::kUrlLoaded;
+  fake_page_state.opt_metadata =
+      FakeWebContentsManager::CreateMetadataWithIconAndTitle(
+          kDocumentTitle, kDocumentIconUrl, kIconSize);
+  fake_page_state.manifest_before_default_processing =
+      CreateManifest(kWebAppStartUrl, kWebAppManifestId, /*icons=*/true);
+
+  // Set all icon states.
+  web_contents_manager().GetOrCreateIconState(kManifestIconUrl).bitmaps = {
+      gfx::test::CreateBitmap(kIconSize, kManifestIconColor)};
   web_contents_manager().GetOrCreateIconState(kFallbackIconUrl).bitmaps = {
       gfx::test::CreateBitmap(kIconSize, kManifestIconColor)};
   web_contents_manager().GetOrCreateIconState(kTrustedIconUrl).bitmaps = {
@@ -683,10 +724,10 @@ TEST_P(InstallFromSyncTest, TrustedIconInstallsFromFallback) {
       InstallFromSyncAndWait(kWebAppStartUrl, kWebAppManifestId);
   ASSERT_TRUE(result.callback_triggered);
 
-  // Installs from fallback.
-  ASSERT_TRUE(result.install_code_before_fallback.has_value());
-  EXPECT_EQ(webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons,
-            result.install_code_before_fallback.value());
+  if (UseFallbackModeForTrustedInstalls()) {
+    EXPECT_EQ(webapps::InstallResultCode::kFallbackInstallUsingTrustedIcons,
+              result.install_code_before_fallback);
+  }
   EXPECT_EQ(webapps::InstallResultCode::kSuccessNewInstall,
             result.install_code);
   EXPECT_EQ(result.installed_app_id, app_id);
@@ -695,16 +736,25 @@ TEST_P(InstallFromSyncTest, TrustedIconInstallsFromFallback) {
                 ? proto::InstallState::INSTALLED_WITH_OS_INTEGRATION
                 : proto::InstallState::SUGGESTED_FROM_ANOTHER_DEVICE);
 
-  // Check that the fallback info was installed.
-  EXPECT_THAT(registrar().GetAppShortName(app_id), Eq(kFallbackTitle));
-  EXPECT_THAT(registrar().GetAppIconInfos(app_id),
-              ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
-  EXPECT_THAT(registrar().GetTrustedAppIconsMetadata(app_id),
-              ElementsAre(apps::IconInfo(kTrustedIconUrl, kTrustedIconSize)));
-
   SkColor icon_color = IconManagerReadAppIconPixel(provider()->icon_manager(),
-                                                   app_id, kTrustedIconSize);
-  EXPECT_THAT(icon_color, Eq(kTrustedIconColor));
+                                                   app_id, kIconSize);
+  if (UseFallbackModeForTrustedInstalls()) {
+    EXPECT_THAT(registrar().GetAppShortName(app_id), Eq(kFallbackTitle));
+    EXPECT_THAT(registrar().GetAppIconInfos(app_id),
+                ElementsAre(apps::IconInfo(kFallbackIconUrl, kIconSize)));
+    EXPECT_THAT(registrar().GetTrustedAppIconsMetadata(app_id),
+                ElementsAre(apps::IconInfo(kTrustedIconUrl, kTrustedIconSize)));
+    EXPECT_THAT(icon_color, Eq(kTrustedIconColor));
+  } else {
+    // On ChromeOS, sync installs always happen from the manifest provided
+    // entries.
+    EXPECT_THAT(GetAppName(app_id), Eq(kManifestName));
+    EXPECT_THAT(registrar().GetAppIconInfos(app_id),
+                ElementsAre(apps::IconInfo(kManifestIconUrl, kIconSize)));
+    EXPECT_THAT(registrar().GetTrustedAppIconsMetadata(app_id),
+                ElementsAre(apps::IconInfo(kManifestIconUrl, kIconSize)));
+    EXPECT_THAT(icon_color, Eq(kManifestIconColor));
+  }
 }
 
 INSTANTIATE_FEATURE_OVERRIDE_TEST_SUITE(InstallFromSyncTest);

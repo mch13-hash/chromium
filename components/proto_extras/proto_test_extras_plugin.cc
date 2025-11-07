@@ -25,6 +25,7 @@
 namespace {
 
 using google::protobuf::Descriptor;
+using google::protobuf::Edition;
 using google::protobuf::FieldDescriptor;
 using google::protobuf::FileDescriptor;
 using google::protobuf::compiler::GeneratorContext;
@@ -48,6 +49,14 @@ class ProtoGmockGenerator : public google::protobuf::compiler::CodeGenerator {
  public:
   ProtoGmockGenerator() = default;
   ~ProtoGmockGenerator() override = default;
+
+  uint64_t GetSupportedFeatures() const override {
+    return FEATURE_PROTO3_OPTIONAL | FEATURE_SUPPORTS_EDITIONS;
+  }
+
+  Edition GetMinimumEdition() const override { return Edition::EDITION_PROTO2; }
+
+  Edition GetMaximumEdition() const override { return Edition::EDITION_2024; }
 
   bool Generate(const FileDescriptor* file,
                 const std::string& options,  // Options from build system
@@ -199,7 +208,9 @@ $print_to_definitions$
       }
       std::string resolve_field_function;
       if (field.type() == FieldDescriptor::Type::TYPE_MESSAGE ||
-          field.type() == FieldDescriptor::Type::TYPE_GROUP) {
+          field.type() == FieldDescriptor::Type::TYPE_GROUP ||
+          field.type() == FieldDescriptor::Type::TYPE_STRING ||
+          field.type() == FieldDescriptor::Type::TYPE_BYTES) {
         resolve_field_function = "::proto_extras::ResolveRepeatedPtrField";
       } else {
         resolve_field_function = "::proto_extras::ResolveRepeatedField";

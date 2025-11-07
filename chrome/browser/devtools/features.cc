@@ -150,6 +150,9 @@ BASE_FEATURE(kDevToolsAiSubmenuPrompts, base::FEATURE_ENABLED_BY_DEFAULT);
 // Whether DevTools shows 'Debug with AI' and new badges.
 BASE_FEATURE(kDevToolsAiDebugWithAi, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Turns on the GreenDev experimental UI.
+BASE_FEATURE(kDevToolsGreenDevUi, base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Whether the global AI entrypoint is enabled.
 BASE_FEATURE(kDevToolsGlobalAiButton, base::FEATURE_ENABLED_BY_DEFAULT);
 // Whether the promotion animation is enabled.
@@ -179,10 +182,23 @@ BASE_FEATURE(kDevToolsIndividualRequestThrottling,
 
 // Whether the AI Prompt API (https://developer.chrome.com/docs/ai/prompt-api)
 // is available in DevTools.
-BASE_FEATURE(kDevToolsAiPromptApi, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kDevToolsAiPromptApi, base::FEATURE_ENABLED_BY_DEFAULT);
+// Whether the Prompt API is allowed to run on devices without a dedicated GPU.
+const base::FeatureParam<bool> kDevToolsAiPromptApiAllowWithoutGpu{
+    &kDevToolsAiPromptApi, "allow_without_gpu",
+    /*default_value=*/false};
 
 // Whether showing animation styles in the styles tab is enabled.
-BASE_FEATURE(kDevToolsStartingStyleDebugging,
+BASE_FEATURE(kDevToolsStartingStyleDebugging, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Whether Network panel should use Durable Messages to preserve network bodies.
+BASE_FEATURE(kDevToolsEnableDurableMessages, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Whether the policy dialog should be shown instead of greying out the
+// Developer Tools toggle.
+// TODO(crbug.com/442892562): Remove this flag once the feature is launched.
+BASE_FEATURE(kDevToolsShowPolicyDialog,
+             "DevToolsShowPolicyDialog",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace features

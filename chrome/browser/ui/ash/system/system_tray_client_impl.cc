@@ -53,6 +53,7 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/managed_ui.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/webui/access_code_cast/access_code_cast_dialog.h"
 #include "chrome/browser/ui/webui/ash/bluetooth/bluetooth_pairing_dialog.h"
@@ -72,6 +73,7 @@
 #include "chromeos/ash/components/network/onc/network_onc_utils.h"
 #include "chromeos/ash/components/network/tether_constants.h"
 #include "chromeos/ash/components/phonehub/util/histogram_util.h"
+#include "chromeos/ash/experiences/settings_ui/settings_app_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/session_manager/core/session_manager.h"
@@ -95,9 +97,8 @@ constexpr char kOfficialCalendarUrlPrefix[] =
     "https://calendar.google.com/calendar/";
 
 void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
-  ash::NewWindowDelegate::GetInstance()->OpenOSSettingsPage(
-      CHECK_DEREF(user_manager::UserManager::Get()->GetActiveUser()),
-      {.sub_page = sub_page});
+  chrome::SettingsWindowManager::GetInstance()->ShowOSSettings(
+      ProfileManager::GetActiveUserProfile(), sub_page);
 }
 
 // Returns the severity of a pending update.
@@ -380,7 +381,7 @@ void SystemTrayClientImpl::SetShowEolNotice(bool show,
 void SystemTrayClientImpl::ShowSettings(int64_t display_id) {
   // TODO(jamescook): Use different metric for OS settings.
   base::RecordAction(base::UserMetricsAction("ShowOptions"));
-  ash::NewWindowDelegate::GetInstance()->OpenOSSettingsPage(
+  ash::SettingsAppManager::Get()->Open(
       CHECK_DEREF(user_manager::UserManager::Get()->GetActiveUser()),
       {.display_id = display_id});
 }

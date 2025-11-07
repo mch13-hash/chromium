@@ -189,12 +189,14 @@
   _omniboxMetricsRecorder =
       [[OmniboxMetricsRecorder alloc] initWithClient:_client.get()
                                            textModel:_omniboxTextModel.get()];
+  viewController.metricsRecorder = _omniboxMetricsRecorder;
   [_omniboxMetricsRecorder
       setAutocompleteController:[_omniboxAutocompleteController
                                     autocompleteController]];
 
   self.pasteDelegate = [[OmniboxTextFieldPasteDelegate alloc] init];
   [textInput setPasteDelegate:self.pasteDelegate];
+  self.pasteDelegate.textInput = textInput;
 
   _keyboardMediator = [[OmniboxAssistiveKeyboardMediator alloc] init];
   _keyboardMediator.applicationCommandsHandler =
@@ -224,6 +226,7 @@
   _omniboxAutocompleteController.omniboxTextController = _omniboxTextController;
   _omniboxAutocompleteController.omniboxMetricsRecorder =
       _omniboxMetricsRecorder;
+  _omniboxAutocompleteController.lensHander = self.mediator;
 
   _omniboxMetricsRecorder.omniboxAutocompleteController =
       _omniboxAutocompleteController;
@@ -306,6 +309,10 @@
   [_omniboxTextController endEditing];
 }
 
+- (void)acceptInput {
+  [self.mediator acceptInput];
+}
+
 - (void)insertTextToOmnibox:(NSString*)text {
   [_omniboxTextController insertTextToOmnibox:text];
 }
@@ -376,7 +383,7 @@
   BOOL showKeyboardAccessory =
       experimental_flags::IsOmniboxDebuggingEnabled() ||
       (!self.searchOnlyUI &&
-       _presentationContext != OmniboxPresentationContext::kAIMPrototype);
+       _presentationContext != OmniboxPresentationContext::kComposebox);
 
   if (!self.keyboardAccessoryView && showKeyboardAccessory) {
     TemplateURLService* templateURLService =

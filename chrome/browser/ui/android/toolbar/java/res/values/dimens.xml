@@ -15,6 +15,13 @@ found in the LICENSE file.
 
     <dimen name="ntp_search_box_height">64dp</dimen>
     <dimen name="ntp_search_box_height_tall">72dp</dimen>
+    <dimen name="ntp_search_box_elevation">3dp</dimen>
+
+    <!-- Tab group context menu on tablet tab strip -->
+    <!-- list_menu_item_horizontal_padding is 16dp and
+         color_picker_color_item_horizontal_padding is 8dp;
+         add 8dp extra padding here to align with the other menu items. -->
+    <dimen name="color_picker_horizontal_padding">8dp</dimen>
 
     <!-- Toolbar Phone - Optional toolbar button dimensions -->
     <!-- Padding of button's background, only visible when showing a contextual action. -->
@@ -46,7 +53,6 @@ found in the LICENSE file.
 
     <!-- Custom Tabs dimensions -->
     <dimen name="toolbar_icon_height">24dp</dimen>
-    <dimen name="toolbar_icon_default_width">@dimen/toolbar_icon_height</dimen>
 
     <!-- Navigation history popup dimensions -->
     <dimen name="navigation_popup_width">312dp</dimen>

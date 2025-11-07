@@ -100,6 +100,8 @@
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/border_shape_painter.h"
+#include "third_party/blink/renderer/core/paint/border_shape_utils.h"
 #include "third_party/blink/renderer/core/paint/box_paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/contoured_border_geometry.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
@@ -505,7 +507,7 @@ bool LayoutBox::TransformsChangeMayRequireLayout() const {
   }
 
   for (const PhysicalBoxFragment& fragment : PhysicalFragments()) {
-    if (fragment.HasAnchorQueryToPropagate()) {
+    if (fragment.HasAnchorsToPropagate()) {
       return true;
     }
   }
@@ -1179,7 +1181,8 @@ void LayoutBox::QuadsInAncestorInternal(Vector<gfx::QuadF>& quads,
   }
 }
 
-gfx::RectF LayoutBox::LocalBoundingBoxRectForAccessibility() const {
+gfx::RectF LayoutBox::LocalBoundingBoxRectForAccessibility(
+    IncludeDescendants include_descendants) const {
   NOT_DESTROYED();
   PhysicalSize size = StitchedSize();
   return gfx::RectF(0, 0, size.width.ToFloat(), size.height.ToFloat());
@@ -1313,7 +1316,7 @@ LayoutUnit LayoutBox::DefaultIntrinsicContentInlineSize() const {
   const bool apply_fixed_size = StyleRef().ApplyControlFixedSize(&element);
   const auto* select = DynamicTo<HTMLSelectElement>(element);
   if (select && select->UsesMenuList() &&
-      StyleRef().EffectiveAppearance() != AppearanceValue::kBaseSelect)
+      !select->SupportsBaseAppearance(StyleRef().EffectiveAppearance()))
       [[unlikely]] {
     return apply_fixed_size ? MenuListIntrinsicInlineSize(*select, *this)
                             : kIndefiniteSize;
@@ -1368,7 +1371,7 @@ LayoutUnit LayoutBox::DefaultIntrinsicContentBlockSize(
     return kIndefiniteSize;
   }
   if (const auto* select = DynamicTo<HTMLSelectElement>(GetNode())) {
-    if (effective_appearance != AppearanceValue::kBaseSelect) {
+    if (!select->SupportsBaseAppearance(effective_appearance)) {
       if (!select->UsesMenuList()) {
         if (!children_have_geometry) {
           return kIndefiniteSize;
@@ -3335,6 +3338,22 @@ PhysicalBoxStrut LayoutBox::ComputeVisualEffectOverflowOutsets() {
 
   PhysicalBoxStrut outsets = style.BoxDecorationOutsets();
 
+  if (style.HasBorderShape()) {
+    PhysicalRect border_rect(PhysicalOffset(), StitchedSize());
+    std::optional<BorderShapeReferenceRects> border_shape_rects =
+        ComputeBorderShapeReferenceRects(border_rect, style, *this);
+    const PhysicalRect outer_reference_rect =
+        border_shape_rects ? border_shape_rects->outer : border_rect;
+    const PhysicalRect inner_reference_rect =
+        border_shape_rects ? border_shape_rects->inner : border_rect;
+    if (std::optional<PhysicalBoxStrut> border_shape_outsets =
+            BorderShapePainter::VisualOutsets(style, border_rect,
+                                              outer_reference_rect,
+                                              inner_reference_rect)) {
+      outsets.Unite(*border_shape_outsets);
+    }
+  }
+
   if (style.HasOutline()) {
     OutlineInfo info;
     Vector<PhysicalRect> outline_rects =
@@ -4272,6 +4291,12 @@ BackgroundPaintLocation LayoutBox::ComputeBackgroundPaintLocation(
     return kBackgroundPaintInBorderBoxSpace;
   }
 
+  if (StyleRef().HasBorderShape()) {
+    // Border-shape clips are applied in the border box space. Painting the
+    // background in the scrolling contents layer would bypass that clip.
+    return kBackgroundPaintInBorderBoxSpace;
+  }
+
   return paint_location;
 }
 
@@ -4372,7 +4397,7 @@ PhysicalOffset LayoutBox::AnchorPositionScrollTranslationOffset() const {
 namespace {
 
 template <typename Function>
-void ForEachAnchorQueryOnContainer(const LayoutBox& box, Function func) {
+void ForEachAnchorMapOnContainer(const LayoutBox& box, Function func) {
   const LayoutObject* container = box.Container();
   if (!container) {
     // This is not supposed to be possible, but it is (crbug.com/424420492).
@@ -4382,14 +4407,14 @@ void ForEachAnchorQueryOnContainer(const LayoutBox& box, Function func) {
   if (container->IsLayoutBlock()) {
     for (const PhysicalBoxFragment& fragment :
          To<LayoutBlock>(container)->PhysicalFragments()) {
-      if (const PhysicalAnchorQuery* anchor_query = fragment.AnchorQuery()) {
-        func(*anchor_query);
+      if (const AnchorMap* anchor_map = fragment.GetAnchorMap()) {
+        func(*anchor_map);
       }
     }
     return;
   }
 
-  // Now the container is an inline box that's also an abspos containing block.
+  // The container is an inline that's also an abspos containing block.
   CHECK(container->IsLayoutInline());
   const LayoutInline* inline_container = To<LayoutInline>(container);
   if (!inline_container->HasInlineFragments()) {
@@ -4399,8 +4424,8 @@ void ForEachAnchorQueryOnContainer(const LayoutBox& box, Function func) {
   cursor.MoveTo(*container);
   for (; cursor; cursor.MoveToNextForSameLayoutObject()) {
     if (const PhysicalBoxFragment* fragment = cursor.Current().BoxFragment()) {
-      if (const PhysicalAnchorQuery* anchor_query = fragment->AnchorQuery()) {
-        func(*anchor_query);
+      if (const AnchorMap* anchor_map = fragment->GetAnchorMap()) {
+        func(*anchor_map);
       }
     }
   }
@@ -4431,18 +4456,18 @@ const LayoutObject* LayoutBox::FindTargetAnchor(
 
   AnchorScopedName* anchor_scoped_name = ToAnchorScopedName(anchor_name, *this);
 
-  // Go through the already built PhysicalAnchorQuery to avoid tree traversal.
+  // Go through the already built AnchorMap to avoid tree traversal.
   const LayoutObject* anchor = nullptr;
-  auto search_for_anchor = [&](const PhysicalAnchorQuery& anchor_query) {
+  auto search_for_anchor = [&](const AnchorMap& anchor_map) {
     if (const LayoutObject* current =
-            anchor_query.AnchorLayoutObject(*this, anchor_scoped_name)) {
+            anchor_map.AnchorLayoutObject(*this, anchor_scoped_name)) {
       if (!anchor ||
           (anchor != current && anchor->IsBeforeInPreOrder(*current))) {
         anchor = current;
       }
     }
   };
-  ForEachAnchorQueryOnContainer(*this, search_for_anchor);
+  ForEachAnchorMapOnContainer(*this, search_for_anchor);
   return anchor;
 }
 
@@ -4459,14 +4484,14 @@ const LayoutObject* LayoutBox::AcceptableImplicitAnchor() const {
   if (!anchor_layout_object) {
     return nullptr;
   }
-  // Go through the already built PhysicalAnchorQuery to avoid tree traversal.
+  // Go through the already built AnchorMap to avoid tree traversal.
   bool is_acceptable_anchor = false;
-  auto validate_anchor = [&](const PhysicalAnchorQuery& anchor_query) {
-    if (anchor_query.AnchorLayoutObject(*this, anchor_element)) {
+  auto validate_anchor = [&](const AnchorMap& anchor_map) {
+    if (anchor_map.AnchorLayoutObject(*this, anchor_element)) {
       is_acceptable_anchor = true;
     }
   };
-  ForEachAnchorQueryOnContainer(*this, validate_anchor);
+  ForEachAnchorMapOnContainer(*this, validate_anchor);
   return is_acceptable_anchor ? anchor_layout_object : nullptr;
 }
 

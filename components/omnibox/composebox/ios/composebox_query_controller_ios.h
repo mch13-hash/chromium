@@ -7,8 +7,8 @@
 
 #include <vector>
 
+#include "components/contextual_search/internal/composebox_query_controller.h"
 #include "components/lens/lens_bitmap_processing.h"
-#include "components/omnibox/composebox/composebox_query_controller.h"
 
 // iOS-specific subclass of ComposeboxQueryController.
 class ComposeboxQueryControllerIOS : public ComposeboxQueryController {
@@ -18,7 +18,7 @@ class ComposeboxQueryControllerIOS : public ComposeboxQueryController {
  protected:
   // ComposeboxQueryController overrides:
   void CreateImageUploadRequest(
-      const base::UnguessableToken& file_token,
+      lens::LensOverlayRequestId request_id,
       const std::vector<uint8_t>& image_data,
       std::optional<lens::ImageEncodingOptions> options,
       RequestBodyProtoCreatedCallback callback) override;

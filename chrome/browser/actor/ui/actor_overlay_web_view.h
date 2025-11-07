@@ -13,10 +13,6 @@
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/views/controls/webview/webview.h"
 
-namespace content {
-class ScopedAccessibilityMode;
-}  // namespace content
-
 namespace tabs {
 class TabInterface;
 }  // namespace tabs
@@ -41,13 +37,14 @@ class ActorOverlayWebView : public views::WebView {
   // Forwards the overlay background visibility to WebUI.
   void SetOverlayBackground(bool is_visible);
 
+  // Forwards the border glow visibility to WebUI.
+  void SetBorderGlowVisibility(bool is_visible);
+
  private:
   actor::ui::ActorOverlayUI* GetWebUi();
   // Manages the lifetime of the WebContents input event ignoring state.
   std::optional<content::WebContents::ScopedIgnoreInputEvents>
       scoped_ignore_input_events_;
-  // Manages the lifetime of the underlying WebContents's accessibility mode.
-  std::unique_ptr<content::ScopedAccessibilityMode> scoped_ax_mode_;
 
   raw_ptr<BrowserWindowInterface> browser_;
 

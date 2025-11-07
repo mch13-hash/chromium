@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/webui/searchbox/contextual_searchbox_test_utils.h"
 
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "components/search_engines/template_url.h"
+#include "components/search_engines/template_url_service.h"
 #include "content/public/browser/web_contents.h"
 
 MockQueryController::MockQueryController(
@@ -14,33 +16,34 @@ MockQueryController::MockQueryController(
     std::string locale,
     TemplateURLService* template_url_service,
     variations::VariationsClient* variations_client,
-    bool send_lns_surface,
-    bool enable_multi_context_input_flow,
-    bool enable_viewport_images)
+    std::unique_ptr<
+        contextual_search::ContextualSearchContextController::ConfigParams>
+        query_controller_config_params)
     : TestComposeboxQueryController(identity_manager,
                                     url_loader_factory,
                                     channel,
                                     locale,
                                     template_url_service,
                                     variations_client,
-                                    send_lns_surface,
-                                    enable_multi_context_input_flow,
-                                    enable_viewport_images) {}
+                                    std::move(query_controller_config_params),
+                                    /*enable_cluster_info_ttl=*/false) {}
 MockQueryController::~MockQueryController() = default;
 
 content::WebContents* TestWebContentsDelegate::OpenURLFromTab(
     content::WebContents* source,
     const content::OpenURLParams& params,
     base::OnceCallback<void(content::NavigationHandle&)>
-    navigation_handle_callback) {
+        navigation_handle_callback) {
   source->GetController().LoadURLWithParams(
       content::NavigationController::LoadURLParams(params));
   return source;
 }
 
-MockComposeboxMetricsRecorder::MockComposeboxMetricsRecorder()
-    : ComposeboxMetricsRecorder("NewTabPage.") {}
-MockComposeboxMetricsRecorder::~MockComposeboxMetricsRecorder() = default;
+MockContextualSearchMetricsRecorder::MockContextualSearchMetricsRecorder()
+    : ContextualSearchMetricsRecorder(
+          contextual_search::ContextualSearchSource::kNewTabPage) {}
+MockContextualSearchMetricsRecorder::~MockContextualSearchMetricsRecorder() =
+    default;
 
 ContextualSearchboxHandlerTestHarness::ContextualSearchboxHandlerTestHarness()
     : ChromeRenderViewHostTestHarness(
@@ -68,9 +71,8 @@ void ContextualSearchboxHandlerTestHarness::SetUp() {
 
   fake_variations_client_ = std::make_unique<FakeVariationsClient>();
 
-  auto* image_upload = scoped_config_.Get()
-                            .config.mutable_composebox()
-                            ->mutable_image_upload();
+  auto* image_upload =
+      scoped_config_.Get().config.mutable_composebox()->mutable_image_upload();
   image_upload->set_downscale_max_image_size(1000000);
   image_upload->set_downscale_max_image_width(1000);
   image_upload->set_downscale_max_image_height(1000);

@@ -53,12 +53,6 @@ BASE_DECLARE_FEATURE(kRestrictLegacySearchEnginePromoOnFormFactors);
 BASE_DECLARE_FEATURE(kResolveRegionalCapabilitiesFromDevice);
 #endif
 
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
-// Use finch permanent country instead of finch latest country for fetching
-// country ID.
-BASE_DECLARE_FEATURE(kUseFinchPermanentCountryForFetchCountryId);
-#endif
-
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
 // Describes UI surfaces that can receive the choice screen.
@@ -82,6 +76,11 @@ extern const base::FeatureParam<RegionalCapabilitiesChoiceScreenSurface>
 // Updates profile country preference stored in preferences
 // dynamically when the current country does not match the stored value.
 BASE_DECLARE_FEATURE(kDynamicProfileCountry);
+
+// Whether support for showing the current default in the choice screen should
+// be enabled. When enabled, the associated program settings will be read to
+// determine whether to actually show it.
+BASE_DECLARE_FEATURE(kCurrentDseHighlightOnChoiceScreenSupport);
 
 }  // namespace switches
 

@@ -141,7 +141,7 @@ class UserAgentResponseProvider : public web::DataResponseProvider {
         selectElementWithMatcher:grey_allOf(grey_accessibilityID(
                                                 kSettingsContentSettingsCellId),
                                             grey_sufficientlyVisible(), nil)]
-           usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 200)
+           usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 300)
         onElementWithMatcher:chrome_test_util::SettingsCollectionView()]
         performAction:grey_tap()];
   }

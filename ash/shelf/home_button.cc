@@ -344,15 +344,7 @@ HomeButton::HomeButton(Shelf* shelf)
   button_image_view_ =
       AddChildViewAt(std::make_unique<ButtonImageView>(&controller_), 0);
 
-  if (features::IsHomeButtonWithTextEnabled()) {
-    // Directly shows the nudge label if the text-in-shelf feature is enabled.
-    CreateNudgeLabel();
-    expandable_container_->SetVisible(true);
-    shelf_->shelf_layout_manager()->LayoutShelf(false);
-  }
-
-  if (features::IsHomeButtonQuickAppAccessEnabled() &&
-      !features::IsHomeButtonWithTextEnabled()) {
+  if (features::IsHomeButtonQuickAppAccessEnabled()) {
     shell_observation_.Observe(Shell::Get());
     app_list_model_observation_.Observe(AppListModelProvider::Get());
     quick_app_model_observation_.Observe(
@@ -477,10 +469,6 @@ void HomeButton::ButtonPressed(views::Button* sender,
 
   // If the home button is pressed, fade out the nudge label if it is showing.
   if (expandable_container_ && !quick_app_button_) {
-    // The label shouldn't be removed if the text-in-shelf feature is enabled.
-    if (features::IsHomeButtonWithTextEnabled())
-      return;
-
     if (!expandable_container_->GetVisible()) {
       // If the nudge label is not visible and will not be animating, directly
       // remove them as the nudge won't be showing anymore.
@@ -579,11 +567,6 @@ bool HomeButton::CanShowNudgeLabel() const {
 }
 
 void HomeButton::StartNudgeAnimation() {
-  // Don't animate the label as it is already visible when text-in-shelf is
-  // enabled.
-  if (features::IsHomeButtonWithTextEnabled())
-    return;
-
   // Ensure any in-progress nudge animations are completed before initializing
   // a new nudge animation, and creating a rippler layer. Nudge animation
   // callbacks may otherwise delete ripple layer mid new animation set up (and
@@ -663,15 +646,10 @@ void HomeButton::CreateExpandableContainer() {
   expandable_container_ = AddChildViewAt(std::make_unique<views::View>(), 0);
   expandable_container_->SetLayoutManager(
       std::make_unique<views::FillLayout>());
-  expandable_container_->SetPaintToLayer(ui::LAYER_SOLID_COLOR);
-  expandable_container_->layer()->SetMasksToBounds(true);
-  if (GetColorProvider()) {
-    expandable_container_->layer()->SetColor(
-        GetColorProvider()->GetColor(cros_tokens::kCrosSysSystemOnBase));
-  }
-  expandable_container_->layer()->SetRoundedCornerRadius(
-      gfx::RoundedCornersF(home_button_width / 2.f));
-  expandable_container_->layer()->SetName("NudgeLabelContainer");
+  expandable_container_->SetBackground(views::CreateLayerBasedRoundedBackground(
+      cros_tokens::kCrosSysSystemOnBase,
+      gfx::RoundedCornersF(home_button_width / 2.f)));
+  expandable_container_->background()->SetInternalName("NudgeLabelContainer");
 }
 
 void HomeButton::UpdateTooltipText() {

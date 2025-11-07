@@ -246,6 +246,16 @@ gpu_linux_builder(
 )
 
 gpu_linux_builder(
+    name = "gpu-fyi-try-linux-intel-arc-b570-exp",
+    mirrors = [
+        "ci/GPU FYI Linux Builder",
+        "ci/Linux FYI Experimental Release (Intel Arc B570)",
+    ],
+    gn_args = "ci/GPU FYI Linux Builder",
+    execution_timeout = 12 * time.hour,
+)
+
+gpu_linux_builder(
     name = "gpu-fyi-try-linux-intel-exp",
     mirrors = [
         "ci/GPU FYI Linux Builder",
@@ -301,6 +311,15 @@ gpu_linux_builder(
 )
 
 gpu_linux_builder(
+    name = "gpu-fyi-try-linux-nvidia-rtx-4070-super-rel",
+    mirrors = [
+        "ci/GPU FYI Linux Builder",
+        "ci/Linux FYI Release (NVIDIA RTX 4070 Super)",
+    ],
+    gn_args = "ci/GPU FYI Linux Builder",
+)
+
+gpu_linux_builder(
     name = "gpu-fyi-try-linux-nvidia-tsn",
     mirrors = [
         "ci/Linux FYI GPU TSAN Release",
@@ -332,7 +351,7 @@ gpu_linux_builder(
 )
 
 def gpu_mac_builder(*, name, **kwargs):
-    kwargs.setdefault("cpu", None)
+    kwargs.setdefault("cpu", "arm64")
     return try_.builder(
         name = name,
         builder_group = "tryserver.chromium.mac",
@@ -644,6 +663,16 @@ gpu_win_builder(
 )
 
 gpu_win_builder(
+    name = "gpu-fyi-try-win11-x64-intel-arc-b570-exp",
+    mirrors = [
+        "ci/GPU FYI Win x64 Builder",
+        "ci/Win11 FYI x64 Experimental Release (Intel Arc B570)",
+    ],
+    gn_args = "ci/GPU FYI Win x64 Builder",
+    execution_timeout = 12 * time.hour,
+)
+
+gpu_win_builder(
     name = "gpu-fyi-try-win11-nvidia-4070-exp-64",
     description_html = "Runs GPU tests on NVIDIA RTX 4070 Super GPUs with experimental OS/drivers",
     mirrors = [
@@ -665,10 +694,20 @@ gpu_win_builder(
 
 gpu_win_builder(
     name = "gpu-fyi-try-win11-qualcomm-rel-64",
-    description_html = "Triggers GPU tests on Windows arm64 devices",
+    description_html = "Triggers GPU tests on Windows arm64 devices with Adreno 690 GPUs",
     mirrors = [
         "ci/GPU FYI Win arm64 Builder",
         "ci/Win11 FYI arm64 Release (Qualcomm Adreno 690)",
+    ],
+    gn_args = "ci/GPU FYI Win arm64 Builder",
+)
+
+gpu_win_builder(
+    name = "gpu-fyi-try-win11-qualcomm-snapdragon-x-elite-rel-64",
+    description_html = "Triggers GPU tests on Windows arm64 devices with Snapdragon X Elite SoCs",
+    mirrors = [
+        "ci/GPU FYI Win arm64 Builder",
+        "ci/Win11 FYI arm64 Release (Qualcomm Snapdragon X Elite)",
     ],
     gn_args = "ci/GPU FYI Win arm64 Builder",
 )

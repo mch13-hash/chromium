@@ -104,7 +104,7 @@ void NonPersistentNotificationHandler::DidDispatchClickEvent(
     NavigateParams params(profile, origin, ui::PAGE_TRANSITION_LINK);
 
     params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-    params.window_action = NavigateParams::SHOW_WINDOW;
+    params.window_action = NavigateParams::WindowAction::kShowWindow;
     Navigate(&params);
 
     // Close the |notification_id| as the user has explicitly acknowledged it.
@@ -129,7 +129,8 @@ void NonPersistentNotificationHandler::DidDispatchClickEvent(
 void NonPersistentNotificationHandler::DisableNotifications(
     Profile* profile,
     const GURL& origin,
-    const std::optional<std::string>& notification_id) {
+    const std::optional<std::string>& notification_id,
+    const std::optional<bool>& is_suspicious) {
   permissions::PermissionUmaUtil::ScopedRevocationReporter
       scoped_revocation_reporter(
           profile, origin, origin, ContentSettingsType::NOTIFICATIONS,

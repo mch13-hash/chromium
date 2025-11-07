@@ -47,6 +47,7 @@ import org.chromium.chrome.browser.app.tabmodel.TabModelOrchestrator;
 import org.chromium.chrome.browser.browserservices.InstalledWebappDataRegister;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabProfileType;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabsUiType;
 import org.chromium.chrome.browser.browserservices.intents.WebappExtras;
 import org.chromium.chrome.browser.browserservices.trustedwebactivityui.TwaFinishHandler;
 import org.chromium.chrome.browser.browserservices.trustedwebactivityui.TwaIntentHandlingStrategy;
@@ -102,7 +103,6 @@ import org.chromium.chrome.browser.init.ActivityProfileProvider;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.night_mode.NightModeStateProvider;
-import org.chromium.chrome.browser.night_mode.PowerSavingModeMonitor;
 import org.chromium.chrome.browser.profiles.OtrProfileId;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileProvider;
@@ -114,6 +114,7 @@ import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.chrome.browser.theme.TopUiThemeColorProvider;
 import org.chromium.chrome.browser.ui.RootUiCoordinator;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuPropertiesDelegate;
+import org.chromium.chrome.browser.ui.browser_window.BrowserWindowType;
 import org.chromium.chrome.browser.ui.desktop_windowing.AppHeaderCoordinator;
 import org.chromium.chrome.browser.ui.google_bottom_bar.GoogleBottomBarCoordinator;
 import org.chromium.chrome.browser.ui.web_app_header.WebAppHeaderLayoutCoordinator;
@@ -266,8 +267,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     public CustomTabNightModeStateController getCustomTabNightModeStateController() {
         if (mNightModeStateController == null) {
             mNightModeStateController =
-                    new CustomTabNightModeStateController(
-                            getLifecycleDispatcher(), PowerSavingModeMonitor.getInstance());
+                    new CustomTabNightModeStateController(getLifecycleDispatcher());
         }
         return mNightModeStateController;
     }
@@ -362,6 +362,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         getTabModelSelectorSupplier(),
                         getBrowserControlsManager(),
                         getWindowAndroid(),
+                        getChromeAndroidTaskSupplier(),
                         getLifecycleDispatcher(),
                         getLayoutManagerSupplier(),
                         /* menuOrKeyboardActionController= */ this,
@@ -390,7 +391,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         () -> getCustomTabActivityNavigationController().openCurrentUrlInBrowser(),
                         getEdgeToEdgeManager(),
                         getAppHeaderCoordinator(),
-                        this::getBrowserServicesThemeColorProvider);
+                        this::getBrowserServicesThemeColorProvider,
+                        getClientPackageNameProvider().get());
         return mBaseCustomTabRootUiCoordinator;
     }
 
@@ -503,7 +505,10 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     }
 
     @Override
-    protected void onPreCreate() {
+    public void performPreInflationStartup() {
+        // This must be requested before adding content.
+        supportRequestWindowFeature(Window.FEATURE_ACTION_MODE_OVERLAY);
+
         // Parse the data from the Intent before calling super to allow the Intent to customize
         // the Activity parameters, including the background of the page.
         // Note that color scheme is fixed for the lifetime of Activity: if the system setting
@@ -516,14 +521,6 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
             this.finishAndRemoveTask();
             return;
         }
-
-        super.onPreCreate();
-    }
-
-    @Override
-    public void performPreInflationStartup() {
-        // This must be requested before adding content.
-        supportRequestWindowFeature(Window.FEATURE_ACTION_MODE_OVERLAY);
 
         InstalledWebappDataRegister.prefetchPreferences();
 
@@ -639,6 +636,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         getCipherFactory(),
                         getLifecycleDispatcher());
 
+        getCustomTabActivityTabFactory().setActivityType(getActivityType());
         // Finish reparenting as soon as possible as it may be blocking navigation.
         getCustomTabActivityTabController()
                 .setUpInitialTab(hiddenTab != null ? hiddenTab.tab : null);
@@ -752,7 +750,6 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
         if (intentDataProvider.isWebappOrWebApkActivity()) initializeForWebappOrWebApk();
         if (mIntentDataProvider.isTrustedWebActivity()) initializeForTwa();
 
-        getCustomTabActivityTabFactory().setActivityType(getActivityType());
         getCustomTabDelegateFactory()
                 .setEphemeralTabCoordinatorSupplier(
                         mRootUiCoordinator.getEphemeralTabCoordinatorSupplier());
@@ -936,9 +933,16 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     @Override
     public void initializeCompositor() {
         super.initializeCompositor();
-        getCustomTabActivityTabFactory()
-                .getTabModelOrchestrator()
-                .onNativeLibraryReady(getTabContentManager());
+        var tabModelOrchestrator = getCustomTabActivityTabFactory().getTabModelOrchestrator();
+        tabModelOrchestrator.onNativeLibraryReady(getTabContentManager());
+
+        @BrowserWindowType Integer browserWindowType = getSupportedBrowserWindowType();
+        if (browserWindowType != null) {
+            initializeChromeAndroidTask(
+                    browserWindowType,
+                    tabModelOrchestrator.getTabModelSelector().getCurrentModel(),
+                    /* multiInstanceManager= */ null);
+        }
     }
 
     @Override
@@ -990,6 +994,11 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
         return ChromeFeatureList.sCctToolbarRefactor.isEnabled()
                 ? R.layout.new_custom_tab_toolbar
                 : R.layout.custom_tabs_toolbar;
+    }
+
+    @Override
+    protected int getToolbarLayoutHeightResId() {
+        return R.dimen.custom_tabs_control_container_height;
     }
 
     @Override
@@ -1403,7 +1412,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                             getBrowserControlsManager(),
                             this::isShowingWebAppHeaderButtons,
                             this::isShowingHeaderAsOverlay,
-                            mRootUiCoordinator.getExclusiveAccessManager());
+                            mRootUiCoordinator.getExclusiveAccessManager(),
+                            mRootUiCoordinator.getDesktopWindowStateManager());
         }
         return mDelegateFactory;
     }
@@ -1589,5 +1599,25 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
         }
 
         return mBaseCustomTabRootUiCoordinator.isShowingHeaderAsOverlay();
+    }
+
+    /**
+     * Returns the native browser window type supported by this {@code Activity}.
+     *
+     * <p>The native browser window types are defined in the {@code BrowserWindowInterface::Type}
+     * enum.
+     */
+    @Nullable
+    @BrowserWindowType
+    Integer getSupportedBrowserWindowType() {
+        if (mIntentDataProvider.getUiType() == CustomTabsUiType.POPUP) {
+            return BrowserWindowType.POPUP;
+        }
+
+        if (mIntentDataProvider.getActivityType() == ActivityType.WEBAPP) {
+            return BrowserWindowType.APP_POPUP;
+        }
+
+        return null;
     }
 }

@@ -28,7 +28,6 @@ GlicInactiveSidePanelUi::CreateForVisibleTab(
   // Using `new` to access a private constructor.
   auto inactive_side_panel =
       base::WrapUnique(new GlicInactiveSidePanelUi(tab, delegate));
-  inactive_side_panel->VisibilityChanged(/*visible=*/true);
 
   // Capture screenshot asynchronously and update the inactive panel.
   inactive_side_panel->inactive_view_controller_.CaptureScreenshot(
@@ -41,12 +40,15 @@ GlicInactiveSidePanelUi::CreateForVisibleTab(
 std::unique_ptr<GlicInactiveSidePanelUi>
 GlicInactiveSidePanelUi::CreateForBackgroundTab(
     base::WeakPtr<tabs::TabInterface> tab,
+    content::WebContents* glic_webui_contents,
     GlicUiEmbedder::Delegate& delegate) {
   // Using `new` to access a private constructor.
   auto inactive_side_panel =
       base::WrapUnique(new GlicInactiveSidePanelUi(tab, delegate));
   // Mark the side panel for showing next time the tab becomes active.
-  inactive_side_panel->Show();
+  inactive_side_panel->Show(ShowOptions::ForSidePanel(*tab));
+  inactive_side_panel->inactive_view_controller_.CaptureScreenshot(
+      glic_webui_contents);
   return inactive_side_panel;
 }
 
@@ -54,17 +56,10 @@ GlicInactiveSidePanelUi::GlicInactiveSidePanelUi(
     base::WeakPtr<tabs::TabInterface> tab,
     GlicUiEmbedder::Delegate& delegate)
     : tab_(tab), delegate_(delegate) {
-  if (!tab_ || !tab_->GetTabFeatures()) {
+  auto* glic_side_panel_coordinator = GetGlicSidePanelCoordinator();
+  if (!glic_side_panel_coordinator) {
     return;
   }
-
-  auto* glic_side_panel_coordinator =
-      tab_->GetTabFeatures()->glic_side_panel_coordinator();
-
-  panel_visibility_subscription_ =
-      glic_side_panel_coordinator->AddVisibilityCallback(
-          base::BindRepeating(&GlicInactiveSidePanelUi::VisibilityChanged,
-                              weak_ptr_factory_.GetWeakPtr()));
 
   auto view = inactive_view_controller_.CreateView();
   scoped_view_observation_.Observe(view.get());
@@ -78,7 +73,8 @@ GlicInactiveSidePanelUi::~GlicInactiveSidePanelUi() = default;
 // tab.
 void GlicInactiveSidePanelUi::OnViewFocused(views::View* observed_view) {
   if (tab_) {
-    delegate_->Attach(tab_.get());
+    // NOTE: `this` will be destroyed after this call.
+    delegate_->Show(ShowOptions::ForSidePanel(*tab_));
   }
 }
 
@@ -93,28 +89,50 @@ Host::EmbedderDelegate* GlicInactiveSidePanelUi::GetHostEmbedderDelegate() {
 }
 
 bool GlicInactiveSidePanelUi::IsShowing() const {
-  return is_showing_;
+  auto* glic_side_panel_coordinator = GetGlicSidePanelCoordinator();
+  if (!glic_side_panel_coordinator) {
+    return false;
+  }
+  return glic_side_panel_coordinator->IsShowing();
 }
 
-void GlicInactiveSidePanelUi::Show() {
-  if (!tab_ || !tab_->GetTabFeatures()) {
+void GlicInactiveSidePanelUi::Show(const ShowOptions& options) {
+  auto* glic_side_panel_coordinator = GetGlicSidePanelCoordinator();
+  if (!glic_side_panel_coordinator) {
     return;
   }
-  SidePanelRegistry* registry = tab_->GetTabFeatures()->side_panel_registry();
-  SidePanelEntry* glic_entry =
-      registry->GetEntryForKey(SidePanelEntry::Key(SidePanelEntry::Id::kGlic));
-  if (glic_entry) {
-    registry->SetActiveEntry(glic_entry);
+  bool suppress_animations = false;
+  if (const auto* side_panel_options =
+          std::get_if<SidePanelShowOptions>(&options.embedder_options)) {
+    suppress_animations = side_panel_options->suppress_opening_animation;
   }
+  glic_side_panel_coordinator->Show(suppress_animations);
 }
 
 void GlicInactiveSidePanelUi::Close() {
-  // TODO: implement close.
-  NOTIMPLEMENTED();
+  auto* glic_side_panel_coordinator = GetGlicSidePanelCoordinator();
+  if (!glic_side_panel_coordinator) {
+    return;
+  }
+  glic_side_panel_coordinator->Close();
 }
 
-views::View* GlicInactiveSidePanelUi::GetViewForTesting() {
+base::WeakPtr<views::View> GlicInactiveSidePanelUi::GetView() {
   return nullptr;
+}
+
+void GlicInactiveSidePanelUi::Focus() {
+  // Do nothing. Inactive view doesn't have webcontents to set focus on.
+}
+
+mojom::PanelState GlicInactiveSidePanelUi::GetPanelState() const {
+  mojom::PanelState state;
+  state.kind = glic::mojom::PanelStateKind::kHidden;
+  return state;
+}
+
+gfx::Size GlicInactiveSidePanelUi::GetPanelSize() {
+  return gfx::Size();
 }
 
 std::unique_ptr<GlicUiEmbedder>
@@ -122,8 +140,16 @@ GlicInactiveSidePanelUi::CreateInactiveEmbedder() const {
   NOTREACHED() << "The embedder is already inactive.";
 }
 
-void GlicInactiveSidePanelUi::VisibilityChanged(bool visible) {
-  is_showing_ = visible;
+GlicSidePanelCoordinator* GlicInactiveSidePanelUi::GetGlicSidePanelCoordinator()
+    const {
+  if (!tab_ || !tab_->GetTabFeatures()) {
+    return nullptr;
+  }
+  return tab_->GetTabFeatures()->glic_side_panel_coordinator();
+}
+
+bool GlicInactiveSidePanelUi::HasFocus() {
+  return false;
 }
 
 }  // namespace glic

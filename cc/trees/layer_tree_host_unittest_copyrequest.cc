@@ -1135,12 +1135,12 @@ class LayerTreeHostCopyRequestTestCreatesSharedImage
               viz::CopyOutputResult::Destination::kSharedImage);
     ASSERT_NE(result->GetSharedImage().get(), nullptr);
     release_ = result->TakeSharedImageOwnership();
-    EXPECT_EQ(1u, release_.size());
+    ASSERT_TRUE(release_);
   }
 
   void AfterTest() override {
-    for (auto& release : release_) {
-      std::move(release).Run(gpu::SyncToken(), false);
+    if (release_) {
+      std::move(release_).Run(gpu::SyncToken(), false);
     }
 
     // Except the copy to have made a new shared image.
@@ -1148,7 +1148,7 @@ class LayerTreeHostCopyRequestTestCreatesSharedImage
               num_shared_images_with_readback_);
   }
 
-  viz::CopyOutputResult::ReleaseCallbacks release_;
+  viz::ReleaseCallback release_;
 };
 
 INSTANTIATE_TEST_SUITE_P(All,
@@ -1381,7 +1381,7 @@ class LayerTreeHostCopyRequestTestMultipleDrawsHiddenCopyRequest
   }
 
   DrawResult PrepareToDrawOnThread(LayerTreeHostImpl* host_impl,
-                                   LayerTreeHostImpl::FrameData* frame_data,
+                                   FrameData* frame_data,
                                    DrawResult draw_result) override {
     LayerImpl* root = host_impl->active_tree()->root_layer();
     LayerImpl* child = host_impl->active_tree()->LayerById(child_->id());

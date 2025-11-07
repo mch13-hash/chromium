@@ -140,7 +140,7 @@ class SyncTransportStateChecker : public SingleClientStatusChangeChecker {
   const syncer::SyncService::TransportState state_;
 };
 
-// Same as reset on chrome.google.com/sync.
+// Same as reset on chrome.google.com/data.
 // This function will wait until the reset is done. If error occurs,
 // it will log error messages.
 bool ResetAccount(network::SharedURLLoaderFactory* url_loader_factory,
@@ -177,7 +177,7 @@ bool ResetAccount(network::SharedURLLoaderFactory* url_loader_factory,
   simple_loader->SetTimeoutDuration(base::Seconds(10));
   content::SimpleURLLoaderTestHelper url_loader_helper;
   simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      url_loader_factory, url_loader_helper.GetCallbackDeprecated());
+      url_loader_factory, url_loader_helper.GetCallback());
   url_loader_helper.WaitForCallback();
   if (simple_loader->NetError() != 0) {
     LOG(ERROR) << "Reset account failed with error "

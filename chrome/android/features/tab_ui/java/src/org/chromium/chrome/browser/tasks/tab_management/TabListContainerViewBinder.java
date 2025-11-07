@@ -17,6 +17,7 @@ import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerP
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_CLIP_TO_PADDING;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_CONTENT_SENSITIVE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_SCROLLING_SUPPLIER_CALLBACK;
+import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.IS_TABLET_OR_LANDSCAPE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.MODE;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.PAGE_KEY_LISTENER;
 import static org.chromium.chrome.browser.tasks.tab_management.TabListContainerProperties.SUPPRESS_ACCESSIBILITY;
@@ -40,6 +41,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.tab.TabUtils;
 import org.chromium.chrome.browser.tasks.tab_management.TabListCoordinator.TabListMode;
+import org.chromium.chrome.tab_ui.R;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -128,6 +130,17 @@ class TabListContainerViewBinder {
                             ? View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                             : View.IMPORTANT_FOR_ACCESSIBILITY_AUTO;
             view.setImportantForAccessibility(important);
+        } else if (IS_TABLET_OR_LANDSCAPE == propertyKey) {
+            boolean isTabletOrLandscape = model.get(IS_TABLET_OR_LANDSCAPE);
+            int paddingTop =
+                    isTabletOrLandscape
+                            ? 0
+                            : view.getResources().getDimensionPixelSize(R.dimen.hub_search_box_gap);
+            view.setPadding(
+                    view.getPaddingLeft(),
+                    paddingTop,
+                    view.getPaddingRight(),
+                    view.getPaddingBottom());
         }
     }
 

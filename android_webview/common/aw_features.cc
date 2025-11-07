@@ -6,11 +6,13 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
-#include "services/network/public/cpp/features.h"
 
 namespace android_webview::features {
 
 // Alphabetical:
+
+// Kill switch for Profile.addQuicHints.
+BASE_FEATURE(kWebViewAddQuicHints, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enable auto granting storage access API requests. This will be done
 // if a relationship is detected between the app and the website.
@@ -21,6 +23,13 @@ BASE_FEATURE(kWebViewAutoSAA, base::FEATURE_DISABLED_BY_DEFAULT);
 // flag is enabled.
 BASE_FEATURE(kWebViewBackForwardCache, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Enables parsing a custom header passed by the WebView embedder during a
+// prefetch request that allows bypassing the HTTP cache for that request.
+// This is a kill switch, so it is enabled by default.
+// TODO(crbug.com/455296998): Remove this code for M145.
+BASE_FEATURE(kWebViewBypassHttpCacheForPrefetchFromHeader,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 // Allow apps to configure the renderer library prefetching behaviour.
 BASE_FEATURE(kWebViewConfigurableLibraryPrefetch,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -28,10 +37,6 @@ BASE_FEATURE(kWebViewConfigurableLibraryPrefetch,
 // Enable loading include statements when checking digital asset links
 BASE_FEATURE(kWebViewDigitalAssetLinksLoadIncludes,
              base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Disables partitioned cookies by default on WebView. This can still be
-// overridden by our `setPartitionedCookiesEnabled` Android X API.
-BASE_FEATURE(kWebViewDisableCHIPS, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables draining the WebView prefetch queue (for prefetches triggered from
 // background thread) during WebView instance initialization and before
@@ -48,15 +53,10 @@ BASE_FEATURE(kWebViewDrainPrefetchQueueDuringInit,
 // longer supported.
 BASE_FEATURE(kWebViewFileSystemAccess, base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Feature parameter for `network::features::kMaskedDomainList` that sets the
-// exclusion criteria for defining which domains are excluded from the
-// Masked Domain List for WebView.
-//
-// Exclusion criteria can assume values from `WebviewExclusionPolicy`.
-const base::FeatureParam<int> kWebViewIpProtectionExclusionCriteria{
-    &network::features::kMaskedDomainList,
-    "WebViewIpProtectionExclusionCriteria",
-    /*WebviewExclusionPolicy::kNone*/ 0};
+// Enable ignoring duplicate navigations in WebView. Note that this will only
+// take effect if both this feature flag and the content/public
+// kIgnoreDuplicateNavs flag is enabled.
+BASE_FEATURE(kWebViewIgnoreDuplicateNavs, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Fetch Hand Writing icon lazily.
 BASE_FEATURE(kWebViewLazyFetchHandWritingIcon,
@@ -78,11 +78,6 @@ BASE_FEATURE(kWebViewMuteAudio, base::FEATURE_ENABLED_BY_DEFAULT);
 // do not clean up this stale feature: we intentionally keep this feature flag
 // around for testing purposes.
 BASE_FEATURE(kWebViewTestFeature, base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Use WebView's nonembedded MetricsUploadService to upload UMA metrics instead
-// of sending it directly to GMS-core.
-BASE_FEATURE(kWebViewUseMetricsUploadService,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Use WebView's nonembedded MetricsUploadService to upload UMA metrics instead
 // of sending it directly to GMS-core when running within the SDK Runtime.
@@ -238,7 +233,7 @@ const base::FeatureParam<double> kWebViewCodeCacheSizeLimitMultiplier{
 
 // Connect to the non-embedded components provider from a background thread.
 BASE_FEATURE(kWebViewConnectToComponentProviderInBackground,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables phase 2 of using startup tasks logic for webview chromium
 // initialization which starts browser process asynchronously, when starting
@@ -288,6 +283,34 @@ BASE_FEATURE(kWebViewCacheBoundaryInterfaceMethods,
 
 // When enabled, opts in WebView to GMSCore's bindService optimizations.
 BASE_FEATURE(kWebViewOptInToGmsBindServiceOptimization,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Moves some of the work that is being run during
+// `startChromium` to be done beforehand during WebView provider
+// initialization. This is expected to improve startup performance especially
+// when async startup takes place.
+BASE_FEATURE(kWebViewMoveWorkToProviderInit, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, the temporary cookie manager used before WebView startup is
+// bypassed. If WebView isn't already started up, calling
+// `CookieManager.getInstance()` will trigger WebView startup on the main looper
+// and wait for startup to complete.
+BASE_FEATURE(kWebViewBypassProvisionalCookieManager,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, WebView stores the persistent metrics files in the
+// app's non-backed-up files directory instead of the app's data directory.
+BASE_FEATURE(kWebViewPersistentMetricsInNoBackupDir,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, requests the compositor warm-up (crbug.com/41496019) for the
+// prerender trigger.
+BASE_FEATURE(kPrerender2WarmUpCompositorForWebView,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enables fetching the Origin Trials configuration update component in the
+// embedded WebView.
+BASE_FEATURE(kWebViewFetchOriginTrialsComponent,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace android_webview::features

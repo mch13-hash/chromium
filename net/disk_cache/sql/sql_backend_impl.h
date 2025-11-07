@@ -190,8 +190,9 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
   // operation coordinator, for unit tests.
   int FlushQueueForTest(CompletionOnceCallback callback);
 
-  scoped_refptr<base::SequencedTaskRunner> GetBackgroundTaskRunnerForTest() {
-    return background_task_runner_;
+  std::vector<scoped_refptr<base::SequencedTaskRunner>>&
+  GetBackgroundTaskRunnersForTest() {
+    return background_task_runners_;
   }
 
   SqlPersistentStore* GetSqlStoreForTest() { return store_.get(); }
@@ -256,6 +257,7 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
 
   void OnInitialized(CompletionOnceCallback callback,
                      const std::vector<bool>& results);
+  void RunDelayedPostInitializationTasks();
 
   SqlEntryImpl* GetActiveEntry(const CacheEntryKey& key);
 
@@ -263,7 +265,7 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
   // schedules an eviction task. This is typically called after operations that
   // might increase the cache size. The eviction itself is run as an exclusive
   // operation to prevent conflicts with other cache activities.
-  void MaybeTriggerEviction();
+  void MaybeTriggerEviction(bool is_idle_time_eviction);
 
   // Internal helper for Open/Create/OpenOrCreate operations. It uses
   // `ExclusiveOperationCoordinator` to serialize operations on the same key and
@@ -420,6 +422,7 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
   // as a normal operation via the `ExclusiveOperationCoordinator` and forwards
   // the call to the persistent store.
   void HandleReadEntryDataOperation(
+      const CacheEntryKey& key,
       const scoped_refptr<ResIdOrErrorHolder>& res_id_or_error,
       int64_t offset,
       scoped_refptr<net::IOBuffer> buffer,
@@ -433,6 +436,7 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
   // scheduled as a normal operation via the `ExclusiveOperationCoordinator`
   // and forwards the call to the persistent store.
   void HandleGetEntryAvailableRangeOperation(
+      const CacheEntryKey& key,
       const scoped_refptr<ResIdOrErrorHolder>& res_id_or_error,
       int64_t offset,
       int len,
@@ -444,6 +448,7 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
   // gathers the keys of all active entries to prevent them from being evicted
   // and then delegates the actual eviction logic to the persistent store.
   void HandleTriggerEvictionOperation(
+      bool is_idle_time_eviction,
       std::unique_ptr<ExclusiveOperationCoordinator::OperationHandle> handle);
 
   // Handles the backend logic for `OnExternalCacheHit()`. This method is
@@ -472,25 +477,21 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
       const CacheEntryKey& key,
       SqlPersistentStore::EntryInfo& entry_info);
 
-  // Schedules the `HandleDeleteDoomedEntriesOperation` task to run. This is the
-  // entry point for the one-time cleanup of entries that were doomed in a
-  // previous session.
-  void TriggerDeleteDoomedEntries();
-
-  // Physically deletes entries that were marked as "doomed" in previous
-  // sessions from the database. It excludes any currently active doomed entries
-  // to prevent data corruption. This method is executed as an exclusive
-  // operation to ensure it has sole access to the cache during cleanup.
-  void HandleDeleteDoomedEntriesOperation(
-      std::unique_ptr<ExclusiveOperationCoordinator::OperationHandle> handle);
-
   const base::FilePath path_;
 
-  // Task runner for all background SQLite operations.
-  scoped_refptr<base::SequencedTaskRunner> background_task_runner_;
+  // Task runners for background SQLite operations.
+  std::vector<scoped_refptr<base::SequencedTaskRunner>>
+      background_task_runners_;
 
   // The persistent store that manages the SQLite database.
   std::unique_ptr<SqlPersistentStore> store_;
+
+  // Coordinates exclusive and normal operations to ensure that exclusive
+  // operations have exclusive access. This must be declared before
+  // `active_entries_` and `doomed_entries_` to ensure it is destroyed after
+  // them. This is critical because `exclusive_operation_coordinator_` may hold
+  // the last `scoped_refptr` to a `SqlEntryImpl`.
+  ExclusiveOperationCoordinator exclusive_operation_coordinator_;
 
   // Map of cache keys to currently active (opened) entries.
   // `raw_ref` is used because the SqlEntryImpl objects are ref-counted and
@@ -501,10 +502,6 @@ class NET_EXPORT_PRIVATE SqlBackendImpl final : public Backend {
   // Set of entries that have been marked as doomed but are still active
   // (i.e., have outstanding references).
   std::set<raw_ref<const SqlEntryImpl>> doomed_entries_;
-
-  // Coordinates exclusive and normal operations to ensure that exclusive
-  // operations have exclusive access.
-  ExclusiveOperationCoordinator exclusive_operation_coordinator_;
 
   // Queue of in-flight entry modifications that need to be applied.
   // These are typically updates to `last_used` or header data that occur

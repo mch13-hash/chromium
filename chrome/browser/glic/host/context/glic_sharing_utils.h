@@ -45,7 +45,7 @@ class GlicActiveTabForProfileTracker : public BrowserListObserver {
       base::RepeatingCallback<void(tabs::TabInterface* tab)> callback);
 
   // Get the last notified active tab.
-  tabs::TabInterface* GetActiveTab();
+  tabs::TabInterface* GetActiveTab() const;
 
  private:
   // BrowserListObserver.
@@ -60,6 +60,12 @@ class GlicActiveTabForProfileTracker : public BrowserListObserver {
 
   // Notifies subscribers when active tab has changed.
   void NotifyActiveTabChanged(tabs::TabInterface* active_tab);
+
+  // Updates the active tab subscription (if any) for the given browser.
+  void UpdateActiveTabSubscription(BrowserWindowInterface* browser);
+
+  // True if the browser is active and for the same profile.
+  bool IsBrowserActiveForProfile(BrowserWindowInterface* browser);
 
   // The last tab we notified (used for de-duping).
   base::WeakPtr<tabs::TabInterface> last_notified_tab_;

@@ -37,6 +37,7 @@
 #import "components/net_log/net_export_file_writer.h"
 #import "components/network_time/network_time_tracker.h"
 #import "components/optimization_guide/optimization_guide_buildflags.h"
+#import "components/os_crypt/async/browser/keychain_key_provider.h"
 #import "components/os_crypt/async/browser/os_crypt_async.h"
 #import "components/prefs/pref_registry_simple.h"
 #import "components/prefs/pref_service.h"
@@ -70,6 +71,7 @@
 #import "ios/chrome/browser/shared/model/profile/incognito_session_tracker.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/signin/model/account_profile_mapper.h"
+#import "ios/chrome/browser/signin/model/avatar_provider.h"
 #import "ios/chrome/browser/update_client/model/ios_chrome_update_query_params_delegate.h"
 #import "ios/chrome/common/channel_info.h"
 #import "ios/components/security_interstitials/safe_browsing/safe_browsing_service_impl.h"
@@ -125,9 +127,12 @@ void ApplicationContextImpl::PreCreateThreads() {
 
 void ApplicationContextImpl::PostCreateThreads() {
   // Delegate all encryption calls to OSCrypt.
-  os_crypt_async_ = std::make_unique<os_crypt_async::OSCryptAsync>(
-      std::vector<std::pair<os_crypt_async::OSCryptAsync::Precedence,
-                            std::unique_ptr<os_crypt_async::KeyProvider>>>());
+  auto key_provider = std::make_unique<os_crypt_async::KeychainKeyProvider>();
+  std::vector<std::pair<size_t, std::unique_ptr<os_crypt_async::KeyProvider>>>
+      key_providers;
+  key_providers.emplace_back(/*precedence=*/10u, std::move(key_provider));
+  os_crypt_async_ =
+      std::make_unique<os_crypt_async::OSCryptAsync>(std::move(key_providers));
 
   // Trigger an instance grab on a background thread if necessary.
   os_crypt_async_->GetInstance(base::DoNothing());
@@ -502,6 +507,14 @@ id<SingleSignOnService> ApplicationContextImpl::GetSingleSignOnService() {
     DCHECK(single_sign_on_service_);
   }
   return single_sign_on_service_;
+}
+
+signin::AvatarProvider* ApplicationContextImpl::GetIdentityAvatarProvider() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!resized_avatar_caches_) {
+    resized_avatar_caches_ = std::make_unique<signin::AvatarProvider>();
+  }
+  return resized_avatar_caches_.get();
 }
 
 SystemIdentityManager* ApplicationContextImpl::GetSystemIdentityManager() {

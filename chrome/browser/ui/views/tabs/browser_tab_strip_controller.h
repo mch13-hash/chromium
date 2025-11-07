@@ -73,6 +73,7 @@ class BrowserTabStripController : public TabStripController,
   std::optional<int> GetActiveIndex() const override;
   bool IsTabSelected(int model_index) const override;
   bool IsTabPinned(int model_index) const override;
+  bool IsBrowserClosing() const override;
   void SelectTab(int model_index, const ui::Event& event) override;
   void RecordMetricsOnTabSelectionChange(
       std::optional<tab_groups::TabGroupId> group) override;
@@ -98,7 +99,7 @@ class BrowserTabStripController : public TabStripController,
                              ui::mojom::MenuSourceType source_type) override;
   int HasAvailableDragActions() const override;
   void OnDropIndexUpdate(std::optional<int> index, bool drop_before) override;
-  void CreateNewTab() override;
+  void CreateNewTab(NewTabTypes context) override;
   void CreateNewTabWithLocation(const std::u16string& loc) override;
   void OnStartedDragging(bool dragging_window) override;
   void OnStoppedDragging() override;

@@ -160,6 +160,8 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoPicker:
     case CSSSelector::kPseudoPopoverInTopLayer:
     case CSSSelector::kPseudoPopoverOpen:
+    case CSSSelector::kPseudoMenulistPopoverWithMenubarAnchor:
+    case CSSSelector::kPseudoMenulistPopoverWithMenulistAnchor:
     case CSSSelector::kPseudoSlotted:
     case CSSSelector::kPseudoVideoPersistent:
     case CSSSelector::kPseudoVideoPersistentAncestor:
@@ -185,6 +187,7 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoInterestSource:
     case CSSSelector::kPseudoInterestTarget:
     case CSSSelector::kPseudoHasSlotted:
+    case CSSSelector::kPseudoRouteMatch:
       return true;
     case CSSSelector::kPseudoUnknown:
     case CSSSelector::kPseudoLeftPage:
@@ -1697,6 +1700,7 @@ RuleInvalidationDataVisitor<VisitorType>::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoInterestSource:
       case CSSSelector::kPseudoInterestTarget:
       case CSSSelector::kPseudoHasSlotted:
+      case CSSSelector::kPseudoRouteMatch:
         return EnsurePseudoInvalidationSet(selector.GetPseudoType(), type,
                                            position, in_nth_child);
       case CSSSelector::kPseudoFirstOfType:

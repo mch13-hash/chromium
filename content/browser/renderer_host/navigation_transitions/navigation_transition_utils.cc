@@ -4,11 +4,15 @@
 
 #include "content/browser/renderer_host/navigation_transitions/navigation_transition_utils.h"
 
+#include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
+#include "components/viz/common/features.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
+#include "components/viz/common/resources/release_callback.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "content/browser/compositor/surface_utils.h"
 #include "content/browser/renderer_host/frame_tree.h"
@@ -18,8 +22,10 @@
 #include "content/browser/renderer_host/navigation_transitions/navigation_entry_screenshot_cache.h"
 #include "content/browser/renderer_host/navigation_transitions/navigation_transition_config.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/public/browser/back_forward_transition_animation_manager.h"
 #include "content/public/common/content_features.h"
 #include "gpu/command_buffer/client/client_shared_image.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/animation/animation.h"
 
 #if BUILDFLAG(IS_ANDROID)
@@ -34,6 +40,11 @@ namespace content {
 namespace {
 
 using CacheHitOrMissReason = NavigationTransitionData::CacheHitOrMissReason;
+
+using SharedImageCallback =
+    base::OnceCallback<void(scoped_refptr<gpu::ClientSharedImage>,
+                            viz::ReleaseCallback)>;
+using BitmapCallback = base::OnceCallback<void(const SkBitmap&)>;
 
 static gfx::Size g_output_size_for_test = gfx::Size();
 
@@ -170,7 +181,8 @@ void CacheScreenshotSharedImageImpl(
     bool is_copied_from_embedder,
     int copy_output_request_sequence,
     bool supports_etc_non_power_of_two,
-    scoped_refptr<gpu::ClientSharedImage> shared_image) {
+    scoped_refptr<gpu::ClientSharedImage> shared_image,
+    viz::ReleaseCallback release_callback) {
   if (!controller) {
     // The tab was destroyed by the time we receive the shared image from the
     // GPU.
@@ -210,8 +222,9 @@ void CacheScreenshotSharedImageImpl(
           : NavigationEntryScreenshot::ScreenshotCallback();
 
   auto screenshot = std::make_unique<NavigationEntryScreenshot>(
-      std::move(shared_image), screenshot_id, supports_etc_non_power_of_two,
-      std::move(raster_context_provider), bound_screenshot_callback);
+      std::move(shared_image), std::move(release_callback), screenshot_id,
+      supports_etc_non_power_of_two, std::move(raster_context_provider),
+      bound_screenshot_callback);
   NavigationEntryScreenshotCache* cache =
       controller->GetNavigationEntryScreenshotCache();
   cache->SetScreenshot(std::move(navigation_request), std::move(screenshot),
@@ -370,7 +383,8 @@ bool NavigationTransitionUtils::
     CaptureNavigationEntryScreenshotForCrossDocumentNavigations(
         NavigationRequest& navigation_request,
         bool did_receive_commit_ack) {
-  if (!NavigationTransitionConfig::AreBackForwardTransitionsEnabled()) {
+  if (!BackForwardTransitionAnimationManager::
+          ShouldAnimateBackForwardTransitions()) {
     return false;
   }
 
@@ -523,7 +537,7 @@ bool NavigationTransitionUtils::
         /*src_rect=*/gfx::Rect(), output_size,
         base::BindOnce(
             &CacheScreenshotSharedImageImpl, navigation_controller.GetWeakPtr(),
-            navigation_request.GetWeakPtr(), context_provider,
+            navigation_request.GetWeakPtr(), std::move(context_provider),
             last_committed_entry->navigation_transition_data().unique_id(),
             /*is_copied_from_embedder=*/false, request_sequence,
             SupportsETC1NonPowerOfTwo(navigation_request)));
@@ -531,23 +545,30 @@ bool NavigationTransitionUtils::
     static_cast<RenderWidgetHostViewBase*>(rwhv)
         ->CopyFromExactSurfaceWithIpcDelay(
             /*src_rect=*/gfx::Rect(), output_size,
-            base::BindOnce(
-                &CacheScreenshotImpl, navigation_controller.GetWeakPtr(),
-                navigation_request.GetWeakPtr(),
-                last_committed_entry->navigation_transition_data().unique_id(),
-                /*is_copied_from_embedder=*/false, request_sequence,
-                SupportsETC1NonPowerOfTwo(navigation_request)),
+            base::BindOnce([](const viz::CopyOutputBitmapWithMetadata& result) {
+              return result.bitmap;
+            })
+                .Then(base::BindOnce(
+                    &CacheScreenshotImpl, navigation_controller.GetWeakPtr(),
+                    navigation_request.GetWeakPtr(),
+                    last_committed_entry->navigation_transition_data()
+                        .unique_id(),
+                    /*is_copied_from_embedder=*/false, request_sequence,
+                    SupportsETC1NonPowerOfTwo(navigation_request))),
             NavigationTransitionConfig::ScreenshotSendResultDelay());
   }
 #else
   static_cast<RenderWidgetHostViewBase*>(rwhv)->CopyFromExactSurface(
       /*src_rect=*/gfx::Rect(), output_size,
-      base::BindOnce(
-          &CacheScreenshotImpl, navigation_controller.GetWeakPtr(),
-          navigation_request.GetWeakPtr(),
-          last_committed_entry->navigation_transition_data().unique_id(),
-          /*is_copied_from_embedder=*/false, request_sequence,
-          SupportsETC1NonPowerOfTwo(navigation_request)));
+      base::BindOnce([](const viz::CopyOutputBitmapWithMetadata& result) {
+        return result.bitmap;
+      })
+          .Then(base::BindOnce(
+              &CacheScreenshotImpl, navigation_controller.GetWeakPtr(),
+              navigation_request.GetWeakPtr(),
+              last_committed_entry->navigation_transition_data().unique_id(),
+              /*is_copied_from_embedder=*/false, request_sequence,
+              SupportsETC1NonPowerOfTwo(navigation_request))));
 #endif
 
   ++g_num_copy_requests_issued_for_testing;
@@ -563,7 +584,8 @@ void NavigationTransitionUtils::SetSameDocumentNavigationEntryScreenshotToken(
     NavigationRequest& navigation_request,
     std::optional<blink::SameDocNavigationScreenshotDestinationToken>
         destination_token) {
-  if (!NavigationTransitionConfig::AreBackForwardTransitionsEnabled()) {
+  if (!BackForwardTransitionAnimationManager::
+          ShouldAnimateBackForwardTransitions()) {
     // The source of this call is from the renderer. We can't always trust the
     // renderer thus fail safely.
     return;
@@ -648,14 +670,50 @@ void NavigationTransitionUtils::SetSameDocumentNavigationEntryScreenshotToken(
   int request_sequence = last_committed_entry->navigation_transition_data()
                              .copy_output_request_sequence();
 
-  GetHostFrameSinkManager()->SetOnCopyOutputReadyCallback(
-      *destination_token,
-      base::BindOnce(
-          &CacheScreenshotImpl, nav_controller.GetWeakPtr(),
-          navigation_request.GetWeakPtr(),
-          last_committed_entry->navigation_transition_data().unique_id(),
-          /*is_copied_from_embedder=*/false, request_sequence,
-          SupportsETC1NonPowerOfTwo(navigation_request)));
+  if (features::IsBackForwardTransitionsSameDocSharedImageEnabled()) {
+    auto* rwhva = static_cast<RenderWidgetHostViewAndroid*>(rwhv);
+    auto context_provider = rwhva->GetRasterContextProvider();
+    if (!context_provider) {
+      InvokeTestCallbackForNoScreenshot(navigation_request);
+      last_committed_entry->navigation_transition_data()
+          .set_cache_hit_or_miss_reason(
+              CacheHitOrMissReason::kNoRootWindowOrCompositor);
+      return;
+    }
+    GetHostFrameSinkManager()->SetOnCopyOutputReadyCallback(
+        *destination_token,
+        base::BindOnce(
+            [](SharedImageCallback callback,
+               std::unique_ptr<viz::CopyOutputResult> cor) {
+              CHECK_EQ(cor->destination(),
+                       viz::CopyOutputResult::Destination::kSharedImage);
+              std::move(callback).Run(cor->GetSharedImage(),
+                                      cor->TakeSharedImageOwnership());
+            },
+            base::BindOnce(
+                &CacheScreenshotSharedImageImpl, nav_controller.GetWeakPtr(),
+                navigation_request.GetWeakPtr(), std::move(context_provider),
+                last_committed_entry->navigation_transition_data().unique_id(),
+                /*is_copied_from_embedder=*/false, request_sequence,
+                SupportsETC1NonPowerOfTwo(navigation_request))));
+  } else {
+    GetHostFrameSinkManager()->SetOnCopyOutputReadyCallback(
+        *destination_token,
+        base::BindOnce(
+            [](BitmapCallback callback,
+               std::unique_ptr<viz::CopyOutputResult> cor) {
+              CHECK_EQ(cor->destination(),
+                       viz::CopyOutputResult::Destination::kSystemMemory);
+              std::move(callback).Run(
+                  cor->ScopedAccessSkBitmap().GetOutScopedBitmap());
+            },
+            base::BindOnce(
+                &CacheScreenshotImpl, nav_controller.GetWeakPtr(),
+                navigation_request.GetWeakPtr(),
+                last_committed_entry->navigation_transition_data().unique_id(),
+                /*is_copied_from_embedder=*/false, request_sequence,
+                SupportsETC1NonPowerOfTwo(navigation_request))));
+  }
 }
 
 int NavigationTransitionUtils::FindEntryIndexForNavigationTransitionID(
@@ -672,10 +730,6 @@ int NavigationTransitionUtils::FindEntryIndexForNavigationTransitionID(
 
 bool NavigationTransitionUtils::ShouldSkipScreenshot(
     const NavigationRequest& navigation_request) {
-  if (!base::FeatureList::IsEnabled(blink::features::kBackForwardTransitions)) {
-    // Preserve existing behavior, where the renderer decides.
-    return false;
-  }
   std::optional<CacheHitOrMissReason> reason;
   return ShouldSkipScreenshotWithMissReason(navigation_request, reason);
 }

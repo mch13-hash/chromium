@@ -52,6 +52,7 @@
 #include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/metrics/autofill_metrics_utils.h"
 #include "components/autofill/core/browser/metrics/log_event.h"
+#include "components/autofill/core/browser/metrics/loyalty_cards_metrics.h"
 #include "components/autofill/core/browser/metrics/payments/save_and_fill_metrics.h"
 #include "components/autofill/core/browser/metrics/suggestions_list_metrics.h"
 #include "components/autofill/core/browser/payments/bnpl_manager.h"
@@ -177,31 +178,6 @@ void PossiblyRemoveAutofillWarnings(std::vector<Suggestion>& suggestions) {
   std::erase_if(suggestions, is_warning);
 }
 
-// Loads the AutofillProfile from the personal data manager and returns a copy
-// to it if exists or `std::nullopt` otherwise. In case the payload contains a
-// non-empty email override, it applies it on the profile before returning it.
-std::optional<AutofillProfile> GetProfileFromPayload(
-    const PersonalDataManager& pdm,
-    const Suggestion::Payload& payload) {
-  auto GetProfileFromPersonalDataManager =
-      [&pdm](const std::string& guid) -> std::optional<AutofillProfile> {
-    if (const AutofillProfile* profile =
-            pdm.address_data_manager().GetProfileByGUID(guid)) {
-      return *profile;
-    }
-    return std::nullopt;
-  };
-
-  const Suggestion::AutofillProfilePayload& details =
-      std::get<Suggestion::AutofillProfilePayload>(payload);
-  std::optional<AutofillProfile> profile =
-      GetProfileFromPersonalDataManager(details.guid.value());
-  if (profile && !details.email_override.empty()) {
-    profile->SetRawInfo(EMAIL_ADDRESS, details.email_override);
-  }
-  return profile;
-}
-
 // Used to determine autofill availability for a11y. Presence of a suggestion
 // for which this method returns `true` makes screen readers change
 // the field announcement to notify users about available autofill options,
@@ -222,6 +198,28 @@ bool HasAutofillSugestionsForA11y(SuggestionType item_id) {
 }  // namespace
 
 int AutofillExternalDelegate::shortcut_test_suggestion_index_ = -1;
+
+// Loads the AutofillProfile from the address data manager and returns a copy
+// of it if exists or `std::nullopt` otherwise. In case the payload contains a
+// non-empty email override, it applies it to the profile before returning it.
+std::optional<AutofillProfile> GetProfileFromPayload(
+    const AddressDataManager& adm,
+    const Suggestion::AutofillProfilePayload& payload) {
+  auto GetProfileFromAddressDataManager =
+      [&adm](const std::string& guid) -> std::optional<AutofillProfile> {
+    if (const AutofillProfile* profile = adm.GetProfileByGUID(guid)) {
+      return *profile;
+    }
+    return std::nullopt;
+  };
+
+  std::optional<AutofillProfile> profile =
+      GetProfileFromAddressDataManager(payload.guid.value());
+  if (profile && !payload.email_override.empty()) {
+    profile->SetRawInfo(EMAIL_ADDRESS, payload.email_override);
+  }
+  return profile;
+}
 
 AutofillExternalDelegate::AutofillExternalDelegate(
     BrowserAutofillManager* manager)
@@ -331,6 +329,14 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
 #endif
   AttemptToDisplayAutofillSuggestions(input_suggestions, trigger_source_,
                                       /*is_update=*/false);
+}
+
+std::optional<AutofillProfile>
+AutofillExternalDelegate::GetProfileFromAddressSuggestion(
+    const Suggestion& suggestion) const {
+  return GetProfileFromPayload(
+      manager_->client().GetPersonalDataManager().address_data_manager(),
+      std::get<Suggestion::AutofillProfilePayload>(suggestion.payload));
 }
 
 void AutofillExternalDelegate::AttemptToDisplayAutofillSuggestions(
@@ -599,8 +605,7 @@ void AutofillExternalDelegate::DidSelectSuggestion(
     case SuggestionType::kAddressFieldByFieldFilling:
       CHECK(suggestion.field_by_field_filling_type_used);
       if (std::optional<AutofillProfile> profile =
-              GetProfileFromPayload(manager_->client().GetPersonalDataManager(),
-                                    suggestion.payload)) {
+              GetProfileFromAddressSuggestion(suggestion)) {
         PreviewAddressFieldByFieldFillingSuggestion(*profile, suggestion);
       }
       break;
@@ -626,8 +631,7 @@ void AutofillExternalDelegate::DidSelectSuggestion(
     case SuggestionType::kAddressEntryOnTyping:
       CHECK(suggestion.field_by_field_filling_type_used);
       if (std::optional<AutofillProfile> profile =
-              GetProfileFromPayload(manager_->client().GetPersonalDataManager(),
-                                    suggestion.payload)) {
+              GetProfileFromAddressSuggestion(suggestion)) {
         PreviewAddressFieldByFieldFillingSuggestion(*profile, suggestion);
       }
       break;
@@ -844,8 +848,7 @@ void AutofillExternalDelegate::DidAcceptSuggestion(
     case SuggestionType::kAddressEntryOnTyping:
       CHECK(suggestion.field_by_field_filling_type_used);
       if (std::optional<AutofillProfile> profile =
-              GetProfileFromPayload(manager_->client().GetPersonalDataManager(),
-                                    suggestion.payload)) {
+              GetProfileFromAddressSuggestion(suggestion)) {
         FillAddressFieldByFieldFillingSuggestion(*profile, suggestion,
                                                  metadata);
         autofill_metrics::LogAddressAutofillOnTypingSuggestionAccepted(
@@ -884,14 +887,14 @@ void AutofillExternalDelegate::DidAcceptSuggestion(
           mojom::ActionPersistence::kFill, mojom::FieldActionType::kReplaceAll,
           query_form_, query_field_, suggestion.main_text.value,
           SuggestionType::kLoyaltyCardEntry, LOYALTY_MEMBERSHIP_ID);
-      ValuablesDataManager* vdm = manager_->client().GetValuablesDataManager();
-      CHECK(vdm);
+      const ValuablesDataManager& vdm =
+          CHECK_DEREF(manager_->client().GetValuablesDataManager());
       const std::string guid =
           std::get<Suggestion::Guid>(suggestion.payload).value();
-      if (std::optional<LoyaltyCard> loyaty_card =
-              vdm->GetLoyaltyCardById(ValuableId(guid))) {
+      if (std::optional<LoyaltyCard> loyalty_card =
+              vdm.GetLoyaltyCardById(ValuableId(guid))) {
         manager_->LogAndRecordLoyaltyCardFill(
-            *loyaty_card, query_form_.global_id(), query_field_.global_id());
+            *loyalty_card, query_form_.global_id(), query_field_.global_id());
       }
       break;
     }
@@ -1161,7 +1164,8 @@ void AutofillExternalDelegate::AutofillForm(
         type == SuggestionType::kDevtoolsTestAddressEntry
             ? GetTestAddressByGUID(manager_->client().GetTestAddresses(),
                                    profile_payload->guid.value())
-            : GetProfileFromPayload(pdm, payload);
+            : GetProfileFromPayload(pdm.address_data_manager(),
+                                    *profile_payload);
     if (profile) {
       manager_->FillOrPreviewForm(action_persistence, query_form_,
                                   query_field_.global_id(), &*profile,
@@ -1231,25 +1235,35 @@ void AutofillExternalDelegate::DidAcceptAddressSuggestion(
       manager_->client().IsOffTheRecord());
   switch (suggestion.type) {
     case SuggestionType::kAddressEntry: {
-      const bool email_and_plus_address_shown = [this] {
-        const AutofillField* autofill_trigger_field = GetQueriedAutofillField();
-        const bool triggered_on_email_field =
-            autofill_trigger_field &&
-            autofill_trigger_field->Type().GetGroups().contains(
-                FieldTypeGroup::kEmail);
-        // Email suggestions don't have a separate suggestion type. Check that
-        // the suggestions are triggered on an email field and that the popup
-        // contains a plus address filling suggestion as well.
-        return triggered_on_email_field &&
-               base::Contains(shown_suggestion_types_,
-                              SuggestionType::kFillExistingPlusAddress);
-      }();
-      if (AutofillPlusAddressDelegate* plus_address_delegate =
+      const AutofillField* autofill_trigger_field = GetQueriedAutofillField();
+      const ValuablesDataManager* vdm =
+          manager_->client().GetValuablesDataManager();
+
+      if (autofill_trigger_field &&
+          autofill_trigger_field->Type().GetLoyaltyCardType() ==
+              EMAIL_OR_LOYALTY_MEMBERSHIP_ID &&
+          vdm && !vdm->GetLoyaltyCards().empty()) {
+        LogEmailOrLoyaltyCardSuggestionAccepted(
+            autofill_metrics::AutofillEmailOrLoyaltyCardAcceptanceMetricValue::
+                kEmailSelected);
+      }
+
+      // Email suggestions don't have a separate suggestion type. Check that
+      // the suggestions are triggered on an email field and that the popup
+      // contains a plus address filling suggestion as well.
+      const bool email_and_plus_address_shown =
+          autofill_trigger_field &&
+          autofill_trigger_field->Type().GetGroups().contains(
+              FieldTypeGroup::kEmail) &&
+          base::Contains(shown_suggestion_types_,
+                         SuggestionType::kFillExistingPlusAddress);
+      if (const AutofillPlusAddressDelegate* plus_address_delegate =
               manager_->client().GetPlusAddressDelegate();
           plus_address_delegate && email_and_plus_address_shown) {
         manager_->client().TriggerPlusAddressUserPerceptionSurvey(
             plus_addresses::hats::SurveyType::kDidChooseEmailOverPlusAddress);
       }
+
       AutofillForm(suggestion.type, suggestion.payload, metadata,
                    /*is_preview=*/false,
                    TriggerSourceFromSuggestionTriggerSource(trigger_source_));
@@ -1258,8 +1272,7 @@ void AutofillExternalDelegate::DidAcceptAddressSuggestion(
     case SuggestionType::kAddressFieldByFieldFilling:
       CHECK(suggestion.field_by_field_filling_type_used);
       if (std::optional<AutofillProfile> profile =
-              GetProfileFromPayload(manager_->client().GetPersonalDataManager(),
-                                    suggestion.payload)) {
+              GetProfileFromAddressSuggestion(suggestion)) {
         FillAddressFieldByFieldFillingSuggestion(*profile, suggestion,
                                                  metadata);
       }

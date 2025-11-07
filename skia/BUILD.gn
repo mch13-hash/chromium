@@ -63,6 +63,15 @@ config("skia_config") {
     "SK_UNTIL_CRBUG_1187654_IS_FIXED",
     "SK_USER_CONFIG_HEADER=\"../../skia/config/SkUserConfig.h\"",
     "SK_WIN_FONTMGR_NO_SIMULATIONS",
+
+    # Let Skia and Skia clients know whether to use `libpng`-based or
+    # Rust-based PNG decoder and encoder.  This mimics what is done in
+    # `third_party/skia/BUILD.gn`'s `png_decode_rust` and `png_encode_rust`
+    # targets.
+    "SK_CODEC_DECODES_PNG",
+    "SK_CODEC_DECODES_PNG_WITH_RUST",
+    "SK_CODEC_ENCODES_PNG",
+    "SK_CODEC_ENCODES_PNG_WITH_RUST",
   ]
 
   include_dirs = [
@@ -81,11 +90,6 @@ config("skia_config") {
 
   if (is_component_build) {
     defines += [ "SKIA_DLL" ]
-    if (is_win) {
-      defines += [ "SKCMS_API=__declspec(dllexport)" ]
-    } else {
-      defines += [ "SKCMS_API=__attribute__((visibility(\"default\")))" ]
-    }
   }
 
   # `SK_GAMMA_EXPONENT` and `SK_GAMMA_CONTRAST` are settings for text
@@ -166,27 +170,12 @@ config("skia_library_config") {
     defines += [ "SKCMS_DISABLE_SKX=1" ]
   }
 
-  # Let Skia know whether to use `libpng`-based or Rust-based PNG decoder and
-  # encoder in internal Skia code (e.g. in implementation of Fontations).
-  #
-  # This currently mimics what is done in `third_party/skia/BUILD.gn`'s
-  # `png_decode_libpng` and `png_encode` targets.
-  #
-  # TODO(https://crbug.com/381900683): When Rust PNG ships, then switch to
-  # using `SK_CODEC_DECODES_PNG_WITH_RUST` and `SK_CODEC_ENCODES_PNG_WITH_RUST`
-  # defines from Skia's `png_encode_rust` and `png_decode_rust` targets.
   defines += [
-    "SK_CODEC_DECODES_PNG",
-    "SK_CODEC_DECODES_PNG_WITH_LIBPNG",
-    "SK_CODEC_ENCODES_PNG",
-    "SK_CODEC_ENCODES_PNG_WITH_LIBPNG",
-
     # https://crbug.com/443057959
     #"SK_DISABLE_LEGACY_INIT_DECODERS",
+
+    "SK_DISABLE_LEGACY_PNG_WRITEBUFFER",
   ]
-  if (use_blink) {
-    defines += [ "SK_CODEC_DECODES_ICO" ]
-  }
 
   if (use_blink) {
     defines += [ "SK_TYPEFACE_FACTORY_FONTATIONS" ]
@@ -261,6 +250,7 @@ component("skia") {
     "ext/pmcolor_utils.h",
     "ext/recursive_gaussian_convolution.h",
     "ext/rgba_to_yuva.h",
+    "ext/skcms_ext.h",
     "ext/skcolorspace_primaries.h",
     "ext/skcolorspace_trfn.h",
     "ext/skia_memory_dump_provider.h",
@@ -289,6 +279,7 @@ component("skia") {
     "ext/opacity_filter_canvas.cc",
     "ext/recursive_gaussian_convolution.cc",
     "ext/rgba_to_yuva.cc",
+    "ext/skcms_ext.cc",
     "ext/skcolorspace_primaries.cc",
     "ext/skcolorspace_trfn.cc",
     "ext/skia_histogram.cc",
@@ -385,7 +376,6 @@ component("skia") {
     sources += skia_encode_jpeg_srcs
     public += skia_encode_jpeg_public
     sources += [
-      "//third_party/skia/src/codec/SkIcoCodec.cpp",
       "//third_party/skia/src/codec/SkJpegCodec.cpp",
       "//third_party/skia/src/codec/SkJpegDecoderMgr.cpp",
       "//third_party/skia/src/codec/SkJpegMetadataDecoderImpl.cpp",
@@ -473,6 +463,12 @@ component("skia") {
     sources += skia_ports_fontmgr_android_parser_sources
   }
 
+  if (is_android) {
+    # Note that this requires expat.
+    # Note that this requires skia_ports_fontmgr_android_parser_sources.
+    sources += skia_ports_fontmgr_android_ndk_sources
+  }
+
   if (is_fuchsia) {
     public += skia_ports_fontmgr_fuchsia_public
     sources += skia_ports_fontmgr_fuchsia_sources
@@ -516,10 +512,11 @@ component("skia") {
   ]
 
   if (use_blink) {
-    deps += [
-      "//build/config/freetype",
-      "//third_party:jpeg",
-    ]
+    deps += [ "//third_party:jpeg" ]
+
+    if (enable_freetype) {
+      deps += [ "//build/config/freetype" ]
+    }
   }
 
   if (is_linux || is_chromeos) {
@@ -647,6 +644,7 @@ component("skia_switches") {
 
 rust_static_library("rust_png_ffi") {
   visibility = [ ":*" ]
+  edition = "2021"
   allow_unsafe = true  # For FFI
   crate_root = skia_codec_rust_png_ffi_crate_root
   sources = skia_codec_rust_png_ffi_rs_srcs
@@ -718,6 +716,11 @@ template("skia_source_set") {
       ]
     }
   }
+}
+set_defaults("skia_source_set") {
+  # Match the defaults for `source_set`
+  # (as defined in `build/config/BUILDCONFIG.gn`).
+  configs = default_compiler_configs
 }
 
 # Split out for targeted removal of the afdo_optimize_size config on Android.
@@ -834,15 +837,51 @@ skia_source_set("skia_opts") {
   visibility = [ ":skia" ]
 }
 
+# Like `skia_library_config` but for things that are `skcms`-specific.
+config("skcms_library_config") {
+  if (!is_win) {
+    cflags = [
+      "-w",
+      "-std=c11",
+    ]
+  }
+
+  # LLVM automatically sets the equivalent of GCC's -mfp16-format=ieee on ARM
+  # builds by default, while GCC itself does not. We need it to enable support
+  # for half-precision floating point data types used by SKCMS on ARM.
+  if ((is_linux || is_chromeos) && !is_clang && current_cpu == "arm") {
+    cflags += [ "-mfp16-format=ieee" ]
+  }
+  if (current_cpu == "loong64") {
+    cflags += [ "-mlsx" ]
+  }
+
+  if (is_component_build) {
+    # TODO(lukasza, kjlubick): Is this the right definition?  `SK_API` is defined in
+    # a more complicated way (e.g. it covers `dllimport` and changes behavior
+    # depending on `SKIA_DLL` and `SKIA_IMPLEMENTATION`).
+    if (is_win) {
+      defines = [ "SKCMS_API=__declspec(dllexport)" ]
+    } else {
+      defines = [ "SKCMS_API=__attribute__((visibility(\"default\")))" ]
+    }
+  }
+
+  visibility = [
+    ":skcms_TransformBaseline_and_public",
+    ":skcms_TransformHsw",
+    ":skcms_TransformSkx",
+  ]
+}
+
 if (current_cpu == "x64") {
   skia_source_set("skcms_TransformHsw") {
     sources = skcms_TransformHsw
+    configs += [ ":skcms_library_config" ]
     if (!is_win) {
       cflags = [
-        "-w",
         "-mavx2",
         "-mf16c",
-        "-std=c11",
       ]
     } else {
       cflags = [ "/arch:AVX2" ]
@@ -851,15 +890,14 @@ if (current_cpu == "x64") {
   }
   skia_source_set("skcms_TransformSkx") {
     sources = skcms_TransformSkx
+    configs += [ ":skcms_library_config" ]
     if (!is_win) {
       cflags = [
-        "-w",
         "-mavx512f",
         "-mavx512dq",
         "-mavx512cd",
         "-mavx512bw",
         "-mavx512vl",
-        "-std=c11",
       ]
     } else {
       cflags = [ "/arch:AVX512" ]
@@ -878,25 +916,7 @@ if (current_cpu == "x64") {
 }
 
 source_set("skcms_TransformBaseline_and_public") {
-  if (!is_win || is_clang) {
-    cflags = [
-      "-w",
-      "-std=c11",
-    ]
-  } else {
-    cflags = []
-  }
-
-  # LLVM automatically sets the equivalent of GCC's -mfp16-format=ieee on ARM
-  # builds by default, while GCC itself does not. We need it to enable support
-  # for half-precision floating point data types used by SKCMS on ARM.
-  if ((is_linux || is_chromeos) && !is_clang && current_cpu == "arm") {
-    cflags += [ "-mfp16-format=ieee" ]
-  }
-  if (current_cpu == "loong64") {
-    cflags += [ "-mlsx" ]
-  }
-
+  configs += [ ":skcms_library_config" ]
   sources = rebase_path(skcms_TransformBaseline + skcms_public,
                         ".",
                         "//third_party/skia/modules/skcms")

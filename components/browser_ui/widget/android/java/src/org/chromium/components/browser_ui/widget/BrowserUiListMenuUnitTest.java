@@ -46,6 +46,7 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.ui.R;
 import org.chromium.ui.listmenu.BasicListMenu;
 import org.chromium.ui.listmenu.ListMenuSubmenuItemProperties;
+import org.chromium.ui.listmenu.ListMenuUtils;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -104,7 +105,7 @@ public class BrowserUiListMenuUnitTest {
 
     @Test
     public void testScrollHairline() {
-        mBasicListMenu = getBasicListMenu(mActivity, mData, item -> {});
+        mBasicListMenu = getBasicListMenu(mActivity, mData, (item, view) -> {});
         mContentView = Mockito.spy(setupListViewForSubmenuTesting());
         // Assert not showing before navigation
         View hairline = mView.findViewById(R.id.menu_header_bottom_hairline);
@@ -141,7 +142,7 @@ public class BrowserUiListMenuUnitTest {
     @Test
     public void testScrollHairline_color() {
         int colorIntForTest = 10;
-        mBasicListMenu = getBasicListMenu(mActivity, mData, item -> {}, 0, colorIntForTest);
+        mBasicListMenu = getBasicListMenu(mActivity, mData, (item, view) -> {}, 0, colorIntForTest);
         setupListViewForSubmenuTesting();
         View hairline = mView.findViewById(R.id.menu_header_bottom_hairline);
         assertEquals(colorIntForTest, ((ColorDrawable) hairline.getBackground()).getColor());
@@ -149,7 +150,7 @@ public class BrowserUiListMenuUnitTest {
 
     @Test
     public void testScroll_noHeader_noHairline() {
-        mBasicListMenu = getBasicListMenu(mActivity, mData, item -> {});
+        mBasicListMenu = getBasicListMenu(mActivity, mData, (item, view) -> {});
         ListView listView = setupListViewForSubmenuTesting();
         // Assert not showing before navigation
         View hairline = mView.findViewById(R.id.menu_header_bottom_hairline);
@@ -173,9 +174,9 @@ public class BrowserUiListMenuUnitTest {
                                 .with(SUBMENU_ITEMS, submenuItems)
                                 .build());
         data.add(submenuParentItem);
-        mBasicListMenu = getBasicListMenu(mActivity, data, item -> {}, 0, colorIntForTest);
+        mBasicListMenu = getBasicListMenu(mActivity, data, (item, view) -> {}, 0, colorIntForTest);
         mBasicListMenu.setupCallbacksRecursively(
-                () -> {}, /* drillDownOverrideValue= */ null, /* flyoutController= */ null);
+                () -> {}, ListMenuUtils.createHierarchicalMenuController(mActivity));
         mView = mBasicListMenu.getContentView();
         int itemHeight =
                 mActivity.getResources().getDimensionPixelSize(R.dimen.list_menu_item_min_height);
@@ -199,7 +200,7 @@ public class BrowserUiListMenuUnitTest {
 
     @Test
     public void testKeyboardNavigation() {
-        mBasicListMenu = getBasicListMenu(mActivity, mData, item -> {});
+        mBasicListMenu = getBasicListMenu(mActivity, mData, (item, view) -> {});
         View view = mBasicListMenu.getContentView();
         ListView headerView = view.findViewById(R.id.menu_header);
         ListView contentView = setupListViewForSubmenuTesting();
@@ -224,7 +225,7 @@ public class BrowserUiListMenuUnitTest {
 
     private ListView setupListViewForSubmenuTesting() {
         mBasicListMenu.setupCallbacksRecursively(
-                () -> {}, /* drillDownOverrideValue= */ null, /* flyoutController= */ null);
+                () -> {}, ListMenuUtils.createHierarchicalMenuController(mActivity));
         mView = mBasicListMenu.getContentView();
         int width = mActivity.getResources().getDimensionPixelSize(R.dimen.list_menu_width);
         int height = 300; // Some arbitrary value small enough to make the bottom part scrollable

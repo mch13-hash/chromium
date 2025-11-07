@@ -10,6 +10,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.components.cached_flags.CachedFlag;
 import org.chromium.content.common.ContentInternalFeatures;
 import org.chromium.content_public.common.ContentFeatures;
+import org.chromium.ui.accessibility.AccessibilityFeatures;
 
 import java.util.List;
 
@@ -25,10 +26,9 @@ public class ContentFeatureList {
     public static final String ACCESSIBILITY_DEPRECATE_TYPE_ANNOUNCE =
             "AccessibilityDeprecateTypeAnnounce";
 
-    public static final String ACCESSIBILITY_INCLUDE_LONG_CLICK_ACTION =
-            "AccessibilityIncludeLongClickAction";
-
     public static final String ACCESSIBILITY_PAGE_ZOOM_V2 = "AccessibilityPageZoomV2";
+
+    public static final String ANDROID_DESKTOP_ZOOM_SCALING = "AndroidDesktopZoomScaling";
 
     public static final String ACCESSIBILITY_POPULATE_SUPPLEMENTAL_DESCRIPTION_API =
             "AccessibilityPopulateSupplementalDescriptionApi";
@@ -42,9 +42,9 @@ public class ContentFeatureList {
 
     public static final String ANDROID_DEV_TOOLS_FRONTEND = "AndroidDevToolsFrontend";
 
-    public static final String ANDROID_OPEN_PDF_INLINE = "AndroidOpenPdfInline";
+    public static final String ANDROID_MEDIA_INSERTION = "AndroidMediaInsertion";
 
-    public static final String DESKTOP_UA_ON_CONNECTED_DISPLAY = "DesktopUAOnConnectedDisplay";
+    public static final String ANDROID_OPEN_PDF_INLINE = "AndroidOpenPdfInline";
 
     public static final String HIDE_PASTE_POPUP_ON_GSB = "HidePastePopupOnGSB";
 
@@ -81,6 +81,12 @@ public class ContentFeatureList {
     public static final MutableBooleanParamWithSafeDefault
             sAccessibilityDeprecateJavaNodeCacheDisableCache =
                     sAccessibilityDeprecateJavaNodeCache.newBooleanParam("disable_cache", false);
+
+    public static final MutableFlagWithSafeDefault sAccessibilityMagnificationFollowsTextCursor =
+            new MutableFlagWithSafeDefault(
+                    ContentFeatureMap.getInstance(),
+                    AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_TEXT_CURSOR,
+                    false);
 
     public static final MutableFlagWithSafeDefault sAndroidCaretBrowsing =
             new MutableFlagWithSafeDefault(

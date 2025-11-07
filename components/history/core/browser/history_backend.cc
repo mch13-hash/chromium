@@ -435,11 +435,9 @@ void HistoryBackend::Init(
     StartDeletingForeignVisits();
   }
 
-  memory_pressure_listener_ =
-      std::make_unique<base::AsyncMemoryPressureListener>(
-          FROM_HERE, base::MemoryPressureListenerTag::kHistoryBackend,
-          base::BindRepeating(&HistoryBackend::OnMemoryPressure,
-                              base::Unretained(this)));
+  memory_pressure_listener_registration_ =
+      std::make_unique<base::AsyncMemoryPressureListenerRegistration>(
+          FROM_HERE, base::MemoryPressureListenerTag::kHistoryBackend, this);
 }
 
 void HistoryBackend::SetOnBackendDestroyTask(
@@ -1269,9 +1267,6 @@ void HistoryBackend::InitImpl(
   base::FilePath history_name = history_dir_.Append(kHistoryFilename);
   base::FilePath favicon_name = GetFaviconsFileName();
 
-  // Delete the old index database files which are no longer used.
-  DeleteFTSIndexDatabases();
-
   // History database.
   db_ = std::make_unique<HistoryDatabase>(
       history_database_params.download_interrupt_reason_none,
@@ -1350,11 +1345,10 @@ void HistoryBackend::InitImpl(
 }
 
 void HistoryBackend::OnMemoryPressure(
-    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+    base::MemoryPressureLevel memory_pressure_level) {
   // TODO(sebmarchand): Check if MEMORY_PRESSURE_LEVEL_MODERATE should also be
   // ignored.
-  if (memory_pressure_level ==
-      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE) {
+  if (memory_pressure_level == base::MEMORY_PRESSURE_LEVEL_NONE) {
     return;
   }
   if (db_)
@@ -1672,9 +1666,12 @@ bool HistoryBackend::CanAddURL(const GURL& url) const {
   return delegate_->CanAddURL(url);
 }
 
-bool HistoryBackend::GetMostRecentVisitForURL(URLID id, VisitRow* visit_row) {
+bool HistoryBackend::GetMostRecentVisitForURL(
+    URLID id,
+    VisitRow* visit_row,
+    VisitQuery404sPolicy policy_for_404_visits) {
   if (db_)
-    return db_->GetMostRecentVisitForURL(id, visit_row);
+    return db_->GetMostRecentVisitForURL(id, visit_row, policy_for_404_visits);
   return false;
 }
 
@@ -2855,12 +2852,14 @@ RedirectList HistoryBackend::QueryRedirectsFrom(const GURL& from_url) {
     return {};
 
   URLID from_url_id = db_->GetRowForURL(from_url, nullptr);
-  VisitID cur_visit = db_->GetMostRecentVisitForURL(from_url_id, nullptr);
+  VisitID cur_visit = db_->GetMostRecentVisitForURL(
+      from_url_id, nullptr, VisitQuery404sPolicy::kExclude404s);
   if (!cur_visit)
     return {};  // No visits for URL.
 
   RedirectList redirects;
-  GetRedirectsFromSpecificVisit(cur_visit, &redirects);
+  GetRedirectsFromSpecificVisit(cur_visit, &redirects,
+                                VisitQuery404sPolicy::kExclude404s);
   return redirects;
 }
 
@@ -2869,7 +2868,8 @@ RedirectList HistoryBackend::QueryRedirectsTo(const GURL& to_url) {
     return {};
 
   URLID to_url_id = db_->GetRowForURL(to_url, nullptr);
-  VisitID cur_visit = db_->GetMostRecentVisitForURL(to_url_id, nullptr);
+  VisitID cur_visit = db_->GetMostRecentVisitForURL(
+      to_url_id, nullptr, VisitQuery404sPolicy::kInclude404s);
   if (!cur_visit)
     return {};  // No visits for URL.
 
@@ -2937,15 +2937,18 @@ KeywordSearchTermVisitList HistoryBackend::QueryMostRepeatedQueriesForKeyword(
   return search_terms;
 }
 
-void HistoryBackend::GetRedirectsFromSpecificVisit(VisitID cur_visit,
-                                                   RedirectList* redirects) {
+void HistoryBackend::GetRedirectsFromSpecificVisit(
+    VisitID cur_visit,
+    RedirectList* redirects,
+    VisitQuery404sPolicy policy_for_404_visits) {
   // Follow any redirects from the given visit and add them to the list.
   // It *should* be impossible to get a circular chain here, but we check
   // just in case to avoid infinite loops.
   GURL cur_url;
   std::set<VisitID> visit_set;
   visit_set.insert(cur_visit);
-  while (db_->GetRedirectFromVisit(cur_visit, &cur_visit, &cur_url)) {
+  while (db_->GetRedirectFromVisit(cur_visit, &cur_visit, &cur_url,
+                                   policy_for_404_visits)) {
     if (visit_set.find(cur_visit) != visit_set.end()) {
       DUMP_WILL_BE_NOTREACHED() << "Loop in visit chain, giving up";
       return;
@@ -2973,18 +2976,6 @@ void HistoryBackend::GetRedirectsToSpecificVisit(VisitID cur_visit,
     }
     visit_set.insert(cur_visit);
     redirects->push_back(cur_url);
-  }
-}
-
-void HistoryBackend::DeleteFTSIndexDatabases() {
-  // Find files on disk matching the text databases file pattern so we can
-  // quickly test for and delete them.
-  base::FilePath::StringType filepattern = FILE_PATH_LITERAL("History Index *");
-  base::FileEnumerator enumerator(history_dir_, false,
-                                  base::FileEnumerator::FILES, filepattern);
-  base::FilePath current_file;
-  while (!(current_file = enumerator.Next()).empty()) {
-    sql::Database::Delete(current_file);
   }
 }
 

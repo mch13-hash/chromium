@@ -13,7 +13,6 @@
 #import "base/not_fatal_until.h"
 #import "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
-#import "base/task/sequenced_task_runner.h"
 #import "components/grit/components_scaled_resources.h"
 #import "components/omnibox/browser/autocomplete_input.h"
 #import "components/open_from_clipboard/clipboard_async_wrapper_ios.h"
@@ -168,18 +167,11 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 }
 
 - (void)setAllowsReturnKeyWithEmptyText:(BOOL)allowsReturnKeyWithEmptyText {
+  if (_allowsReturnKeyWithEmptyText == allowsReturnKeyWithEmptyText) {
+    return;
+  }
   _allowsReturnKeyWithEmptyText = allowsReturnKeyWithEmptyText;
-
-  // To make sure the keyboard is correctly taking the new value into account,
-  // call `-reloadInputViews`. That being said, `-reloadInputViews` can
-  // update the input mode, which can itself call again this method.
-  // `-reloadInputViews` being non-reentrant (contention on
-  // `+[UIKeyboardAutomatic sharedInstance]`), call this asynchronously.
-  __weak __typeof(self) weakSelf = self;
-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(^{
-        [weakSelf reloadInputViews];
-      }));
+  [self reloadInputViews];
 }
 
 - (void)setText:(NSAttributedString*)text
@@ -996,7 +988,13 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 /// `self.attributedAdditionalText`.
 - (void)setTextInternal:(NSAttributedString*)text
      autocompleteLength:(NSUInteger)autocompleteLength {
+  if (autocompleteLength > text.length) {
+    DUMP_WILL_BE_NOTREACHED() << "autocomplete length: " << autocompleteLength
+                              << " text length: " << text.length;
+    autocompleteLength = text.length;
+  }
   _autocompleteTextLength = autocompleteLength;
+
   // Extract substrings for the permanent text and the autocomplete text.  The
   // former needs to retain any text attributes from the original string.
   NSUInteger beginningOfAutocomplete = text.length - autocompleteLength;
@@ -1058,15 +1056,22 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
       UITextPosition* endOfUserText =
           [self positionFromPosition:self.beginningOfDocument
                               offset:beginningOfAutocomplete];
-      // Move the cursor to the beginning of the field before setting the
-      // position to the end of the user input so if the text is very wide, the
-      // user sees the beginning of the text instead of the end.
-      self.selectedTextRange =
-          [self textRangeFromPosition:self.beginningOfDocument
-                           toPosition:self.beginningOfDocument];
-      // Preserve the cursor position at the end of the user input.
-      self.selectedTextRange = [self textRangeFromPosition:endOfUserText
-                                                toPosition:endOfUserText];
+      if (endOfUserText) {
+        // Move the cursor to the beginning of the field before setting the
+        // position to the end of the user input so if the text is very wide,
+        // the user sees the beginning of the text instead of the end.
+        self.selectedTextRange =
+            [self textRangeFromPosition:self.beginningOfDocument
+                             toPosition:self.beginningOfDocument];
+        // Preserve the cursor position at the end of the user input.
+        self.selectedTextRange = [self textRangeFromPosition:endOfUserText
+                                                  toPosition:endOfUserText];
+      } else {
+        DUMP_WILL_BE_NOTREACHED()
+            << "autocomplete length: " << autocompleteLength
+            << " text length: " << text.length
+            << " has endOfUserText: " << !!endOfUserText;
+      }
     }
   }
 

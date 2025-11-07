@@ -21,6 +21,8 @@
 #import "ios/chrome/browser/affiliations/model/ios_chrome_affiliation_service_factory.h"
 #import "ios/chrome/browser/autofill/model/personal_data_manager_factory.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_model_factory.h"
+#import "ios/chrome/browser/data_import/ui/data_import_import_stage_transition_handler.h"
+#import "ios/chrome/browser/data_import/ui/import_data_item_table_view.h"
 #import "ios/chrome/browser/favicon/model/ios_chrome_favicon_loader_factory.h"
 #import "ios/chrome/browser/history/model/history_service_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_account_password_store_factory.h"
@@ -31,11 +33,9 @@
 #import "ios/chrome/browser/safari_data_import/public/metrics.h"
 #import "ios/chrome/browser/safari_data_import/public/password_import_item.h"
 #import "ios/chrome/browser/safari_data_import/public/safari_data_import_stage.h"
-#import "ios/chrome/browser/safari_data_import/ui/safari_data_import_import_stage_transition_handler.h"
 #import "ios/chrome/browser/safari_data_import/ui/safari_data_import_import_view_controller.h"
 #import "ios/chrome/browser/safari_data_import/ui/safari_data_import_password_conflict_resolution_view_controller.h"
 #import "ios/chrome/browser/safari_data_import/ui/safari_data_invalid_passwords_view_controller.h"
-#import "ios/chrome/browser/safari_data_import/ui/safari_data_item_table_view.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/sync/model/sync_service_factory.h"
@@ -44,9 +44,16 @@
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util_mac.h"
 
+namespace {
+
+/// Number of expected items in the table.
+constexpr NSInteger kExpectedItemsCount = 4;
+
+}  // namespace
+
 @interface SafariDataImportImportCoordinator () <
     PromoStyleViewControllerDelegate,
-    SafariDataImportImportStageTransitionHandler,
+    DataImportImportStageTransitionHandler,
     UITableViewDelegate>
 
 /// The mediator handling the interaction with the model. Lazily loaded with
@@ -70,7 +77,7 @@
   /// File picker for the user to select Safari data.
   UIDocumentPickerViewController* _documentProvider;
   /// Table view  that displays the import status of Safari data.
-  SafariDataItemTableView* _tableView;
+  ImportDataItemTableView* _tableView;
 }
 
 @synthesize mediator = _mediator;
@@ -93,7 +100,8 @@
   _containerViewController =
       [[SafariDataImportImportViewController alloc] init];
   _containerViewController.delegate = self;
-  _tableView = [[SafariDataItemTableView alloc] init];
+  _tableView =
+      [[ImportDataItemTableView alloc] initWithItemCount:kExpectedItemsCount];
   _tableView.delegate = self;
   _tableView.importStageTransitionHandler = self;
   _containerViewController.itemTableView = _tableView;
@@ -109,6 +117,10 @@
 }
 
 #pragma mark - Accessors
+
+- (SafariDataImportStage)importStage {
+  return _containerViewController.importStage;
+}
 
 - (SafariDataImportImportMediator*)mediator {
   if (!_mediator) {
@@ -163,14 +175,10 @@
     NSString* description = l10n_util::GetNSString(
         IDS_IOS_SAFARI_IMPORT_IMPORT_FAILURE_MESSAGE_DESCRIPTION);
     NSString* buttonText = l10n_util::GetNSString(IDS_OK);
-    __weak __typeof(self) weakSelf = self;
-    UIAlertAction* dismiss = [UIAlertAction
-        actionWithTitle:buttonText
-                  style:UIAlertActionStyleDefault
-                handler:^(UIAlertAction* action) {
-                  [weakSelf.errorAlert dismissViewControllerAnimated:YES
-                                                          completion:nil];
-                }];
+    UIAlertAction* dismiss =
+        [UIAlertAction actionWithTitle:buttonText
+                                 style:UIAlertActionStyleDefault
+                               handler:nil];
     _errorAlert = [UIAlertController
         alertControllerWithTitle:title
                          message:description
@@ -216,7 +224,7 @@
 #pragma mark - PromoStyleViewControllerDelegate
 
 - (void)didTapPrimaryActionButton {
-  switch (_containerViewController.importStage) {
+  switch (self.importStage) {
     case SafariDataImportStage::kNotStarted:
       if ([self showFilePicker]) {
         [self transitionToNextImportStage];
@@ -241,21 +249,19 @@
   [self dismissWorkflow];
 }
 
-#pragma mark - SafariDataImportImportStageTransitionHandler
+#pragma mark - DataImportImportStageTransitionHandler
 
 - (void)transitionToNextImportStage {
-  CHECK_NE(_containerViewController.importStage,
-           SafariDataImportStage::kImported)
+  CHECK_NE(self.importStage, SafariDataImportStage::kImported)
       << "No next import stage.";
-  int nextImportStageInt =
-      static_cast<int>(_containerViewController.importStage) + 1;
+  int nextImportStageInt = static_cast<int>(self.importStage) + 1;
   _containerViewController.email = self.mediator.email;
   _containerViewController.importStage =
       static_cast<SafariDataImportStage>(nextImportStageInt);
 }
 
 - (void)resetToInitialImportStage:(BOOL)userInitiated {
-  SafariDataImportStage currentStage = _containerViewController.importStage;
+  SafariDataImportStage currentStage = self.importStage;
   CHECK_EQ(currentStage, SafariDataImportStage::kFileLoading)
       << "Not supported for stage: " << static_cast<int>(currentStage);
   /// If the user has not explicitly canceled the import, alert the user that
@@ -374,7 +380,7 @@
 
 /// Dismisses Safari import workflow.
 - (void)dismissWorkflow {
-  RecordSafariDataImportEndsAtImportStage(_containerViewController.importStage);
+  RecordSafariDataImportEndsAtImportStage(self.importStage);
   [self.delegate safariDataImportCoordinatorWillDismissWorkflow:self];
 }
 

@@ -19,7 +19,9 @@ import static org.mockito.Mockito.when;
 import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinator.BottomSheetType.THEME;
 import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinator.BottomSheetType.THEME_COLLECTIONS;
 
+import android.content.ComponentCallbacks;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
 import android.view.View;
 import android.widget.ImageView;
@@ -45,11 +47,14 @@ import org.chromium.chrome.browser.ntp_customization.BottomSheetDelegate;
 import org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinator.BottomSheetType;
 import org.chromium.chrome.browser.ntp_customization.R;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridge;
-import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridgeJni;
+import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridge.ThemeCollectionSelectionListener;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Unit tests for {@link NtpThemeCollectionsCoordinator}. */
 @RunWith(BaseRobolectricTestRunner.class)
@@ -65,12 +70,14 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
     @Mock private BottomSheetDelegate mBottomSheetDelegate;
     @Mock private BottomSheetController mBottomSheetController;
     @Mock private NtpSingleThemeCollectionCoordinator mNtpSingleThemeCollectionCoordinator;
-    @Mock private NtpThemeBridge.Natives mNtpThemeBridgeJniMock;
-    @Mock private Runnable mOnThemeImageSelectedCallback;
-    @Captor private ArgumentCaptor<Callback<Object[]>> mCallbackCaptor;
+    @Mock private NtpThemeBridge mNtpThemeBridge;
+    @Captor private ArgumentCaptor<Callback<List<BackgroundCollection>>> mCallbackCaptor;
+    @Captor private ArgumentCaptor<ComponentCallbacks> mComponentCallbacksCaptor;
+    @Captor private ArgumentCaptor<ThemeCollectionSelectionListener> mListenerCaptor;
 
     private NtpThemeCollectionsCoordinator mCoordinator;
     private Context mContext;
+    private Context mContextSpy;
     private View mBottomSheetView;
 
     @Before
@@ -79,14 +86,13 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
                 new ContextThemeWrapper(
                         ApplicationProvider.getApplicationContext(),
                         R.style.Theme_BrowserUI_DayNight);
+        mContextSpy = spy(mContext);
 
-        NtpThemeBridgeJni.setInstanceForTesting(mNtpThemeBridgeJniMock);
-        when(mNtpThemeBridgeJniMock.init(mProfile)).thenReturn(1L);
         when(mBottomSheetDelegate.getBottomSheetController()).thenReturn(mBottomSheetController);
 
         mCoordinator =
                 new NtpThemeCollectionsCoordinator(
-                        mContext, mBottomSheetDelegate, mProfile, mOnThemeImageSelectedCallback);
+                        mContextSpy, mBottomSheetDelegate, mProfile, mNtpThemeBridge);
 
         ArgumentCaptor<View> viewCaptor = ArgumentCaptor.forClass(View.class);
         verify(mBottomSheetDelegate)
@@ -97,7 +103,7 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
     @Test
     public void testConstructor() {
         assertNotNull(mBottomSheetView);
-        verify(mNtpThemeBridgeJniMock).getBackgroundCollections(eq(1L), mCallbackCaptor.capture());
+        verify(mNtpThemeBridge).getBackgroundCollections(mCallbackCaptor.capture());
 
         RecyclerView recyclerView =
                 mBottomSheetView.findViewById(R.id.theme_collections_recycler_view);
@@ -105,7 +111,7 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
         NtpThemeCollectionsAdapter adapterSpy = spy(adapter);
         mCoordinator.setNtpThemeCollectionsAdapterForTesting(adapterSpy);
 
-        Object[] collections = new Object[0];
+        List<BackgroundCollection> collections = new ArrayList<>();
         mCallbackCaptor.getValue().onResult(collections);
 
         verify(mBottomSheetController).expandSheet();
@@ -146,6 +152,9 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
 
     @Test
     public void testDestroy() {
+        verify(mContextSpy).registerComponentCallbacks(mComponentCallbacksCaptor.capture());
+        ComponentCallbacks componentCallbacks = mComponentCallbacksCaptor.getValue();
+
         View backButton = mBottomSheetView.findViewById(R.id.back_button);
         ImageView learnMoreButton = mBottomSheetView.findViewById(R.id.learn_more_button);
         RecyclerView recyclerView =
@@ -166,17 +175,18 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
         assertFalse(learnMoreButton.hasOnClickListeners());
         verify(adapterSpy).clearOnClickListeners();
         verify(mNtpSingleThemeCollectionCoordinator).destroy();
-        verify(mNtpThemeBridgeJniMock).destroy(eq(1L));
+        verify(mNtpThemeBridge).removeListener(any(ThemeCollectionSelectionListener.class));
+        verify(mContextSpy).unregisterComponentCallbacks(eq(componentCallbacks));
     }
 
     @Test
     public void testHandleThemeCollectionClick() {
         // Populate mThemeCollectionsList in the coordinator.
-        verify(mNtpThemeBridgeJniMock).getBackgroundCollections(eq(1L), mCallbackCaptor.capture());
-        Object[] collections = new Object[1];
-        collections[0] =
+        verify(mNtpThemeBridge).getBackgroundCollections(mCallbackCaptor.capture());
+        List<BackgroundCollection> collections = new ArrayList<>();
+        collections.add(
                 new BackgroundCollection(
-                        TEST_COLLECTION_ID, TEST_COLLECTION_TITLE, JUnitTestGURLs.EXAMPLE_URL);
+                        TEST_COLLECTION_ID, TEST_COLLECTION_TITLE, JUnitTestGURLs.EXAMPLE_URL));
         mCallbackCaptor.getValue().onResult(collections);
         verify(mBottomSheetController).expandSheet();
 
@@ -184,9 +194,9 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
         RecyclerView recyclerView =
                 mBottomSheetView.findViewById(R.id.theme_collections_recycler_view);
         recyclerView.measure(
-                View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY));
-        recyclerView.layout(0, 0, 480, 800);
+        recyclerView.layout(0, 0, 400, 800);
 
         // Get the view for the first item.
         View themeCollectionView = recyclerView.getChildAt(0);
@@ -221,26 +231,58 @@ public class NtpThemeCollectionsCoordinatorUnitTest {
         NtpThemeCollectionsAdapter adapterSpy = spy(adapter);
         mCoordinator.setNtpThemeCollectionsAdapterForTesting(adapterSpy);
 
-        NtpThemeBridge ntpThemeBridge = mCoordinator.getNtpThemeBridgeForTesting();
+        verify(mNtpThemeBridge).addListener(mListenerCaptor.capture());
+        ThemeCollectionSelectionListener listener = mListenerCaptor.getValue();
 
         String collectionId = "test_id";
         GURL imageUrl = JUnitTestGURLs.URL_2;
-        ntpThemeBridge.setSelectedTheme(collectionId, imageUrl);
+        listener.onThemeCollectionSelectionChanged(collectionId, imageUrl);
 
         verify(adapterSpy).setSelection(eq(collectionId), eq(imageUrl));
     }
 
     @Test
     public void testClearThemeSelection() {
-        RecyclerView recyclerView =
-                mBottomSheetView.findViewById(R.id.theme_collections_recycler_view);
-        NtpThemeCollectionsAdapter adapter = (NtpThemeCollectionsAdapter) recyclerView.getAdapter();
-        NtpThemeCollectionsAdapter adapterSpy = spy(adapter);
-        mCoordinator.setNtpThemeCollectionsAdapterForTesting(adapterSpy);
-
         mCoordinator.clearThemeCollectionSelection();
 
-        // Verify that the adapter's selection is cleared via the listener callback.
-        verify(adapterSpy).setSelection(eq(null), eq(null));
+        verify(mNtpThemeBridge).setSelectedTheme(eq(null), eq(null));
+    }
+
+    @Test
+    public void testConfigurationChanged() {
+        verify(mContextSpy).registerComponentCallbacks(mComponentCallbacksCaptor.capture());
+        ComponentCallbacks componentCallbacks = mComponentCallbacksCaptor.getValue();
+
+        int initialScreenWidth = mCoordinator.getScreenWidthForTesting();
+
+        // Test that screen width is updated on configuration change.
+        Configuration newConfig = new Configuration(mContext.getResources().getConfiguration());
+        newConfig.screenWidthDp = 1000;
+        componentCallbacks.onConfigurationChanged(newConfig);
+
+        int screenWidthAfterChange = mCoordinator.getScreenWidthForTesting();
+        assertTrue(
+                "Screen width should change on configuration change.",
+                initialScreenWidth != screenWidthAfterChange);
+        assertEquals(
+                "Screen width should be updated to the new value.", 1000, screenWidthAfterChange);
+
+        // Test that screen width is not updated if it is the same.
+        componentCallbacks.onConfigurationChanged(newConfig);
+        assertEquals(
+                "Screen width should not change if configuration is the same.",
+                screenWidthAfterChange,
+                mCoordinator.getScreenWidthForTesting());
+
+        // Test that screen width is updated again with a different value.
+        newConfig.screenWidthDp = 500;
+        componentCallbacks.onConfigurationChanged(newConfig);
+        assertTrue(
+                "Screen width should change on configuration change again.",
+                screenWidthAfterChange != mCoordinator.getScreenWidthForTesting());
+        assertEquals(
+                "Screen width should be updated to the new value.",
+                500,
+                mCoordinator.getScreenWidthForTesting());
     }
 }

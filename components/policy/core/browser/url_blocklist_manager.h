@@ -11,10 +11,11 @@
 #include <map>
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/compiler_specific.h"
 #include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "components/policy/policy_export.h"
@@ -123,6 +124,8 @@ class POLICY_EXPORT URLBlocklistManager {
   void SetOverrideBlockListSource(
       std::unique_ptr<BlocklistSource> blocklist_source);
 
+  base::CallbackListSubscription AddObserver(base::RepeatingClosure callback);
+
  protected:
   // Used to delay updating the blocklist while the preferences are
   // changing, and execute only one update per simultaneous prefs changes.
@@ -150,6 +153,7 @@ class POLICY_EXPORT URLBlocklistManager {
   // The current blocklist.
   std::unique_ptr<URLBlocklist> blocklist_;
 
+  base::RepeatingClosureList observer_list_;
   // Used to post update tasks to the UI thread.
   base::WeakPtrFactory<URLBlocklistManager> ui_weak_ptr_factory_{this};
 };

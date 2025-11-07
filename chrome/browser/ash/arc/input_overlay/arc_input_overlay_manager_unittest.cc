@@ -174,8 +174,10 @@ class ArcInputOverlayManagerTest : public ChromeAshTestBase {
     arc_test_input_overlay_manager_ =
         base::WrapUnique(new TestArcInputOverlayManager());
 
-    profile_ = std::make_unique<TestingProfile>();
     arc_app_test_.set_wait_compatibility_mode(true);
+    arc_app_test_.PreProfileSetUp();
+
+    profile_ = std::make_unique<TestingProfile>();
     arc_app_test_.SetUp(profile_.get());
 
     SimulatedAppInstalled(task_environment(), arc_app_test_,
@@ -306,9 +308,9 @@ TEST_F(ArcInputOverlayManagerTest, TestWindowFocusChangeWithNullWidget) {
       std::make_unique<aura::test::TestWindowDelegate>();
   test_window_delegate->set_window_component(HTCAPTION);
   std::unique_ptr<aura::Window> window_no_widget(
-      CreateTestWindowInShellWithDelegateAndType(
-          test_window_delegate.get(), aura::client::WINDOW_TYPE_NORMAL, 0,
-          gfx::Rect(100, 100)));
+      CreateTestWindowInShell({.delegate = test_window_delegate.get(),
+                               .bounds = {100, 100},
+                               .window_id = 0}));
   EXPECT_FALSE(views::Widget::GetWidgetForNativeWindow(window_no_widget.get()));
 
   // Focus on the window without widget.

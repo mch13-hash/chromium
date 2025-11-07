@@ -344,7 +344,7 @@ DownloadBubbleRowView::DownloadBubbleRowView(
   views::InkDrop::UseInkDropForFloodFillRipple(views::InkDrop::Get(this),
                                                /*highlight_on_hover=*/true,
                                                /*highlight_on_focus=*/true);
-  views::InkDrop::Get(this)->SetBaseColorId(kColorDownloadBubbleRowHover);
+  views::InkDrop::Get(this)->SetBaseColor(kColorDownloadBubbleRowHover);
   views::InkDrop::Get(this)->SetHighlightOpacity(1.0f);
 
   const int icon_label_spacing = ChromeLayoutProvider::Get()->GetDistanceMetric(
@@ -638,7 +638,7 @@ void DownloadBubbleRowView::OnMainButtonPressed(const ui::Event& event) {
     return;
   }
   if (input_protector_->IsPossiblyUnintendedInteraction(
-          event, /*allow_key_events=*/true)) {
+          event, /*allow_key_events=*/false)) {
     return;
   }
   if (info_->has_subpage()) {
@@ -657,7 +657,7 @@ void DownloadBubbleRowView::OnActionButtonPressed(
     const ui::Event& event) {
   if (!bubble_controller_ || !info_->model() ||
       input_protector_->IsPossiblyUnintendedInteraction(
-          event, /*allow_key_events=*/true)) {
+          event, /*allow_key_events=*/false)) {
     return;
   }
   bubble_controller_->ProcessDownloadButtonPress(info_->model()->GetWeakPtr(),
@@ -801,7 +801,7 @@ void DownloadBubbleRowView::AddQuickAction(DownloadCommands::Command command) {
   quick_action->SetProperty(views::kMarginsKey, kRowInterElementPadding);
   quick_action->SetVisible(false);
   views::InkDrop::Get(quick_action)
-      ->SetBaseColorId(views::TypographyProvider::Get().GetColorId(
+      ->SetBaseColor(views::TypographyProvider::Get().GetColorId(
           views::style::CONTEXT_BUTTON, views::style::STYLE_SECONDARY));
   quick_actions_[command] = quick_action;
 }

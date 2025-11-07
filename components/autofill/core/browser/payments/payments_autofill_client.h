@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
+#include "base/functional/callback.h"
 #include "base/functional/callback_forward.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/data_model/payments/credit_card.h"
@@ -34,6 +36,7 @@ enum class AutofillProgressDialogType;
 class AutofillSaveCardBottomSheetBridge;
 class AutofillSaveIbanBottomSheetBridge;
 class BnplIssuer;
+struct BnplTosModel;
 struct CardUnmaskChallengeOption;
 class CardUnmaskDelegate;
 class AutofillProgressDialogController;
@@ -61,6 +64,7 @@ enum class WebauthnDialogCallbackType;
 
 namespace payments {
 
+struct BnplIssuerContext;
 class BnplStrategy;
 class BnplUiDelegate;
 class MandatoryReauthManager;
@@ -547,6 +551,10 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // defaults to false.
   virtual bool IsRiskBasedAuthEffectivelyAvailable() const = 0;
 
+  // Returns true if Mandatory Reauth is supported on this platform and enabled
+  // by the user, if applicable.
+  virtual bool IsMandatoryReauthEnabled() = 0;
+
   // Prompt the user to enable mandatory reauthentication for payment method
   // autofill. When enabled, the user will be asked to authenticate using
   // biometrics or device unlock before filling in payment method information.
@@ -578,6 +586,9 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // Gets an AutofillOfferManager instance (can be null for unsupported
   // platforms).
   virtual AutofillOfferManager* GetAutofillOfferManager() = 0;
+
+  // Gets a const version of the AutofillOfferManager.
+  const AutofillOfferManager* GetAutofillOfferManager() const;
 
   // TODO(crbug.com/40134864): Rename all the "domain" in this flow to origin.
   //                          The server is passing down full origin of the
@@ -623,36 +634,52 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // possible, returning `true` on success. Should be called only on Android if
   // the feature is supported by the platform.
   virtual bool UpdateTouchToFillBnplPaymentMethod(
-      std::optional<uint64_t> extracted_amount,
+      std::optional<int64_t> extracted_amount,
       bool is_amount_supported_by_any_issuer) = 0;
 
   // Shows the BNPL progress screen, if possible, returning `true` on success.
   // Should be called only on Android if the feature is supported by the
-  // platform. If `delegate` is present, it will be notified of events.
-  virtual bool ShowTouchToFillProgress(
-      base::WeakPtr<TouchToFillDelegate> delegate) = 0;
+  // platform. `cancel_callback` will be run if the screen is dismissed by the
+  // user. This function is not implemented on iOS and iOS WebView, and should
+  // not be used on those platforms.
+  virtual bool ShowTouchToFillProgress(base::OnceClosure cancel_callback) = 0;
 
   // Shows the Touch To Fill surface with BNPL issuer information, if possible,
-  // returning `true` on success. `delegate` will be notified of events. This
-  // function is not implemented on iOS and iOS WebView, and should not be used
-  // on those platforms.
+  // returning `true` on success. `bnpl_issuer_contexts` provides a read-only
+  // list of BNPL issuer contexts to be shown. `app_locale` provides the
+  // application's current language and region code for localization.
+  // `selected_issuer_callback` provides a one-time callback to be invoked when
+  // an issuer is selected. `cancel_callback` provides a one-time callback to be
+  // invoked to reset the BNPL flow. This function is not implemented on iOS
+  // and iOS WebView, and should not be used on those platforms.
   virtual bool ShowTouchToFillBnplIssuers(
-      base::WeakPtr<TouchToFillDelegate> delegate,
-      base::span<const BnplIssuer> bnpl_issuers_to_suggest) = 0;
+      base::span<const payments::BnplIssuerContext> bnpl_issuer_contexts,
+      const std::string& app_locale,
+      base::OnceCallback<void(BnplIssuer)> selected_issuer_callback,
+      base::OnceClosure cancel_callback) = 0;
+
+  // Shows the Touch To Fill surface with terms for linking a new BNPL issuer,
+  // if possible, returning `true` on success. This function is not implemented
+  // on iOS and iOS WebView, and should not be used on those platforms.
+  virtual bool ShowTouchToFillBnplTos(BnplTosModel bnpl_tos_model,
+                                      base::OnceClosure accept_callback,
+                                      base::OnceClosure cancel_callback) = 0;
 
   // Shows the BNPL error screen, if possible, returning `true` on success.
   // Should be called only on Android if the feature is supported by the
-  // platform. If `delegate` is present, it will be notified of events.
-  // `context` will decide what strings are displayed for the title and
-  // description.
+  // platform. `context` will decide what strings are displayed for the title
+  // and description.
   virtual bool ShowTouchToFillError(
-      base::WeakPtr<TouchToFillDelegate> delegate,
       const AutofillErrorDialogContext& context) = 0;
 
   // Hides the Touch To Fill surface for filling payment information if one is
   // currently shown. Should be called only if the feature is supported by the
   // platform.
   virtual void HideTouchToFillPaymentMethod() = 0;
+
+  // Sets the Touch To Fill surface visibility to `visible`. Should be called
+  // only if the feature is supported by the platform.
+  virtual void SetTouchToFillVisible(bool visible) = 0;
 
   // Return the `PaymentsDataManager` which is payments-specific version of
   // PersonalDataManager. It has two main responsibilities:
@@ -661,6 +688,9 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // - Posting changes to `AutofillTable` via the `AutofillWebDataService`
   //   and updating its state accordingly.
   virtual PaymentsDataManager& GetPaymentsDataManager() = 0;
+
+  // Gets a const version of the PaymentsDataManager.
+  const PaymentsDataManager& GetPaymentsDataManager() const;
 
 #if !BUILDFLAG(IS_IOS)
   // Creates the appropriate implementation of InternalAuthenticator. May be
@@ -678,6 +708,9 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // Gets the payments Save and Fill manager owned by the client. This will be
   // used to handle the Save and Fill dialog.
   virtual payments::SaveAndFillManager* GetSaveAndFillManager() = 0;
+
+  // Gets a const version of payments Save and Fill manager owned by the client.
+  const payments::SaveAndFillManager* GetSaveAndFillManager() const;
 
   // Shows the local `Save and Fill` modal dialog.
   virtual void ShowCreditCardLocalSaveAndFillDialog(
@@ -709,12 +742,6 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // Gets the `BnplUiDelegate` instance associated with the client. Handles the
   // UI in the BNPL flow depending on the platform.
   virtual BnplUiDelegate* GetBnplUiDelegate() = 0;
-
-  // Gets a const version of the AutofillOfferManager.
-  const AutofillOfferManager* GetAutofillOfferManager() const;
-
-  // Gets a const version of the PaymentsDataManager.
-  const PaymentsDataManager& GetPaymentsDataManager() const;
 };
 
 }  // namespace payments

@@ -5,10 +5,12 @@
 #ifndef CHROME_BROWSER_UI_LENS_LENS_OVERLAY_CONTROLLER_H_
 #define CHROME_BROWSER_UI_LENS_LENS_OVERLAY_CONTROLLER_H_
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -30,12 +32,9 @@
 #include "chrome/browser/ui/lens/lens_overlay_languages_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_query_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_translate_options.h"
-#include "chrome/browser/ui/lens/lens_preselection_bubble.h"
 #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_coordinator.h"
 #include "chrome/browser/ui/webui/searchbox/lens_searchbox_client.h"
-#include "chrome/common/chrome_render_frame.mojom.h"
 #include "components/content_extraction/content/browser/inner_text.h"
 #include "components/find_in_page/find_result_observer.h"
 #include "components/lens/lens_overlay_dismissal_source.h"
@@ -44,9 +43,7 @@
 #include "components/lens/lens_overlay_metrics.h"
 #include "components/lens/lens_overlay_mime_type.h"
 #include "components/lens/lens_overlay_side_panel_result.h"
-#include "components/lens/proto/server/lens_overlay_response.pb.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
-#include "components/optimization_guide/proto/features/common_quality_data.pb.h"
 #include "components/sessions/core/session_id.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/url_matcher/regex_set_matcher.h"
@@ -55,7 +52,6 @@
 #include "components/viz/common/frame_timing_details.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -65,6 +61,7 @@
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/mojom/window_open_disposition.mojom.h"
 #include "ui/views/view_observer.h"
+#include "ui/views/widget/widget_observer.h"
 
 #if BUILDFLAG(ENABLE_PDF)
 #include "pdf/mojom/pdf.mojom.h"
@@ -83,6 +80,10 @@ class LensSearchboxController;
 class LensSearchContextualizationController;
 struct SearchQuery;
 class SidePanelInUse;
+namespace proto {
+class LensOverlaySuggestInputs;
+class LensOverlayUrlResponse;
+}  // namespace proto
 }  // namespace lens
 
 namespace signin {
@@ -106,9 +107,10 @@ class View;
 class WebView;
 }  // namespace views
 
+class LensSearchController;
 class PrefService;
 class Profile;
-class LensSearchController;
+class SidePanelCoordinator;
 enum class SidePanelEntryHideReason;
 
 extern void* kLensOverlayPreselectionWidgetIdentifier;
@@ -178,6 +180,7 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
     // Showing an overlay without results.
     kOverlay,
 
+    // TODO(crbug.com/450638028): Remove this state and only keep kOverlay.
     // Showing an overlay with results.
     kOverlayAndResults,
 
@@ -270,6 +273,9 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
 
   // Returns true if the overlay is currently in the process of closing.
   bool IsOverlayClosing();
+
+  // Returns true if the overlay has a region selection.
+  bool HasRegionSelection() const;
 
   // Pass a result frame URL to load in the side panel.
   void LoadURLInResultsFrame(const GURL& url);
@@ -373,6 +379,9 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
 
   // Returns the current thumbnail URI for testing.
   const std::string& GetThumbnailForTesting();
+
+  // Clears the region selection for testing.
+  void ClearRegionSelectionForTesting();
 
   // Handles the event where text was modified in the searchbox for testing.
   void OnTextModifiedForTesting();
@@ -867,6 +876,7 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   void MaybeCloseTranslateFeaturePromo(bool feature_engaged) override;
   void FetchSupportedLanguages(
       FetchSupportedLanguagesCallback callback) override;
+  void FinishReshowOverlay() override;
 
   // Tries to show the translate feature promo after the translate button
   // element is shown.
@@ -910,6 +920,9 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // points since the state of the overlay has changed.
   void UpdateEntryPointsState();
 
+  // Notifies the side panel whether the overlay is showing.
+  void NotifyIsOverlayShowing(bool is_showing);
+
   // Callback to run when the partial page text is retrieved from the PDF.
   void OnPdfPartialPageTextRetrieved(
       std::vector<std::u16string> pdf_pages_text);
@@ -937,8 +950,15 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // created.
   void ReshowOverlayPart3(const SkBitmap& rgb_bitmap);
 
+  // Sets the opacity of the overlay web view. No-op if the web view does not
+  // exist.
+  void SetOverlayWebViewOpacity(float opacity);
+
   // Shorthand to grab the LensSearchboxController for this instance of Lens.
   lens::LensSearchboxController* GetLensSearchboxController();
+
+  // Shorthand to grab the LensOverlaySidePanelCoordinator for this instance of Lens.
+  lens::LensOverlaySidePanelCoordinator* GetLensOverlaySidePanelCoordinator();
 
   // Shorthand to grab the LensSearchContextualizationController for this
   // instance of Lens.
@@ -1138,6 +1158,8 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // be assumed to be non-null.
   raw_ptr<SidePanelCoordinator> side_panel_coordinator_ = nullptr;
 
+  // TODO(crbug.com/450336818): Remove this field and use the
+  // LensSearchController to get the side panel coordinator.
   // Side panel coordinator for the side panel coordinator that controls the
   // results side panel. Guaranteed to exist if the overlay is not `kOff`.
   raw_ptr<lens::LensOverlaySidePanelCoordinator>
@@ -1167,6 +1189,9 @@ class LensOverlayController : public lens::mojom::LensPageHandler,
   // Used to observe the immersive mode pref on Mac, and the side panel
   // horizontal alignment pref.
   PrefChangeRegistrar pref_change_registrar_;
+
+  // Whether to use AIM for visual searches.
+  bool use_aim_for_visual_search_ = false;
 
   // --------------------Browser window scoped state: END---------------------
 

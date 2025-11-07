@@ -70,6 +70,7 @@
 #include "chrome/browser/actor/ui/actor_overlay_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/ui/tabs/tab_group_home/tab_group_home_ui.h"
+#include "chrome/browser/ui/webui/reload_button/reload_button_ui.h"
 #include "chrome/browser/ui/webui_browser/webui_browser_ui.h"
 #if !BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ui/webui/app_home/app_home_ui.h"
@@ -94,6 +95,7 @@
 #include "chrome/browser/ui/webui/internals/internals_ui.h"
 #include "chrome/browser/ui/webui/tab_strip_internals/tab_strip_internals_ui.h"
 #endif  // BUILDFLAG(ENABLE_SESSION_SERVICE)
+#include "chrome/browser/ui/webui/legion_internals/legion_internals_ui.h"
 #include "chrome/browser/ui/webui/management/management_ui.h"
 #include "chrome/browser/ui/webui/media_router/media_router_internals_ui.h"
 #include "chrome/browser/ui/webui/new_tab_footer/new_tab_footer_ui.h"
@@ -317,6 +319,7 @@ void RegisterChromeWebUIConfigs() {
   map.AddWebUIConfig(std::make_unique<InternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<TabStripInternalsUIConfig>());
 #endif  // BUILDFLAG(ENABLE_SESSION_SERVICE)
+  map.AddWebUIConfig(std::make_unique<LegionInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<ManagementUIConfig>());
   map.AddWebUIConfig(
       std::make_unique<media_router::MediaRouterInternalsUIConfig>());
@@ -334,6 +337,7 @@ void RegisterChromeWebUIConfigs() {
       std::make_unique<commerce::ProductSpecificationsUIConfig>());
   map.AddWebUIConfig(std::make_unique<ProfileInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<ReadingListUIConfig>());
+  map.AddWebUIConfig(std::make_unique<ReloadButtonUIConfig>());
   map.AddWebUIConfig(std::make_unique<SearchEngineChoiceUIConfig>());
   map.AddWebUIConfig(std::make_unique<settings::SettingsUIConfig>());
   map.AddWebUIConfig(std::make_unique<ShoppingInsightsSidePanelUIConfig>());

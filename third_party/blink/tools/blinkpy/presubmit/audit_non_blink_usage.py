@@ -101,6 +101,11 @@ _CONFIG = [
             'base::i18n::TextDirection',
             'base::i18n::ToChar16Ptr',
             'base::i18n::ToUCharPtr',
+            'base::IdType',
+            'base::IdType32',
+            'base::IdType64',
+            'base::IdTypeU32',
+            'base::IdTypeU64',
             'base::JobDelegate',
             'base::JobHandle',
             'base::KiB',
@@ -231,6 +236,7 @@ _CONFIG = [
 
             # //base/metrics/histogram_functions.h
             'base::UmaHistogram.+',
+            'base::ScopedUmaHistogramTimer',
 
             # //base/metrics/histogram.h
             'base::Histogram',
@@ -651,6 +657,7 @@ _CONFIG = [
             'cc::VERTICAL',
 
             # Animation
+            "cc::PropertyChangeForcesCommitCriteria",
             "cc::AnimationHost",
             "cc::AnimationIdProvider",
             "cc::AnimationTimeline",
@@ -1321,6 +1328,7 @@ _CONFIG = [
     {
         'paths': ['third_party/blink/renderer/core/page'],
         'allowed': [
+            'cc::SkiaPaintCanvas',
             'touch_adjustment::.+',
             'viz::FrameSinkId',
         ],
@@ -1461,6 +1469,7 @@ _CONFIG = [
             'third_party/blink/public/platform/web_policy_container.h',
         ],
         'allowed': [
+            'network::ConnectionAllowlists',
             'network::IntegrityPolicy',
         ],
     },
@@ -1472,6 +1481,14 @@ _CONFIG = [
         ],
         'allowed': [
             'media::OutputDeviceStatus',
+        ],
+    },
+    {
+        'paths': [
+            'third_party/blink/public/platform/web_video_frame_submitter.h',
+        ],
+        'allowed': [
+            'gpu::SharedImageInterface',
         ],
     },
     {
@@ -1578,6 +1595,7 @@ _CONFIG = [
             'third_party/blink/renderer/controller/dev_tools_frontend_impl.cc',
             'third_party/blink/renderer/modules/credentialmanagement/authentication_credentials_container.cc',
             'third_party/blink/renderer/modules/credentialmanagement/digital_identity_credential.cc',
+            'third_party/blink/renderer/modules/credentialmanagement/identity_provider.cc',
             'third_party/blink/renderer/modules/filesystem/dev_tools_host_file_system.cc'
         ],
         'allowed': [
@@ -1962,6 +1980,7 @@ _CONFIG = [
             'cc::SkiaPaintCanvas',
             'cc::YUVIndex',
             'cc::YUVSubsampling',
+            'gfx::ContentColorUsage',
             'gpu::kNullSurfaceHandle',
             'gpu::Mailbox',
             'gpu::MailboxHolder',
@@ -1999,6 +2018,7 @@ _CONFIG = [
             'gpu::webgpu::WEBGPU_MAILBOX_NONE',
             'gpu::webgpu::WebGPUInterface',
             'media::PIXEL_FORMAT_NV12',
+            'media::PIXEL_FORMAT_RGBAF16',
             'switches::kEnableUnsafeWebGPU',
         ],
     },
@@ -2597,6 +2617,8 @@ _CONFIG = [
         'allowed': [
             'blink_mojom::.+',
             'webnn::.+',
+            'gpu::SharedImageInterface',
+            'viz::SinglePlaneFormat',
         ]
     },
     {
@@ -2716,6 +2738,7 @@ _CONFIG = [
             'third_party/blink/common/features.cc',
         ],
         'allowed': [
+            'net::HttpCache',
             'network::features::kBrowsingTopics',
             'network::features::kInterestGroupStorage',
             'network::features::kSharedStorageAPI',
@@ -2743,11 +2766,23 @@ _CONFIG = [
     },
     {
         'paths': [
-            'third_party/blink/renderer/modules/canvas/canvas_noise_test_util.h',
-            'third_party/blink/renderer/modules/canvas/canvas_noise_test_util.cc',
+            'third_party/blink/renderer/core/inspector/thread_debugger_common_impl.cc',
         ],
         'allowed': [
-            'viz::TestRasterInterface',
+            'gin::kThreadDebuggerCommonImplTag',
+        ]
+    },
+    {
+        'paths': [
+            'third_party/blink/renderer/core/xml/parser/xml_document_parser_rs.cc',
+            'third_party/blink/renderer/core/xml/parser/xml_document_parser_rs.h',
+            'third_party/blink/renderer/core/xml/parser/xml_ffi_callbacks.h',
+        ],
+        'allowed': [
+            'rust::(Str(ing)?|Box|Vec)',
+            'xml_ffi::.*',
+            'base::(StringViewToRustSlice|RustStrToStringView)',
+            're2::StringPiece',
         ]
     }
 ]

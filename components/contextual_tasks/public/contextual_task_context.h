@@ -10,19 +10,57 @@
 
 #include "base/uuid.h"
 #include "components/sessions/core/session_id.h"
+#include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
 namespace contextual_tasks {
+
+// Enum representing the different sources that can contribute to the context of
+// a contextual task.
+enum class ContextualTaskContextSource {
+  kFallbackTitle,
+  kFaviconService,
+  kHistoryService,
+  kTabStrip,
+};
 
 class ContextualTask;
 
 // Data block for UrlAttachment, intended to be modified only by
 // ContextDecorator implementations.
 struct UrlAttachmentDecoratorData {
+  UrlAttachmentDecoratorData();
+  ~UrlAttachmentDecoratorData();
+  UrlAttachmentDecoratorData(const UrlAttachmentDecoratorData&);
+  UrlAttachmentDecoratorData& operator=(const UrlAttachmentDecoratorData&);
+  UrlAttachmentDecoratorData(UrlAttachmentDecoratorData&&);
+  UrlAttachmentDecoratorData& operator=(UrlAttachmentDecoratorData&&);
+
+  // Filled in by ContextualTaskContextSource::kFallbackTitle.
   struct FallbackTitleData {
     std::u16string title;
   };
   FallbackTitleData fallback_title_data;
+
+  // Filled in by ContextualTaskContextSource::kFaviconService.
+  struct FaviconData {
+    gfx::Image image;
+    GURL icon_url;
+  };
+  FaviconData favicon_data;
+
+  // Filled in by ContextualTaskContextSource::kHistoryService.
+  struct HistoryData {
+    std::u16string title;
+  };
+  HistoryData history_data;
+
+  // Filled in by ContextualTaskContextSource::kTabStrip.
+  struct TabStripData {
+    std::u16string title;
+    bool is_open_in_tab_strip = false;
+  };
+  TabStripData tab_strip_data;
 };
 
 // Represents a URL that is attached to a `ContextualTask`. This struct contains
@@ -35,14 +73,18 @@ struct UrlAttachment {
   // Accessor methods.
   GURL GetURL() const;
   std::u16string GetTitle() const;
+  gfx::Image GetFavicon() const;
+  bool IsOpen() const;
+
+  // Gives access to internal data sources.
+  UrlAttachmentDecoratorData& GetMutableDecoratorDataForTesting();
 
  private:
   friend class ContextDecorator;
-  friend class ContextualTasksServiceImplTest;
 
   // ContextDecorator implementation can access this method through a protected
   // method.
-  UrlAttachmentDecoratorData& GetDecoratorData();
+  UrlAttachmentDecoratorData& GetMutableDecoratorData();
 
   // The URL that is attached.
   GURL url_;
@@ -73,9 +115,11 @@ struct ContextualTaskContext {
   // Returns the URL attachments for the task.
   const std::vector<UrlAttachment>& GetUrlAttachments() const;
 
+  // Returns a mutable version of the URL attachments for the task.
+  std::vector<UrlAttachment>& GetMutableUrlAttachmentsForTesting();
+
  private:
   friend class ContextDecorator;
-  friend class ContextualTasksServiceImplTest;
 
   // Returns a mutable version of the URL attachments for the task.
   std::vector<UrlAttachment>& GetMutableUrlAttachments();

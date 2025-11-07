@@ -325,6 +325,9 @@
       <message name="IDS_PROVIDED_BY_GOOGLE" desc="Generic label for something that comes from Google servers.">
         Provided by Google
       </message>
+      <message name="IDS_TURN_ON" desc="Generic label for a user to turn">
+        Turn on
+      </message>
 
       <message name="IDS_ACCESSIBILITY_TOOLBAR_BTN_FORWARD" desc="Content description for the forward navigation button.">
         Go forward
@@ -811,8 +814,8 @@
       <message name="IDS_ACCESSIBILITY_NEXT_SLIDE" desc="The accessibility text of the next slide button in a Picture-in-Picture window that allow users to navigate to the next slide.">
         Next slide
       </message>
-      <message name="IDS_ACCESSIBILITY_GO_TO_BACKGROUND" desc="The accessibility text for the button in a Picture-in-Picture window that closes the window and keeps the media playing in the background.">
-        Go to background
+      <message name="IDS_ACCESSIBILITY_LISTEN_IN_THE_BACKGROUND" desc="The accessibility text for the button in a Picture-in-Picture window that closes the window and keeps the media playing in the background.">
+        Listen in the background
       </message>
       <message name="IDS_MEDIA_NOTIFICATION_INCOGNITO" desc="Text used as a placeholder for a media notification about playing media, when notification is shown from Incognito tab.">
         A site is playing media
@@ -1062,6 +1065,12 @@
       <message name="IDS_JUMP_START_OMNIBOX_SUMMARY" desc="When this preference is enabled, Chrome start-up time is reduced, and the user is taken directly to an active Omnibox">
         Launch Chrome with the Omnibox focused, reducing start-up time on low-end devices.
       </message>
+      <message name="IDS_TOUCHPAD_OVERSCROLL_HISTORY_NAVIGATION_TITLE" desc="Title of the preference to enable swipe-to-navigate by touchpad horizontal overscroll">
+        Swipe between pages using a touchpad
+      </message>
+      <message name="IDS_TOUCHPAD_OVERSCROLL_HISTORY_NAVIGATION_SUMMARY" desc="Summary of the preference to enable swipe-to-navigate by touchpad horizontal overscroll">
+        Navigate back and forth by swiping with two fingers on the touchpad
+      </message>
 
       <message name="IDS_CARET_BROWSING_TITLE" desc="Title of preference that allows the user to navigate pages with a text caret.">
         Navigate pages with a text cursor when a keyboard is attached
@@ -1132,6 +1141,16 @@
       </message>
       <message name="IDS_PAGE_ZOOM_IPH_MESSAGE" desc="Text for in-product help bubble that appears to alert user of the new Zoom option in the main menu">
         You can zoom in or out on sites you visit
+      </message>
+      <!-- Zoom Indicator -->
+      <message name="IDS_ZOOM_BUTTON_CONTENT_DESCRIPTION" desc="Content description for the zoom indicator on the location bar.">
+        {ZOOM_PERCENTAGE, plural,
+          =1 {Zoom}
+          other {Zoom: <ph name="ZOOM_PERCENTAGE_NUMBER">%1$d<ex>120</ex></ph>%%}
+        }
+      </message>
+      <message name="IDS_PAGE_ZOOM_FULLSCREEN_BUTTON_CONTENT_DESCRIPTION" desc="Content description for the fullscreen button in the zoom menu.">
+        Fullscreen
       </message>
 
       <!-- Search resumption module strings -->

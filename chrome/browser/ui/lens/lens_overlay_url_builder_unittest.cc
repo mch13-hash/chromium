@@ -13,8 +13,10 @@
 #include "components/lens/lens_features.h"
 #include "net/base/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/lens_server_proto/lens_overlay_cluster_info.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_knowledge_intent_query.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_knowledge_query.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_request_id.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_selection_type.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_stickiness_signals.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_translate_stickiness_signals.pb.h"
@@ -847,28 +849,18 @@ TEST_F(LensOverlayUrlBuilderTest, ShouldOpenSearchURLInNewTab) {
       GURL(std::string(kResultsSearchBaseUrl) + "?udm=24");
   const GURL results_url_aim_mode =
       GURL(std::string(kResultsSearchBaseUrl) + "?udm=50");
-  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(base_results_url));
-  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(results_url_unimodal));
-  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(results_url_multimodal));
-  EXPECT_TRUE(lens::ShouldOpenSearchURLInNewTab(results_url_shopping_mode));
-  EXPECT_TRUE(lens::ShouldOpenSearchURLInNewTab(results_url_aim_mode));
-}
-
-TEST_F(LensOverlayUrlBuilderTest,
-       ShouldOpenSearchURLInNewTabWithAimInSidePanelFlag) {
-  feature_list_.Reset();
-  feature_list_.InitWithFeaturesAndParameters(
-      {{lens::features::kLensOverlay,
-        {
-            {"results-search-url", kResultsSearchBaseUrl},
-        }},
-       {lens::features::kLensSearchAimM3,
-        {{"open-aim-in-side-panel", "true"}}}},
-      /*disabled_features=*/{});
-  const GURL base_results_url = GURL(kResultsSearchBaseUrl);
-  const GURL results_url_mgt_mode =
-      GURL(std::string(kResultsSearchBaseUrl) + "?udm=50");
-  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(results_url_mgt_mode));
+  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(
+      base_results_url, /*is_aim_feature_enabled=*/false));
+  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(
+      results_url_unimodal, /*is_aim_feature_enabled=*/false));
+  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(
+      results_url_multimodal, /*is_aim_feature_enabled=*/false));
+  EXPECT_TRUE(lens::ShouldOpenSearchURLInNewTab(
+      results_url_shopping_mode, /*is_aim_feature_enabled=*/false));
+  EXPECT_TRUE(lens::ShouldOpenSearchURLInNewTab(
+      results_url_aim_mode, /*is_aim_feature_enabled=*/false));
+  EXPECT_FALSE(lens::ShouldOpenSearchURLInNewTab(
+      results_url_aim_mode, /*is_aim_feature_enabled=*/true));
 }
 
 TEST_F(LensOverlayUrlBuilderTest, URLsMatchWithoutTextFragment) {

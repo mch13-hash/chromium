@@ -55,6 +55,7 @@
 #include "components/permissions/request_type.h"
 #include "components/privacy_sandbox/privacy_sandbox_features.h"
 #include "components/safe_browsing/buildflags.h"
+#include "components/safe_browsing/core/browser/safe_browsing_metrics_collector.h"
 #include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/security_interstitials/content/stateful_ssl_host_state_delegate.h"
 #include "components/ssl_errors/error_info.h"
@@ -415,20 +416,6 @@ void PageInfo::OnThirdPartyToggleClicked(bool block_third_party_cookies) {
   show_info_bar_ = true;
 }
 
-void PageInfo::OnTrackingProtectionButtonPressed() {
-  DCHECK(controls_state_ == CookieControlsState::kPausedTp ||
-         controls_state_ == CookieControlsState::kActiveTp);
-  // Check current controls state to record metrics before updates are made via
-  // `OnTrackingProtectionsChangedForSite`.
-  RecordPageInfoAction(
-      controls_state_ == CookieControlsState::kActiveTp
-          ? page_info::PAGE_INFO_PRIVACY_PAGE_TRACKING_PROTECTIONS_PAUSED
-          : page_info::PAGE_INFO_PRIVACY_PAGE_TRACKING_PROTECTIONS_REENABLED);
-  controller_->OnTrackingProtectionsChangedForSite();
-  show_info_bar_ = true;
-  info_bar_reload_type_ = content::ReloadType::BYPASSING_CACHE;
-}
-
 // static
 bool PageInfo::IsPermissionFactoryDefault(const PermissionInfo& permission,
                                           bool is_incognito) {
@@ -639,10 +626,6 @@ void PageInfo::RecordPageInfoAction(page_info::PageInfoAction action) {
       base::RecordAction(base::UserMetricsAction(
           "PageInfo.CookiesSubpage.SyncSettingsLinkClicked"));
       break;
-    case page_info::PAGE_INFO_PRIVACY_PAGE_INCOGNITO_SETTINGS_OPENED:
-      base::RecordAction(base::UserMetricsAction(
-          "PageInfo.PrivacySubpage.IncognitoSettingsOpened"));
-      break;
     case page_info::PAGE_INFO_PRIVACY_PAGE_TRACKING_PROTECTIONS_REENABLED:
       base::RecordAction(base::UserMetricsAction(
           "PageInfo.PrivacySubpage.TrackingProtectionsReenabled"));
@@ -748,8 +731,11 @@ void PageInfo::OnSitePermissionChanged(
   }
 
   // Also clear heuristic grant data if user removes the granted state.
-  if (setting && (info->delegate().IsBlocked(*setting) ||
-                  info->delegate().IsUndecided(*setting))) {
+  if (base::FeatureList::IsEnabled(
+          permissions::features::kPermissionHeuristicAutoGrant) &&
+      setting &&
+      (info->delegate().IsBlocked(*setting) ||
+       info->delegate().IsUndecided(*setting))) {
     delegate_->GetPermissionActionsHistory()->ResetHeuristicData(site_url_,
                                                                  type);
   }
@@ -777,6 +763,19 @@ void PageInfo::OnSitePermissionChanged(
       content_settings::CanBeAutoRevokedAsUnusedPermission(
           type, info->delegate().ToValue(*setting), is_one_time)) {
     constraints.set_track_last_visit_for_autoexpiration(true);
+  }
+
+  // If notification permission changes from allowed to not allowed, log the
+  // histogram.
+  if (type == ContentSettingsType::NOTIFICATIONS &&
+      setting_old == CONTENT_SETTING_ALLOW &&
+      (!setting ||
+       ToContentSettingForMetrics(info, setting) == CONTENT_SETTING_ASK ||
+       ToContentSettingForMetrics(info, setting) == CONTENT_SETTING_BLOCK)) {
+    safe_browsing::SafeBrowsingMetricsCollector::
+        LogSafeBrowsingNotificationRevocationSourceHistogram(
+            safe_browsing::NotificationRevocationSource::
+                kUserManuallyChangedSiteSetting);
   }
 
   map->SetNarrowestContentSetting(primary_url, site_url_, type, setting,
@@ -849,8 +848,7 @@ void PageInfo::OnUIClosing(bool* reload_prompt) {
     *reload_prompt = false;
   }
   if (show_info_bar_ && web_contents_ && !web_contents_->IsBeingDestroyed()) {
-    if (delegate_->CreateInfoBarDelegate(info_bar_reload_type_) &&
-        reload_prompt) {
+    if (delegate_->CreateInfoBarDelegate() && reload_prompt) {
       *reload_prompt = true;
     }
   }
@@ -887,16 +885,6 @@ void PageInfo::OpenCookiesSettingsView() {
 #else
   RecordPageInfoAction(page_info::PAGE_INFO_COOKIES_SETTINGS_OPENED);
   delegate_->ShowCookiesSettings();
-#endif
-}
-
-void PageInfo::OpenIncognitoSettingsView() {
-#if BUILDFLAG(IS_ANDROID)
-  NOTREACHED();
-#else
-  RecordPageInfoAction(
-      page_info::PAGE_INFO_PRIVACY_PAGE_INCOGNITO_SETTINGS_OPENED);
-  delegate_->ShowIncognitoSettings();
 #endif
 }
 

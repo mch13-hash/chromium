@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/autofill/payments/filled_card_information_bubble_controller_impl.h"
 
 #include "base/task/single_thread_task_runner.h"
+#include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/autofill/autofill_bubble_base.h"
 #include "chrome/browser/ui/autofill/autofill_bubble_handler.h"
 #include "chrome/browser/ui/browser.h"
@@ -62,7 +63,7 @@ void FilledCardInformationBubbleControllerImpl::SetupAndShowBubble(
   // If another bubble is visible, dismiss it and show a new one since the card
   // information can be different.
   if (bubble_view()) {
-    HideBubble();
+    HideBubble(/*initiated_by_bubble_manager=*/false);
   }
 
   if (!MaySetUpBubble()) {
@@ -86,6 +87,7 @@ void FilledCardInformationBubbleControllerImpl::SetupAndShowBubble(
 
 void FilledCardInformationBubbleControllerImpl::SetupBubbleState(
     FilledCardInformationBubbleOptions options) {
+  was_bubble_shown_ = false;
   DCHECK(options.IsValid());
   options_ = std::move(options);
   is_user_gesture_ = false;
@@ -229,10 +231,14 @@ void FilledCardInformationBubbleControllerImpl::OnLinkClicked() {
       /*navigation_handle_callback=*/{});
 }
 
-void FilledCardInformationBubbleControllerImpl::OnBubbleClosed(
-    PaymentsUiClosedReason closed_reason) {
-  ResetBubbleViewAndInformBubbleManager();
+void FilledCardInformationBubbleControllerImpl::OnBubbleDiscarded() {
+  LogBubbleCloseMetrics(was_bubble_shown_
+                            ? PaymentsUiClosedReason::kNotInteracted
+                            : PaymentsUiClosedReason::kUnknown);
+}
 
+void FilledCardInformationBubbleControllerImpl::LogBubbleCloseMetrics(
+    PaymentsUiClosedReason closed_reason) {
   // Log bubble result according to the closed reason.
   autofill_metrics::FilledCardInformationBubbleResult metric;
   switch (closed_reason) {
@@ -249,7 +255,14 @@ void FilledCardInformationBubbleControllerImpl::OnBubbleClosed(
   }
   autofill_metrics::LogFilledCardInformationBubbleResultMetric(
       metric, is_user_gesture_);
+}
 
+void FilledCardInformationBubbleControllerImpl::OnBubbleClosed(
+    PaymentsUiClosedReason closed_reason) {
+  ResetBubbleViewAndInformBubbleManager();
+  if (!bubble_hide_initiated_by_bubble_manager_) {
+    LogBubbleCloseMetrics(closed_reason);
+  }
   UpdatePageActionIcon();
 }
 
@@ -355,13 +368,12 @@ void FilledCardInformationBubbleControllerImpl::PrimaryPageChanged(
   should_icon_be_visible_ = false;
   bubble_has_been_shown_ = false;
   UpdatePageActionIcon();
-  HideBubble();
+  HideBubble(/*initiated_by_bubble_manager=*/false);
 }
 
 void FilledCardInformationBubbleControllerImpl::OnVisibilityChanged(
     content::Visibility visibility) {
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillShowBubblesBasedOnPriorities)) {
+  if (IsBubbleManagerEnabled()) {
     // BubbleManager will handle the effects of tab changes.
     return;
   }
@@ -373,14 +385,20 @@ void FilledCardInformationBubbleControllerImpl::OnVisibilityChanged(
       should_icon_be_visible_) {
     QueueOrShowBubble();
   } else if (visibility == content::Visibility::HIDDEN) {
-    HideBubble();
+    HideBubble(/*initiated_by_bubble_manager=*/false);
   }
 }
 
-std::optional<PageActionIconType>
-FilledCardInformationBubbleControllerImpl::GetPageActionIconType() {
-  return PageActionIconType::kFilledCardInformation;
+#if !BUILDFLAG(IS_ANDROID)
+bool FilledCardInformationBubbleControllerImpl::ShouldShowPageAction() {
+  return ShouldIconBeVisible();
 }
+
+std::optional<actions::ActionId>
+FilledCardInformationBubbleControllerImpl::GetActionIdForPageAction() {
+  return kActionFilledCardInformation;
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 void FilledCardInformationBubbleControllerImpl::DoShowBubble() {
   if (!IsWebContentsActive()) {

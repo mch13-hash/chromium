@@ -188,20 +188,6 @@ WebContentsStateByteBuffer& WebContentsStateByteBuffer::operator=(
 WebContentsStateByteBuffer::WebContentsStateByteBuffer(
     WebContentsStateByteBuffer&& other) noexcept = default;
 
-WebContentsStateUnpacked::WebContentsStateUnpacked(
-    bool is_off_the_record,
-    int current_entry_index,
-    std::vector<sessions::SerializedNavigationEntry> navigations)
-    : is_off_the_record_(is_off_the_record),
-      current_entry_index_(current_entry_index),
-      navigations_(std::move(navigations)) {}
-WebContentsStateUnpacked::~WebContentsStateUnpacked() = default;
-
-ScopedJavaLocalRef<jobject> WebContentsStateUnpacked::Pack(JNIEnv* env) const {
-  return WriteSerializedNavigationsAsByteBuffer(
-      env, is_off_the_record_, navigations_, current_entry_index_);
-}
-
 ScopedJavaLocalRef<jobject> WebContentsState::GetContentsStateAsByteBuffer(
     JNIEnv* env,
     content::WebContents* web_contents) {
@@ -226,23 +212,6 @@ ScopedJavaLocalRef<jobject> WebContentsState::GetContentsStateAsByteBuffer(
   return WriteNavigationsAsByteBuffer(
       env, web_contents->GetBrowserContext()->IsOffTheRecord(), navigations,
       controller.GetLastCommittedEntryIndex());
-}
-
-std::unique_ptr<WebContentsStateUnpacked> WebContentsState::Unpack(
-    base::span<const uint8_t> buffer,
-    int saved_state_version) {
-  bool is_off_the_record;
-  int current_entry_index;
-  std::vector<sessions::SerializedNavigationEntry> navigations;
-  bool success = WebContentsState::ExtractNavigationEntries(
-      buffer, saved_state_version, &is_off_the_record, &current_entry_index,
-      &navigations);
-  if (!success) {
-    return nullptr;
-  }
-
-  return std::make_unique<WebContentsStateUnpacked>(
-      is_off_the_record, current_entry_index, std::move(navigations));
 }
 
 ScopedJavaLocalRef<jobject>
@@ -499,6 +468,7 @@ ScopedJavaLocalRef<jobject> WebContentsState::AppendPendingNavigation(
     BrowserContext* browser_context,
     base::span<const uint8_t> buffer,
     int saved_state_version,
+    bool clobber_current_entry,
     const std::optional<std::u16string>& title,
     const std::string& url,
     const std::optional<std::string>& referrer_url,
@@ -523,8 +493,9 @@ ScopedJavaLocalRef<jobject> WebContentsState::AppendPendingNavigation(
         initiator_origin);
   }
 
-  int new_entry_index = current_entry_index + 1;
-  navigations.erase(std::next(navigations.begin(), new_entry_index), navigations.end());
+  int new_entry_index = current_entry_index + (clobber_current_entry ? 0 : 1);
+  navigations.erase(std::next(navigations.begin(), new_entry_index),
+                    navigations.end());
   std::unique_ptr<content::NavigationEntry> new_entry =
       CreatePendingNavigationEntry(browser_context, title, url, referrer_url,
                                    referrer_policy, initiator_origin);
@@ -594,6 +565,7 @@ static ScopedJavaLocalRef<jobject> JNI_WebContentsState_AppendPendingNavigation(
     Profile* profile,
     const JavaParamRef<jobject>& state,
     int saved_state_version,
+    jboolean clobber_current_entry,
     std::optional<std::u16string>& title,
     std::string& url,
     std::optional<std::string>& referrer_url,
@@ -603,8 +575,8 @@ static ScopedJavaLocalRef<jobject> JNI_WebContentsState_AppendPendingNavigation(
       base::android::JavaByteBufferToSpan(env, state);
 
   return WebContentsState::AppendPendingNavigation(
-      env, profile, span, saved_state_version, title, url, referrer_url,
-      referrer_policy, initiator_origin);
+      env, profile, span, saved_state_version, clobber_current_entry, title,
+      url, referrer_url, referrer_policy, initiator_origin);
 }
 
 static std::optional<std::u16string>

@@ -39,7 +39,7 @@
 #import "ios/chrome/browser/settings/ui_bundled/password/widget_promo_instructions/widget_promo_instructions_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/settings_root_table_constants.h"
 #import "ios/chrome/browser/signin/model/fake_system_identity.h"
-#import "ios/chrome/common/ui/confirmation_alert/constants.h"
+#import "ios/chrome/common/ui/button_stack/button_stack_constants.h"
 #import "ios/chrome/common/ui/reauthentication/reauthentication_event.h"
 #import "ios/chrome/common/ui/reauthentication/reauthentication_protocol.h"
 #import "ios/chrome/common/ui/table_view/table_view_cells_constants.h"
@@ -361,8 +361,7 @@ id<GREYMatcher> PasswordManagerWidgetPromoInstructions() {
 // instruction screen.
 id<GREYMatcher> PasswordManagerWidgetPromoInstructionsCloseButton() {
   return grey_allOf(
-      grey_accessibilityID(
-          kConfirmationAlertSecondaryActionAccessibilityIdentifier),
+      grey_accessibilityID(kButtonStackSecondaryActionAccessibilityIdentifier),
       grey_interactable(), nullptr);
 }
 
@@ -4139,9 +4138,7 @@ void OpenPasswordManagerWidgetPromoInstructions() {
       assertWithMatcher:grey_sufficientlyVisible()];
 }
 
-// TODO(crbug.com/440119404): Re-enable after roll is complete and testers are
-// also updated.
-- (void)DISABLED_testSwipingAnotherAffiliatedGroupWhenAnotherIsInEditMode {
+- (void)testSwipingAnotherAffiliatedGroupWhenAnotherIsInEditMode {
   // Form an affiliated group with two passwords.
   SavePasswordFormToProfileStore(/*password=*/@"password1",
                                  /*username=*/@"user1",

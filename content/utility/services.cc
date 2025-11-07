@@ -37,12 +37,6 @@
 #include "services/tracing/tracing_service.h"
 #include "services/video_capture/public/mojom/video_capture_service.mojom.h"
 #include "services/video_capture/video_capture_service_impl.h"
-#include "services/video_effects/public/cpp/buildflags.h"
-
-#if BUILDFLAG(ENABLE_VIDEO_EFFECTS)
-#include "services/video_effects/public/mojom/video_effects_service.mojom.h"  // nogncheck
-#include "services/video_effects/video_effects_service_impl.h"  // nogncheck
-#endif
 
 #if BUILDFLAG(IS_MAC)
 #include "base/apple/mach_logging.h"
@@ -337,18 +331,6 @@ auto RunVideoCapture(
   return service;
 }
 
-#if BUILDFLAG(ENABLE_VIDEO_EFFECTS)
-auto RunVideoEffects(
-    mojo::PendingReceiver<video_effects::mojom::VideoEffectsService> receiver) {
-  if (base::FeatureList::IsEnabled(media::kCameraMicEffects)) {
-    return std::make_unique<video_effects::VideoEffectsServiceImpl>(
-        std::move(receiver), UtilityThread::Get()->GetIOTaskRunner());
-  }
-
-  return std::unique_ptr<video_effects::VideoEffectsServiceImpl>{};
-}
-#endif
-
 auto RunOnDeviceModel(
     mojo::PendingReceiver<on_device_model::mojom::OnDeviceModelService>
         receiver) {
@@ -376,7 +358,7 @@ auto RunOOPArcVideoAcceleratorFactoryService(
 auto RunOOPVideoDecoderFactoryProcessService(
     mojo::PendingReceiver<media::mojom::VideoDecoderFactoryProcess> receiver) {
   return std::make_unique<media::OOPVideoDecoderFactoryProcessService>(
-      std::move(receiver));
+      std::move(receiver), ChildProcess::current()->io_task_runner());
 }
 
 auto RunVideoEncodeAcceleratorProviderFactory(
@@ -402,10 +384,6 @@ void RegisterIOThreadServices(mojo::ServiceFactory& services) {
   // loop of type IO that can get notified when pipes have data.
   services.Add(RunNetworkService);
 
-#if BUILDFLAG(USE_LINUX_VIDEO_ACCELERATION)
-  services.Add(RunOOPVideoDecoderFactoryProcessService);
-#endif
-
   // Add new IO-thread services above this line.
   GetContentClient()->utility()->RegisterIOThreadServices(services);
 }
@@ -419,8 +397,8 @@ void RegisterMainThreadServices(mojo::ServiceFactory& services) {
   services.Add(RunTracing);
   services.Add(RunVideoCapture);
 
-#if BUILDFLAG(ENABLE_VIDEO_EFFECTS)
-  services.Add(RunVideoEffects);
+#if BUILDFLAG(USE_LINUX_VIDEO_ACCELERATION)
+  services.Add(RunOOPVideoDecoderFactoryProcessService);
 #endif
 
   if (optimization_guide::features::CanLaunchOnDeviceModelService()) {

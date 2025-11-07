@@ -8,6 +8,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 import static org.chromium.chrome.browser.notifications.NotificationConstants.ACTION_REPORT_AS_SAFE;
 import static org.chromium.chrome.browser.notifications.NotificationConstants.ACTION_REPORT_UNWARNED_NOTIFICATION_AS_SPAM;
 import static org.chromium.chrome.browser.notifications.NotificationConstants.ACTION_REPORT_WARNED_NOTIFICATION_AS_SPAM;
+import static org.chromium.chrome.browser.notifications.NotificationConstants.PENDING_INTENT_REQUEST_CODE;
 import static org.chromium.components.content_settings.PrefNames.NOTIFICATIONS_VIBRATE_ENABLED;
 
 import android.app.Notification;
@@ -96,10 +97,6 @@ public class NotificationPlatformBridge {
     // integer id is not needed anymore except it must not vary in an uncontrolled way.
     public static final int PLATFORM_ID = -1;
 
-    // We always use the same request code for pending intents. We use other ways to force
-    // uniqueness of pending intents when necessary.
-    static final int PENDING_INTENT_REQUEST_CODE = 0;
-
     static final int[] EMPTY_VIBRATION_PATTERN = new int[0];
 
     // The duration after which the "provisionally unsubscribed" service notification is auto-closed
@@ -159,7 +156,7 @@ public class NotificationPlatformBridge {
         public final String webApkPackage;
         public final @Nullable String channelId;
 
-        public NotificationIdentifyingAttributes(
+        NotificationIdentifyingAttributes(
                 String notificationId,
                 @NotificationType int notificationType,
                 String origin,
@@ -284,7 +281,7 @@ public class NotificationPlatformBridge {
                 notificationManager.cancel(attributes.notificationId, PLATFORM_ID);
                 // Check if the committed unsubscribe action is facilitated by a notification
                 // warning. If it is, then log metrics and cleanup static maps.
-                NotificationContentDetectionManager.onUnsubscribeMaybeCommittedAfterWarning(
+                NotificationContentDetectionManager.onPreUnsubscribeMaybeCommittedAfterWarning(
                         attributes.notificationId, attributes.origin);
                 return true;
             case NotificationConstants.ACTION_SHOW_ORIGINAL_NOTIFICATION:
@@ -312,8 +309,8 @@ public class NotificationPlatformBridge {
                         SuspiciousNotificationWarningInteractions
                                 .REPORT_WARNED_NOTIFICATION_AS_SPAM);
                 // Reporting a warned notification also commits the unsubscribe action that is
-                // facilitated by the warning, so call this to log metrics and cleanup static maps.
-                NotificationContentDetectionManager.onUnsubscribeMaybeCommittedAfterWarning(
+                // facilitated by the warning, so call this to log metrics.
+                NotificationContentDetectionManager.onPreUnsubscribeMaybeCommittedAfterWarning(
                         attributes.notificationId, attributes.origin);
                 return true;
             case NotificationConstants.ACTION_REPORT_UNWARNED_NOTIFICATION_AS_SPAM:
@@ -545,16 +542,10 @@ public class NotificationPlatformBridge {
         // ever get called with ACTION_PRE_UNSUBSCRIBE when displaying a web notification, which
         // implies native is running, making this a non-issue. Neverthelerss, removing support for
         // startService-type intents would be the cleanest solution here.
-        boolean useServiceIntent =
-                NotificationConstants.ACTION_PRE_UNSUBSCRIBE.equals(action)
-                        && NotificationIntentInterceptor
-                                .shouldUseServiceIntentForPreUnsubscribeAction();
         Intent intent = new Intent(action, intentData);
         intent.setClass(
                 context,
-                useServiceIntent
-                        ? NotificationService.class
-                        : NotificationServiceImpl.Receiver.class);
+                NotificationServiceImpl.Receiver.class);
 
         // Make sure to update NotificationJobService.getJobExtrasFromIntent() when changing any
         // of the extras included with the |intent|.
@@ -578,16 +569,6 @@ public class NotificationPlatformBridge {
         // receiver gets a shorter timeout interval before it may be killed, but this is ok because
         // we schedule a job to handle the intent in NotificationService.Receiver.
         intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
-
-        if (useServiceIntent) {
-            return PendingIntentProvider.getService(
-                    context,
-                    PENDING_INTENT_REQUEST_CODE,
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT,
-                    mutable);
-        }
-
         return PendingIntentProvider.getBroadcast(
                 context,
                 PENDING_INTENT_REQUEST_CODE,
@@ -934,8 +915,7 @@ public class NotificationPlatformBridge {
                 isSuspicious
                         && ChromeFeatureList.isEnabled(
                                 ChromeFeatureList.SHOW_WARNINGS_FOR_SUSPICIOUS_NOTIFICATIONS);
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.NOTIFICATION_ONE_TAP_UNSUBSCRIBE)
-                && identifyingAttributes.notificationType == NotificationType.WEB_PERSISTENT
+        if (identifyingAttributes.notificationType == NotificationType.WEB_PERSISTENT
                 && !skipUAButtons
                 && !shouldTreatNotificationAsSuspicious) {
             appendUnsubscribeButton(notificationBuilder, identifyingAttributes);
@@ -1701,7 +1681,12 @@ public class NotificationPlatformBridge {
                         identifyingAttributes.notificationType,
                         identifyingAttributes.origin,
                         identifyingAttributes.profileId,
-                        identifyingAttributes.incognito);
+                        identifyingAttributes.incognito,
+                        NotificationContentDetectionManager.isNotificationSuspicious(
+                                identifyingAttributes.notificationId,
+                                identifyingAttributes.origin));
+        NotificationContentDetectionManager.removeOriginFromSuspiciousMap(
+                identifyingAttributes.origin);
         var backups =
                 sOriginsWithProvisionallyRevokedPermissions.remove(identifyingAttributes.origin);
         NotificationUmaTracker.getInstance()
@@ -1909,7 +1894,8 @@ public class NotificationPlatformBridge {
                 @NotificationType int notificationType,
                 @JniType("std::string") String origin,
                 @JniType("std::string") @Nullable String profileId,
-                boolean incognito);
+                boolean incognito,
+                boolean isSuspicious);
 
         void onNotificationShowOriginalNotification(
                 long nativeNotificationPlatformBridgeAndroid,

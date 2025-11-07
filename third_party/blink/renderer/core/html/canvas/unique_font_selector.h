@@ -38,8 +38,11 @@ class CORE_EXPORT UniqueFontSelector
   void RegisterForInvalidationCallbacks(FontSelectorClient* client);
 
  private:
+  friend class OffscreenCanvasTest;
+  friend class UniqueFontSelectorTest;
+
   // MemoryPressureListener override:
-  void OnPurgeMemory() override;
+  void OnMemoryPressure(base::MemoryPressureLevel) override;
 
   Member<FontSelector> base_selector_;
 

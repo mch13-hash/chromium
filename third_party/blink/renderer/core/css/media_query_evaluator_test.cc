@@ -13,7 +13,9 @@
 #include "third_party/blink/public/common/privacy_budget/identifiable_surface.h"
 #include "third_party/blink/public/common/privacy_budget/identifiable_token.h"
 #include "third_party/blink/public/common/privacy_budget/scoped_identifiability_test_sample_collector.h"
+#include "third_party/blink/renderer/core/css/css_numeric_literal_value.h"
 #include "third_party/blink/renderer/core/css/media_list.h"
+#include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/core/css/media_values.h"
 #include "third_party/blink/renderer/core/css/media_values_cached.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_stream.h"
@@ -463,8 +465,7 @@ MediaQueryEvaluatorTestCase g_float_cast_overflow_cases[] = {
 };
 
 void TestMQEvaluator(base::span<MediaQueryEvaluatorTestCase> test_cases,
-                     const MediaQueryEvaluator* media_query_evaluator,
-                     CSSParserMode mode) {
+                     const MediaQueryEvaluator* media_query_evaluator) {
   MediaQuerySet* query_set = nullptr;
   for (const MediaQueryEvaluatorTestCase& test_case : test_cases) {
     if (String(test_case.input).empty()) {
@@ -472,17 +473,11 @@ void TestMQEvaluator(base::span<MediaQueryEvaluatorTestCase> test_cases,
     } else {
       StringView str(test_case.input);
       CSSParserTokenStream stream(str);
-      query_set =
-          MediaQueryParser::ParseMediaQuerySetInMode(stream, mode, nullptr);
+      query_set = MediaQueryParser::ParseMediaQuerySet(stream, nullptr);
     }
     EXPECT_EQ(test_case.output, media_query_evaluator->Eval(*query_set))
         << "Query: " << test_case.input;
   }
-}
-
-void TestMQEvaluator(base::span<MediaQueryEvaluatorTestCase> test_cases,
-                     const MediaQueryEvaluator* media_query_evaluator) {
-  TestMQEvaluator(test_cases, media_query_evaluator, kHTMLStandardMode);
 }
 
 TEST(MediaQueryEvaluatorTest, Cached) {
@@ -1188,36 +1183,30 @@ TEST(MediaQueryEvaluatorTest, ExpNode) {
   EXPECT_EQ(KleeneValue::kTrue, media_query_evaluator->Eval(*width_lt_600));
   EXPECT_EQ(KleeneValue::kFalse, media_query_evaluator->Eval(*width_lt_400));
 
-  EXPECT_EQ(KleeneValue::kTrue,
-            media_query_evaluator->Eval(
-                *MakeGarbageCollected<MediaQueryNestedExpNode>(width_lt_600)));
-  EXPECT_EQ(KleeneValue::kFalse,
-            media_query_evaluator->Eval(
-                *MakeGarbageCollected<MediaQueryNestedExpNode>(width_lt_400)));
-
-  EXPECT_EQ(KleeneValue::kFalse,
-            media_query_evaluator->Eval(
-                *MakeGarbageCollected<MediaQueryNotExpNode>(width_lt_600)));
-  EXPECT_EQ(KleeneValue::kTrue,
-            media_query_evaluator->Eval(
-                *MakeGarbageCollected<MediaQueryNotExpNode>(width_lt_400)));
-
   EXPECT_EQ(KleeneValue::kTrue, media_query_evaluator->Eval(
-                                    *MakeGarbageCollected<MediaQueryAndExpNode>(
-                                        width_lt_600, width_lt_800)));
+                                    *ConditionalExpNode::Nested(width_lt_600)));
   EXPECT_EQ(
       KleeneValue::kFalse,
-      media_query_evaluator->Eval(*MakeGarbageCollected<MediaQueryAndExpNode>(
-          width_lt_600, width_lt_400)));
+      media_query_evaluator->Eval(*ConditionalExpNode::Nested(width_lt_400)));
 
+  EXPECT_EQ(KleeneValue::kFalse, media_query_evaluator->Eval(
+                                     *ConditionalExpNode::Not(width_lt_600)));
   EXPECT_EQ(KleeneValue::kTrue, media_query_evaluator->Eval(
-                                    *MakeGarbageCollected<MediaQueryOrExpNode>(
-                                        width_lt_600, width_lt_400)));
-  EXPECT_EQ(
-      KleeneValue::kFalse,
-      media_query_evaluator->Eval(*MakeGarbageCollected<MediaQueryOrExpNode>(
-          width_lt_400,
-          MakeGarbageCollected<MediaQueryNotExpNode>(width_lt_800))));
+                                    *ConditionalExpNode::Not(width_lt_400)));
+
+  EXPECT_EQ(KleeneValue::kTrue,
+            media_query_evaluator->Eval(
+                *ConditionalExpNode::And(width_lt_600, width_lt_800)));
+  EXPECT_EQ(KleeneValue::kFalse,
+            media_query_evaluator->Eval(
+                *ConditionalExpNode::And(width_lt_600, width_lt_400)));
+
+  EXPECT_EQ(KleeneValue::kTrue,
+            media_query_evaluator->Eval(
+                *ConditionalExpNode::Or(width_lt_600, width_lt_400)));
+  EXPECT_EQ(KleeneValue::kFalse,
+            media_query_evaluator->Eval(*ConditionalExpNode::Or(
+                width_lt_400, ConditionalExpNode::Not(width_lt_800))));
 }
 
 TEST(MediaQueryEvaluatorTest, DependentResults) {
@@ -1282,8 +1271,7 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
     MediaQueryResultFlags result_flags;
 
     media_query_evaluator->Eval(
-        *MakeGarbageCollected<MediaQueryNestedExpNode>(device_width_lt_600),
-        &result_flags);
+        *ConditionalExpNode::Nested(device_width_lt_600), &result_flags);
 
     EXPECT_FALSE(result_flags.is_viewport_dependent);
     EXPECT_TRUE(result_flags.is_device_dependent);
@@ -1293,9 +1281,8 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
   {
     MediaQueryResultFlags result_flags;
 
-    media_query_evaluator->Eval(
-        *MakeGarbageCollected<MediaQueryNotExpNode>(device_width_lt_600),
-        &result_flags);
+    media_query_evaluator->Eval(*ConditionalExpNode::Not(device_width_lt_600),
+                                &result_flags);
 
     EXPECT_FALSE(result_flags.is_viewport_dependent);
     EXPECT_TRUE(result_flags.is_device_dependent);
@@ -1306,9 +1293,9 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
   {
     MediaQueryResultFlags result_flags;
 
-    media_query_evaluator->Eval(*MakeGarbageCollected<MediaQueryAndExpNode>(
-                                    width_lt_400, device_width_lt_600),
-                                &result_flags);
+    media_query_evaluator->Eval(
+        *ConditionalExpNode::And(width_lt_400, device_width_lt_600),
+        &result_flags);
 
     EXPECT_TRUE(result_flags.is_viewport_dependent);
     EXPECT_TRUE(result_flags.is_device_dependent);
@@ -1323,9 +1310,8 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
     MediaQueryResultFlags result_flags;
 
     media_query_evaluator->Eval(
-        *MakeGarbageCollected<MediaQueryAndExpNode>(
-            MakeGarbageCollected<MediaQueryNotExpNode>(width_lt_400),
-            device_width_lt_600),
+        *ConditionalExpNode::And(ConditionalExpNode::Not(width_lt_400),
+                                 device_width_lt_600),
         &result_flags);
 
     EXPECT_TRUE(result_flags.is_viewport_dependent);
@@ -1340,9 +1326,9 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
   {
     MediaQueryResultFlags result_flags;
 
-    media_query_evaluator->Eval(*MakeGarbageCollected<MediaQueryOrExpNode>(
-                                    width_lt_400, device_width_lt_600),
-                                &result_flags);
+    media_query_evaluator->Eval(
+        *ConditionalExpNode::Or(width_lt_400, device_width_lt_600),
+        &result_flags);
 
     EXPECT_TRUE(result_flags.is_viewport_dependent);
     EXPECT_FALSE(result_flags.is_device_dependent);
@@ -1354,9 +1340,8 @@ TEST(MediaQueryEvaluatorTest, DependentResults) {
     MediaQueryResultFlags result_flags;
 
     media_query_evaluator->Eval(
-        *MakeGarbageCollected<MediaQueryOrExpNode>(
-            MakeGarbageCollected<MediaQueryNotExpNode>(width_lt_400),
-            device_width_lt_600),
+        *ConditionalExpNode::Or(ConditionalExpNode::Not(width_lt_400),
+                                device_width_lt_600),
         &result_flags);
 
     EXPECT_TRUE(result_flags.is_viewport_dependent);
@@ -1822,6 +1807,19 @@ TEST_F(MediaQueryEvaluatorIdentifiabilityTest,
                 IdentifiableToken(
                     IdentifiableSurface::MediaFeatureName::kScripting)));
   EXPECT_EQ(entry.metrics.begin()->value, IdentifiableToken(Scripting::kNone));
+}
+
+TEST(MediaQueryEvaluatorTest, TestQueriesWithUndefinedCustomMedias) {
+  MediaValuesCached::MediaValuesCachedData data;
+  auto* media_values = MakeGarbageCollected<MediaValuesCached>(data);
+  MediaQueryEvaluator* media_query_evaluator =
+      MakeGarbageCollected<MediaQueryEvaluator>(media_values);
+
+  MediaQueryEvaluatorTestCase test_cases[] = {
+      {"(--undefined)", false},
+  };
+
+  TestMQEvaluator(test_cases, media_query_evaluator);
 }
 
 }  // namespace blink

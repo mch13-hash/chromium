@@ -31,6 +31,7 @@
 #include "chrome/browser/web_applications/generated_icon_fix_util.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolated_web_app_integrity_block_data.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolation_data.h"
+#include "chrome/browser/web_applications/model/app_installed_by.h"
 #include "chrome/browser/web_applications/proto/web_app.pb.h"
 #include "chrome/browser/web_applications/proto/web_app_install_state.pb.h"
 #include "chrome/browser/web_applications/proto/web_app_launch_handler.pb.h"
@@ -1353,7 +1354,8 @@ std::unique_ptr<WebApp> ParseWebAppProto(const proto::WebApp& proto) {
         proto.pending_update_info().trusted_icons().empty() &&
         proto.pending_update_info().manifest_icons().empty() &&
         proto.pending_update_info().downloaded_trusted_icons().empty() &&
-        proto.pending_update_info().downloaded_manifest_icons().empty()) {
+        proto.pending_update_info().downloaded_manifest_icons().empty() &&
+        !proto.pending_update_info().has_was_ignored()) {
       return nullptr;
     }
 
@@ -1398,6 +1400,14 @@ std::unique_ptr<WebApp> ParseWebAppProto(const proto::WebApp& proto) {
         }
       }
     }
+
+    // The `was_ignored` field should always be set, and default initialized by
+    // database migration in case of proto version differences. This not being
+    // set is an error case.
+    if (!proto.pending_update_info().has_was_ignored()) {
+      return nullptr;
+    }
+
     web_app->SetPendingUpdateInfo(proto.pending_update_info());
   }
 
@@ -1429,6 +1439,18 @@ std::unique_ptr<WebApp> ParseWebAppProto(const proto::WebApp& proto) {
     return nullptr;
   }
   web_app->SetBorderlessUrlPatterns(std::move(borderless_url_patterns.value()));
+
+  std::deque<AppInstalledBy> installed_by_data;
+  for (const auto& installed_by_proto : proto.installed_by()) {
+    std::optional<AppInstalledBy> installed_by =
+        AppInstalledBy::Parse(installed_by_proto);
+    if (!installed_by.has_value()) {
+      DLOG(ERROR) << "WebApp proto Installed By field parse error";
+      return nullptr;
+    }
+    installed_by_data.push_back(std::move(installed_by.value()));
+  }
+  web_app->SetInstalledBy(InstalledByPassKey(), std::move(installed_by_data));
 
   return web_app;
 }
@@ -1960,6 +1982,7 @@ std::unique_ptr<proto::WebApp> WebAppToProto(const WebApp& web_app) {
         CHECK(icon.has_url() && icon.has_size_in_px() && icon.has_purpose());
       }
     }
+    CHECK(web_app.pending_update_info()->has_was_ignored());
     *local_data->mutable_pending_update_info() = *web_app.pending_update_info();
   }
 
@@ -1979,6 +2002,10 @@ std::unique_ptr<proto::WebApp> WebAppToProto(const WebApp& web_app) {
 
   for (const auto& pattern : web_app.borderless_url_patterns()) {
     *(local_data->add_borderless_url_patterns()) = ToUrlPatternProto(pattern);
+  }
+
+  for (const auto& installed_by_data : web_app.installed_by()) {
+    *(local_data->add_installed_by()) = installed_by_data.ToProto();
   }
 
   return local_data;

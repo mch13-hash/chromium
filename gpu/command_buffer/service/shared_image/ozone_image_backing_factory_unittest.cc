@@ -20,6 +20,7 @@
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_utils.h"
 #include "ui/gl/init/gl_factory.h"
+#include "ui/ozone/public/ozone_platform.h"
 
 namespace gpu {
 
@@ -605,7 +606,7 @@ TEST_F(OzoneImageBackingFactoryTest, CorrectlyDestroysAndMarksContextLost) {
 }
 
 TEST_F(OzoneImageBackingFactoryTest, CreateGpuMemoryBufferHandle) {
-  for (auto format : gfx::GetBufferFormatsForTesting()) {
+  for (auto format : viz::GetMappableSharedImageFormatForTesting()) {
     gfx::BufferUsage usages[] = {
         gfx::BufferUsage::GPU_READ,
         gfx::BufferUsage::SCANOUT,
@@ -621,16 +622,15 @@ TEST_F(OzoneImageBackingFactoryTest, CreateGpuMemoryBufferHandle) {
         gfx::BufferUsage::SCANOUT_FRONT_RENDERING,
     };
     for (auto usage : usages) {
-      if (!gpu::GpuMemoryBufferSupport::
-              IsNativeGpuMemoryBufferConfigurationSupportedForTesting(format,
-                                                                      usage)) {
+      if (!ui::OzonePlatform::GetInstance()->IsNativePixmapConfigSupported(
+              viz::SharedImageFormatToBufferFormat(format), usage)) {
         continue;
       }
 
       gfx::GpuMemoryBufferHandle handle =
           OzoneImageBackingFactory::CreateGpuMemoryBufferHandle(
-              /*vulkan_context_provider=*/nullptr, gfx::Size(2, 2),
-              viz::GetSharedImageFormat(format), usage);
+              /*vulkan_context_provider=*/nullptr, gfx::Size(2, 2), format,
+              usage);
       EXPECT_EQ(handle.type, gfx::NATIVE_PIXMAP);
     }
   }

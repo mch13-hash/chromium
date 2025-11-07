@@ -10,14 +10,16 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequence_checker.h"
 #include "build/build_config.h"
-#include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
+#include "components/services/storage/public/mojom/cache_storage_control.mojom-forward.h"
 #include "content/common/content_export.h"
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
 #include "mojo/public/cpp/bindings/unique_receiver_set.h"
-#include "third_party/blink/public/mojom/cache_storage/cache_storage.mojom.h"
+#include "net/base/network_isolation_key.h"
+#include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom.h"
 
 class GURL;
@@ -114,7 +116,8 @@ class CONTENT_EXPORT CodeCacheHostImpl : public blink::mojom::CodeCacheHost {
       CodeCacheHostImplTest,
       PersistentCacheLockedAndUnlockedProcessesShareNoData);
 
-  bool IsPersistentCacheForCodeCacheEnabled();
+  bool IsPersistentCacheForCodeCacheEnabled(
+      blink::mojom::CodeCacheType cache_type);
 
   // blink::mojom::CodeCacheHost implementation.
   void DidGenerateCacheableMetadata(blink::mojom::CodeCacheType cache_type,

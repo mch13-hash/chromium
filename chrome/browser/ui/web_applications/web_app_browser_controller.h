@@ -76,6 +76,10 @@ class WebAppBrowserController : public AppBrowserController,
   WebAppBrowserController& operator=(const WebAppBrowserController&) = delete;
   ~WebAppBrowserController() override;
 
+  // Returns the web app controller if `browser` is a web app and the controller
+  // is a WebAppBrowserController, otherwise null.
+  static WebAppBrowserController* From(BrowserWindowInterface* browser);
+
   // AppBrowserController:
   using HomeTabCallbackList = base::OnceCallbackList<void()>;
   bool HasMinimalUiButtons() const override;
@@ -113,6 +117,7 @@ class WebAppBrowserController : public AppBrowserController,
   gfx::Rect GetDefaultBounds() const override;
   bool HasReloadButton() const override;
   bool HasPendingUpdate() const override;
+  bool HasPendingUpdateNotIgnoredByUser() const override;
   void CreateMetadataAndTriggerAppUpdateDialog(
       base::TimeTicks start_time) const override;
 #if BUILDFLAG(IS_CHROMEOS)
@@ -152,6 +157,8 @@ class WebAppBrowserController : public AppBrowserController,
   void OnTabRemoved(content::WebContents* contents) override;
 
  private:
+  bool did_notify_first_tab_ = false;
+
   mutable HomeTabCallbackList home_tab_callback_list_;
   const WebAppRegistrar& registrar() const;
   const WebAppInstallManager& install_manager() const;

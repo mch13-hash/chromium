@@ -24,7 +24,9 @@ import androidx.annotation.ColorInt;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Px;
 import androidx.annotation.StyleRes;
+import androidx.appcompat.content.res.AppCompatResources;
 import androidx.appcompat.widget.AppCompatTextView;
+import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.widget.ImageViewCompat;
 
 import org.chromium.build.annotations.EnsuresNonNullIf;
@@ -37,6 +39,7 @@ import org.chromium.ui.widget.ChromeImageView;
 import org.chromium.ui.widget.LoadingView;
 import org.chromium.ui.widget.RectProvider;
 import org.chromium.ui.widget.RippleBackgroundHelper;
+import org.chromium.ui.widget.RippleBackgroundHelper.BorderType;
 import org.chromium.ui.widget.ViewRectProvider;
 
 /**
@@ -82,7 +85,7 @@ public class ChipView extends LinearLayout {
     private @MonotonicNonNull ViewGroup mEndIconWrapper;
     private @MonotonicNonNull LinearLayout mTextViewsWrapper;
     private @MonotonicNonNull AppCompatTextView mSecondaryText;
-    private int mMaxWidth = Integer.MAX_VALUE;
+    private @Px int mMaxWidth = Integer.MAX_VALUE;
 
     /** Constructor for applying a theme overlay. */
     public ChipView(Context context, @StyleRes int themeOverlay) {
@@ -201,7 +204,7 @@ public class ChipView extends LinearLayout {
 
         mStartIcon = new ChromeImageView(getContext());
         mStartIcon.setId(R.id.chip_view_start_icon);
-        mStartIcon.setLayoutParams(new LayoutParams(iconWidth, iconHeight));
+        mStartIcon.setLayoutParams(new LinearLayout.LayoutParams(iconWidth, iconHeight));
         addView(mStartIcon);
 
         if (mUseRoundedStartIcon) {
@@ -223,7 +226,7 @@ public class ChipView extends LinearLayout {
                 loadingViewHeightPadding,
                 loadingViewWidthPadding,
                 loadingViewHeightPadding);
-        addView(mLoadingView, new LayoutParams(iconWidth, iconHeight));
+        addView(mLoadingView, new LinearLayout.LayoutParams(iconWidth, iconHeight));
 
         // Setting this enforces 16dp padding at the end and 8dp at the start (unless overridden).
         // For text, the start padding needs to be 16dp which is why a ChipTextView contributes the
@@ -236,6 +239,12 @@ public class ChipView extends LinearLayout {
         mPrimaryText.setTextAppearance(primaryTextAppearance);
         // Reduce font padding if the text is aligned vertically.
         mPrimaryText.setIncludeFontPadding(!alignTextVertically);
+        // Default layout parameters used for vertically oriented linear layout are (MATCH_PARENT,
+        // WRAP_CONTENT). Chip view isn't measured correctly with these layout parameters. For more
+        // information, see crbug.com/450830784.
+        mPrimaryText.setLayoutParams(
+                new LinearLayout.LayoutParams(
+                        LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
 
         // If false fall back to single line defined in XML styles.
         if (allowMultipleLines) {
@@ -277,7 +286,7 @@ public class ChipView extends LinearLayout {
                         chipStrokeColorId,
                         chipBorderWidthId,
                         verticalInset);
-        setIcon(INVALID_ICON_ID, false);
+        setIconWithTint(INVALID_ICON_ID, /* tintWithTextColor= */ false);
 
         updateLayoutDirection();
     }
@@ -297,10 +306,53 @@ public class ChipView extends LinearLayout {
     }
 
     /**
-     * Sets the icon at the start of the chip view.
+     * Sets the icon at the start of the chip view. If the {@code tintWithTextColor} is set to
+     * {@code true}, applies the primary text's tint to the icon. TODO: crbug.com/454608496 - Rename
+     * to setIcon once the other method is removed.
+     *
+     * @param icon The resource id pointing to the icon.
+     * @param tintWithTextColor Whether to change the icon's tint to match the primary text's tint.
+     */
+    public void setIconWithTint(@DrawableRes int iconId, boolean tintWithTextColor) {
+        if (iconId == INVALID_ICON_ID) {
+            mStartIcon.setVisibility(ViewGroup.GONE);
+            return;
+        }
+        Drawable icon = AppCompatResources.getDrawable(getContext(), iconId);
+        setIconWithTint(icon, tintWithTextColor);
+    }
+
+    /**
+     * Sets the icon at the start of the chip view. If the {@code tintWithTextColor} is set to
+     * {@code true}, applies the primary text's tint to the icon. TODO: crbug.com/454608496 - Rename
+     * to setIcon once the other method is removed.
+     *
+     * @param drawable Drawable to display.
+     * @param tintWithTextColor Whether to change the icon's tint to match the primary text's tint.
+     */
+    public void setIconWithTint(@Nullable Drawable drawable, boolean tintWithTextColor) {
+        if (drawable == null) {
+            mStartIcon.setVisibility(ViewGroup.GONE);
+            return;
+        }
+
+        mStartIcon.setVisibility(ViewGroup.VISIBLE);
+        if (tintWithTextColor) {
+            // Do not set tint on the `mStartIcon` because the tint in the `ImageView` cannot be
+            // fully reset: `ImageView::setImageTintList(null)` will always reset the original tint
+            // of the `Drawable` the `ImageView` is displaying.
+            DrawableCompat.setTintList(drawable, mPrimaryText.getTextColors());
+        }
+        mStartIcon.setImageDrawable(drawable);
+    }
+
+    /**
+     * Sets the icon at the start of the chip view. TODO: crbug.com/454608496 - Remove once this
+     * method is no longer used.
      *
      * @param icon The resource id pointing to the icon.
      */
+    @Deprecated(since = "Use setIconWithTint(int, boolean) instead", forRemoval = true)
     public void setIcon(@DrawableRes int icon, boolean tintWithTextColor) {
         if (icon == INVALID_ICON_ID) {
             mStartIcon.setVisibility(ViewGroup.GONE);
@@ -313,10 +365,12 @@ public class ChipView extends LinearLayout {
     }
 
     /**
-     * Sets the icon at the start of the chip view.
+     * Sets the icon at the start of the chip view. TODO: crbug.com/454608496 - Remove once this
+     * method is no longer used.
      *
      * @param drawable Drawable to display.
      */
+    @Deprecated(since = "Use setIconWithTint(Drawable, boolean) instead", forRemoval = true)
     public void setIcon(@Nullable Drawable drawable, boolean tintWithTextColor) {
         if (drawable == null) {
             mStartIcon.setVisibility(ViewGroup.GONE);
@@ -410,7 +464,7 @@ public class ChipView extends LinearLayout {
         mEndIconWrapper.addView(endIcon, layoutParams);
         addView(
                 mEndIconWrapper,
-                new LayoutParams(
+                new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // Remove the end padding from the chip to make X icon touch target extend till the end of
@@ -458,6 +512,12 @@ public class ChipView extends LinearLayout {
                             new ContextThemeWrapper(getContext(), R.style.ChipTextView));
             mSecondaryText.setId(R.id.chip_view_secondary_text);
             mSecondaryText.setTextAppearance(mSecondaryTextAppearanceId);
+            // Default layout parameters used for vertically oriented linear layout are
+            // (MATCH_PARENT, WRAP_CONTENT). Chip view isn't measured correctly with these layout
+            // parameters. For more information, see crbug.com/450830784.
+            mSecondaryText.setLayoutParams(
+                    new LinearLayout.LayoutParams(
+                            LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
             // Reduce font padding if the text is aligned vertically.
             mSecondaryText.setIncludeFontPadding(isSingleLineChip());
             // Ensure that basic state changes are aligned with the ChipView. They update
@@ -513,8 +573,8 @@ public class ChipView extends LinearLayout {
      * @param width of the border in pixels.
      * @param color of the border.
      */
-    public void setBorder(int width, @ColorInt int color) {
-        mRippleBackgroundHelper.setBorder(width, color);
+    public void setBorder(int width, @Nullable ColorStateList color) {
+        mRippleBackgroundHelper.setBorder(width, color, BorderType.SOLID);
     }
 
     @Override
@@ -542,8 +602,26 @@ public class ChipView extends LinearLayout {
      *
      * @param maxWidth of the chip in px.
      */
-    public void setMaxWidth(int maxWidth) {
+    public void setMaxWidth(@Px int maxWidth) {
+        // Remove any existing width constraints. The new maximum width will take effect after the
+        // next view measurement.
+        mPrimaryText.setMaxWidth(Integer.MAX_VALUE);
+        mPrimaryText.setEllipsize(null);
+        if (isTwoLineChip() && mSecondaryText != null) {
+            mSecondaryText.setMaxWidth(Integer.MAX_VALUE);
+            mSecondaryText.setEllipsize(null);
+        }
         mMaxWidth = maxWidth;
+    }
+
+    /**
+     * Returns the max width of this {@link ChipView}. Returns Integer.MAX_VALUE if this {@link
+     * ChipView} doesn't have width constraints.
+     *
+     * @return the max width set to this {@link ChipView}.
+     */
+    public @Px int getMaxWidth() {
+        return mMaxWidth;
     }
 
     /**
@@ -557,22 +635,14 @@ public class ChipView extends LinearLayout {
         // If the chip width exceeds the maximum allowed size, resize the contents to respect the
         // width constraint.
         if (getMeasuredWidth() > mMaxWidth) {
-            // Subtract padding and icon width first.
-            int newTextWidth =
-                    mMaxWidth
-                            - getPaddingLeft()
-                            - getPaddingRight()
-                            - ((mStartIcon != null && mStartIcon.getVisibility() != GONE)
-                                    ? mStartIcon.getMeasuredWidth()
-                                    : 0);
-
-            if (isSingleLineChip()) {
-                // If the text views are stacked horizontally, reduce the primary text view size.
-                newTextWidth -=
-                        ((mSecondaryText != null && mSecondaryText.getVisibility() != GONE)
-                                ? mSecondaryText.getMeasuredWidth()
-                                : 0);
-            }
+            final int textWidth =
+                    isSingleLineChip()
+                            ? mPrimaryText.getMeasuredWidth()
+                            : mTextViewsWrapper.getMeasuredWidth();
+            final int excessWidth = getMeasuredWidth() - mMaxWidth;
+            // The text width should be reduced by the difference between the actual width and the
+            // width constraint imposed on this ChipView.
+            final int newTextWidth = textWidth - excessWidth;
 
             // TODO (crbug.com/1376691): The primary text must be at least a few pixels wide,
             // else only the ellipses will be visible. If there is space for displaying the
@@ -586,18 +656,20 @@ public class ChipView extends LinearLayout {
                     mSecondaryText.setMaxWidth(newTextWidth);
                     mSecondaryText.setEllipsize(TextUtils.TruncateAt.END);
                 }
+                super.onMeasure(
+                        MeasureSpec.makeMeasureSpec(mMaxWidth, MeasureSpec.EXACTLY),
+                        heightMeasureSpec);
             } else if (isSingleLineChip()
                     && mSecondaryText != null
                     && mSecondaryText.getVisibility() != GONE) {
                 // If the text views are stacked horizontally and the second text view is displayed,
                 // hide the primary text view.
                 mPrimaryText.setVisibility(GONE);
-            } else {
-                return;
+                super.onMeasure(
+                        MeasureSpec.makeMeasureSpec(
+                                getMeasuredWidth() - textWidth, MeasureSpec.EXACTLY),
+                        heightMeasureSpec);
             }
-
-            super.onMeasure(
-                    MeasureSpec.makeMeasureSpec(mMaxWidth, MeasureSpec.EXACTLY), heightMeasureSpec);
         }
     }
 
@@ -609,7 +681,8 @@ public class ChipView extends LinearLayout {
         textViewsWrapper.setId(R.id.chip_view_text_wrapper);
         textViewsWrapper.setOrientation(LinearLayout.VERTICAL);
         textViewsWrapper.setLayoutParams(
-                new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+                new LinearLayout.LayoutParams(
+                        LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
         return textViewsWrapper;
     }
 

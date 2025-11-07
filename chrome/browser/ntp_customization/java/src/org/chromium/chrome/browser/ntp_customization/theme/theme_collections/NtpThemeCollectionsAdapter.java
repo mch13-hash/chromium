@@ -7,18 +7,20 @@ package org.chromium.chrome.browser.ntp_customization.theme.theme_collections;
 import static org.chromium.chrome.browser.ntp_customization.theme.theme_collections.NtpThemeCollectionsAdapter.ThemeCollectionsItemType.SINGLE_THEME_COLLECTION_ITEM;
 import static org.chromium.chrome.browser.ntp_customization.theme.theme_collections.NtpThemeCollectionsAdapter.ThemeCollectionsItemType.THEME_COLLECTIONS_ITEM;
 
-import android.support.annotation.IntDef;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
+import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils;
 import org.chromium.chrome.browser.ntp_customization.R;
 import org.chromium.components.image_fetcher.ImageFetcher;
 import org.chromium.url.GURL;
@@ -95,6 +97,24 @@ public class NtpThemeCollectionsAdapter extends RecyclerView.Adapter<RecyclerVie
                         R.layout.ntp_customization_theme_collections_list_item_layout,
                         parent,
                         false);
+
+        ImageView imageView = view.findViewById(R.id.theme_collection_image);
+        ConstraintLayout.LayoutParams lp =
+                (ConstraintLayout.LayoutParams) imageView.getLayoutParams();
+
+        if (viewType == THEME_COLLECTIONS_ITEM) {
+            lp.height =
+                    parent.getContext()
+                            .getResources()
+                            .getDimensionPixelSize(
+                                    R.dimen.ntp_customization_theme_collections_list_item_height);
+            lp.dimensionRatio = null;
+        } else if (viewType == SINGLE_THEME_COLLECTION_ITEM) {
+            lp.height = ConstraintLayout.LayoutParams.MATCH_CONSTRAINT;
+            lp.dimensionRatio = "1:1";
+        }
+        imageView.setLayoutParams(lp);
+
         return new ThemeCollectionViewHolder(view);
     }
 
@@ -188,11 +208,9 @@ public class NtpThemeCollectionsAdapter extends RecyclerView.Adapter<RecyclerVie
         // Clear the previous image to avoid showing stale images in recycled views.
         viewHolder.mImage.setImageDrawable(null);
 
-        ImageFetcher.Params params =
-                ImageFetcher.Params.create(
-                        imageUrl, ImageFetcher.NTP_CUSTOMIZATION_THEME_COLLECTION_NAME);
-        mImageFetcher.fetchImage(
-                params,
+        NtpCustomizationUtils.fetchThemeCollectionImage(
+                mImageFetcher,
+                imageUrl,
                 (bitmap) -> {
                     // Before setting the bitmap, check if the ImageView is still
                     // supposed to display this image.

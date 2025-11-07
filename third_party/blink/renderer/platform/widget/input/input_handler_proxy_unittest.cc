@@ -5,10 +5,12 @@
 #include "third_party/blink/renderer/platform/widget/input/input_handler_proxy.h"
 
 #include <memory>
+#include <optional>
 
 #include "base/containers/circular_deque.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -27,6 +29,7 @@
 #include "components/input/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_gesture_device.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
@@ -301,14 +304,32 @@ InputHandlerProxy::EventDisposition HandleInputEventAndFlushEventQueue(
 
 class InputHandlerProxyEventQueueTest
     : public testing::Test,
-      public ::testing::WithParamInterface<bool> {
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
   InputHandlerProxyEventQueueTest() = default;
 
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatureState(
-        input::features::kUpdateScrollPredictorInputMapping,
-        /* enabled= */ GetParam());
+    std::vector<base::test::FeatureRefAndParams> enabled_features;
+    std::vector<base::test::FeatureRef> disabled_features;
+
+    if (std::get<0>(GetParam())) {
+      enabled_features.push_back(
+          {input::features::kUpdateScrollPredictorInputMapping, {}});
+    } else {
+      disabled_features.push_back(
+          input::features::kUpdateScrollPredictorInputMapping);
+    }
+
+    if (std::get<1>(GetParam())) {
+      enabled_features.push_back(
+          {features::kRefactorCompositorThreadEventQueue, {}});
+    } else {
+      disabled_features.push_back(
+          features::kRefactorCompositorThreadEventQueue);
+    }
+
+    scoped_feature_list_.InitWithFeaturesAndParameters(enabled_features,
+                                                       disabled_features);
 
     input_handler_proxy_ = std::make_unique<TestInputHandlerProxy>(
         mock_input_handler_, &mock_client_);
@@ -317,6 +338,14 @@ class InputHandlerProxyEventQueueTest
   }
 
   ~InputHandlerProxyEventQueueTest() override = default;
+
+  bool IsUpdateScrollPredictorInputMappingEnabled() const {
+    return std::get<0>(GetParam());
+  }
+
+  bool IsRefactorCompositorThreadEventQueueEnabled() const {
+    return std::get<1>(GetParam());
+  }
 
   void HandleGestureEvent(WebInputEvent::Type type,
                           float delta_y_or_scale = 0,
@@ -1130,8 +1159,7 @@ TEST_P(InputHandlerProxyTest, HitTestTouchEventNonNullTouchAction) {
 }
 
 TEST_P(InputHandlerProxyEventQueueTest, DeliverInputForDeadlineIsScheduled) {
-  // GetParam() is true when kUpdateScrollPredictorInputMapping is enabled.
-  if (GetParam()) {
+  if (IsUpdateScrollPredictorInputMappingEnabled()) {
     return;
   }
 
@@ -1360,7 +1388,7 @@ TEST_P(InputHandlerProxyEventQueueTest, FilterOutEmptyUpdates) {
   enabled_features.push_back({::features::kSendEmptyGestureScrollUpdate,
                               {{"filter_out_empty_updates", "true"}}});
 
-  if (GetParam()) {
+  if (IsUpdateScrollPredictorInputMappingEnabled()) {
     // kUpdateScrollPredictorInputMapping is ENABLED. Disable synthetic
     // prediction for this test.
     enabled_features.push_back(
@@ -2377,15 +2405,29 @@ TEST_P(InputHandlerProxyEventQueueTest, VSyncAlignedGestureScroll) {
 
   HandleGestureEvent(WebInputEvent::Type::kGestureScrollUpdate, -40);
 
-  // Second GestureScrollUpdate will be queued without coalescing yet.
-  EXPECT_EQ(2ul, event_queue().size());
+  // The event queue size varies based on the RefactorCompositorThreadEventQueue
+  // feature, which affects event coalescing and queueing, thus influencing
+  // UpdateScrollPredictorInputMapping behavior.
+  if (IsRefactorCompositorThreadEventQueueEnabled()) {
+    // Second GestureScrollUpdate will be queued without coalescing yet.
+    EXPECT_EQ(2ul, event_queue().size());
+  } else {
+    EXPECT_EQ(1ul, event_queue().size());
+  }
   EXPECT_EQ(1ul, event_disposition_recorder_.size());
 
   EXPECT_CALL(mock_input_handler_, RecordScrollEnd(_)).Times(0);
   HandleGestureEvent(WebInputEvent::Type::kGestureScrollEnd);
 
-  // GestureScrollEnd will be queued.
-  EXPECT_EQ(3ul, event_queue().size());
+  // The event queue size varies based on the
+  // RefactorCompositorThreadEventQueue feature, which affects event
+  // coalescing and queueing, thus influencing
+  // UpdateScrollPredictorInputMapping behavior.
+  if (IsRefactorCompositorThreadEventQueueEnabled()) {
+    EXPECT_EQ(3ul, event_queue().size());
+  } else {
+    EXPECT_EQ(2ul, event_queue().size());
+  }
   EXPECT_EQ(1ul, event_disposition_recorder_.size());
   testing::Mock::VerifyAndClearExpectations(&mock_input_handler_);
 
@@ -2504,7 +2546,14 @@ TEST_P(InputHandlerProxyEventQueueTest,
   HandleGestureEvent(WebInputEvent::Type::kGestureScrollUpdate, -5);
   HandleGestureEvent(WebInputEvent::Type::kGestureScrollEnd);
 
-  EXPECT_EQ(10ul, event_queue().size());
+  // The event queue size varies based on the RefactorCompositorThreadEventQueue
+  // feature, which affects event coalescing and queueing, thus influencing
+  // UpdateScrollPredictorInputMapping behavior.
+  if (IsRefactorCompositorThreadEventQueueEnabled()) {
+    EXPECT_EQ(10ul, event_queue().size());
+  } else {
+    EXPECT_EQ(8ul, event_queue().size());
+  }
   EXPECT_EQ(2ul, event_disposition_recorder_.size());
 
   GetInputHandlerProxy()->DispatchQueuedInputEventsHelper();
@@ -2657,8 +2706,15 @@ TEST_P(InputHandlerProxyEventQueueTest, VSyncAlignedCoalesceTouchpadPinch) {
   HandleGestureEventWithSourceDevice(WebInputEvent::Type::kGesturePinchEnd,
                                      WebGestureDevice::kTouchpad);
 
-  // All the events are simply queued.
-  EXPECT_EQ(4ul, event_queue().size());
+  // The event queue size varies based on the RefactorCompositorThreadEventQueue
+  // feature, which affects event coalescing and queueing, thus influencing
+  // UpdateScrollPredictorInputMapping behavior.
+  if (IsRefactorCompositorThreadEventQueueEnabled()) {
+    // All the events are simply queued.
+    EXPECT_EQ(4ul, event_queue().size());
+  } else {
+    EXPECT_EQ(3ul, event_queue().size());
+  }
   EXPECT_EQ(1ul, event_disposition_recorder_.size());
 
   EXPECT_CALL(mock_input_handler_, PinchGestureUpdate(1.21f, _));
@@ -2739,9 +2795,17 @@ TEST_P(InputHandlerProxyEventQueueTest, OriginalEventsTracing) {
       trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_NESTABLE_ASYNC_END),
       &end_events);
 
-  // All 12 queued events should have a trace slice.
-  EXPECT_EQ(12ul, begin_events.size());
-  EXPECT_EQ(12ul, end_events.size());
+  // The number of trace events depends on whether the
+  // RefactorCompositorThreadEventQueue feature is enabled, as it changes how
+  // events are processed and traced, impacting the behavior of
+  // UpdateScrollPredictorInputMapping.
+  if (IsRefactorCompositorThreadEventQueueEnabled()) {
+    EXPECT_EQ(12ul, begin_events.size());
+    EXPECT_EQ(12ul, end_events.size());
+  } else {
+    EXPECT_EQ(7ul, begin_events.size());
+    EXPECT_EQ(7ul, end_events.size());
+  }
 
   // Filter for only the events that were dispatched.
   trace_analyzer::TraceEventVector dispatched_events;
@@ -3112,8 +3176,7 @@ TEST_P(InputHandlerProxyEventQueueTest, QueueInputForLateBeginFrameArgs) {
   // This test verifies the legacy deadline-based dispatch
   // mode, which is superseded by the kUpdateScrollPredictorInputMapping
   // feature. It should only run when the new feature is disabled.
-  if (GetParam()) {  // GetParam() is true when the feature
-                     // UpdateScrollPredictorInputMapping is enabled.
+  if (IsUpdateScrollPredictorInputMappingEnabled()) {
     return;
   }
 
@@ -3620,10 +3683,16 @@ INSTANTIATE_TEST_SUITE_P(All,
 INSTANTIATE_TEST_SUITE_P(
     All,
     InputHandlerProxyEventQueueTest,
-    ::testing::Bool(),
-    [](auto& info) {
-      return info.param ? "UpdateScrollPredictorInputMapping_Enabled"
-                        : "UpdateScrollPredictorInputMapping_Disabled";
+    testing::Combine(testing::Bool(), testing::Bool()),
+    [](const testing::TestParamInfo<std::tuple<bool, bool>>& info) {
+      return base::StringPrintf(
+          "%s_%s",
+          std::get<0>(info.param)
+              ? "UpdateScrollPredictorInputMapping_Enabled"
+              : "UpdateScrollPredictorInputMapping_Disabled",
+          std::get<1>(info.param)
+              ? "RefactorCompositorThreadEventQueue_Enabled"
+              : "RefactorCompositorThreadEventQueue_Disabled");
     });
 
 INSTANTIATE_TEST_SUITE_P(All,
@@ -3652,17 +3721,7 @@ class MockInputHandlerWithEventMetricsManager : public cc::MockInputHandler {
   cc::EventsMetricsManager events_metrics_manager;
 };
 
-struct InputHandlerProxyEventMetricsTestCase {
-  WebGestureEvent::InertialPhaseState inertial_phase;
-  bool is_inertial;
-  cc::EventMetrics::EventType expected_event_type;
-  std::string test_name;
-};
-
-class InputHandlerProxyEventMetricsTest
-    : public testing::Test,
-      public testing::WithParamInterface<
-          InputHandlerProxyEventMetricsTestCase> {
+class InputHandlerProxyEventMetricsTest : public testing::Test {
  public:
   InputHandlerProxyEventMetricsTest()
       : input_handler_proxy_(mock_input_handler_, &mock_client_) {
@@ -3680,13 +3739,27 @@ class InputHandlerProxyEventMetricsTest
   TestInputHandlerProxy input_handler_proxy_;
 };
 
-TEST_P(InputHandlerProxyEventMetricsTest, SavesScrollEndMetrics) {
+struct InputHandlerProxyScrollEventMetricsTestCase {
+  WebGestureEvent::InertialPhaseState inertial_phase;
+  bool is_inertial;
+  cc::EventMetrics::EventType expected_event_type;
+  std::string test_name;
+};
+
+class InputHandlerProxyScrollEventMetricsTest
+    : public InputHandlerProxyEventMetricsTest,
+      public testing::WithParamInterface<
+          InputHandlerProxyScrollEventMetricsTestCase> {};
+
+TEST_P(InputHandlerProxyScrollEventMetricsTest, SavesScrollEndMetrics) {
+  const InputHandlerProxyScrollEventMetricsTestCase& param = GetParam();
+
   std::unique_ptr<WebGestureEvent> gesture_event =
       std::make_unique<WebGestureEvent>(
           WebInputEvent::Type::kGestureScrollEnd, WebInputEvent::kNoModifiers,
           WebInputEvent::GetStaticTimeStampForTests(),
           WebGestureDevice::kTouchscreen);
-  gesture_event->data.scroll_end.inertial_phase = GetParam().inertial_phase;
+  gesture_event->data.scroll_end.inertial_phase = param.inertial_phase;
   std::unique_ptr<WebCoalescedInputEvent> coalesced_event =
       std::make_unique<WebCoalescedInputEvent>(std::move(gesture_event),
                                                ui::LatencyInfo());
@@ -3698,7 +3771,7 @@ TEST_P(InputHandlerProxyEventMetricsTest, SavesScrollEndMetrics) {
   std::unique_ptr<cc::EventMetrics> metrics =
       cc::ScrollEventMetrics::CreateForTesting(
           ui::EventType::kGestureScrollEnd, ui::ScrollInputType::kTouchscreen,
-          GetParam().is_inertial, timestamp, arrived_in_browser_main_timestamp,
+          param.is_inertial, timestamp, arrived_in_browser_main_timestamp,
           &tick_clock_);
 
   input_handler_proxy_.HandleInputEventWithLatencyInfo(
@@ -3708,13 +3781,13 @@ TEST_P(InputHandlerProxyEventMetricsTest, SavesScrollEndMetrics) {
   EXPECT_THAT(
       mock_input_handler_.events_metrics_manager.TakeSavedEventsMetrics(),
       testing::ElementsAre(testing::Pointee(testing::Property(
-          &cc::EventMetrics::type, GetParam().expected_event_type))));
+          &cc::EventMetrics::type, param.expected_event_type))));
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    InputHandlerProxyEventMetricsTest,
-    InputHandlerProxyEventMetricsTest,
-    testing::ValuesIn<InputHandlerProxyEventMetricsTestCase>(
+    InputHandlerProxyScrollEventMetricsTest,
+    InputHandlerProxyScrollEventMetricsTest,
+    testing::ValuesIn<InputHandlerProxyScrollEventMetricsTestCase>(
         {{.inertial_phase = WebGestureEvent::InertialPhaseState::kNonMomentum,
           .is_inertial = false,
           .expected_event_type = cc::EventMetrics::EventType::kGestureScrollEnd,
@@ -3725,7 +3798,87 @@ INSTANTIATE_TEST_SUITE_P(
               cc::EventMetrics::EventType::kInertialGestureScrollEnd,
           .test_name = "InertialScroll"}}),
     [](const testing::TestParamInfo<
-        InputHandlerProxyEventMetricsTest::ParamType>& info) {
+        InputHandlerProxyScrollEventMetricsTest::ParamType>& info) {
+      return info.param.test_name;
+    });
+
+struct InputHandlerProxyScrollUpdateEventMetricsTestCase {
+  WebGestureEvent::InertialPhaseState inertial_phase;
+  bool is_inertial;
+  cc::ScrollUpdateEventMetrics::ScrollUpdateType scroll_update_type;
+  cc::EventMetrics::EventType expected_event_type;
+  std::string test_name;
+};
+
+class InputHandlerProxyScrollUpdateEventMetricsTest
+    : public InputHandlerProxyEventMetricsTest,
+      public testing::WithParamInterface<
+          InputHandlerProxyScrollUpdateEventMetricsTestCase> {};
+
+TEST_P(InputHandlerProxyScrollUpdateEventMetricsTest,
+       SavesScrollUpdateMetrics) {
+  const InputHandlerProxyScrollUpdateEventMetricsTestCase& param = GetParam();
+
+  std::unique_ptr<WebGestureEvent> gesture_event =
+      std::make_unique<WebGestureEvent>(
+          WebInputEvent::Type::kGestureScrollUpdate,
+          WebInputEvent::kNoModifiers,
+          WebInputEvent::GetStaticTimeStampForTests(),
+          WebGestureDevice::kTouchscreen);
+  gesture_event->data.scroll_update.inertial_phase = param.inertial_phase;
+  std::unique_ptr<WebCoalescedInputEvent> coalesced_event =
+      std::make_unique<WebCoalescedInputEvent>(std::move(gesture_event),
+                                               ui::LatencyInfo());
+
+  base::TimeTicks timestamp = tick_clock_.NowTicks();
+  tick_clock_.Advance(base::Microseconds(10));
+  base::TimeTicks arrived_in_browser_main_timestamp = tick_clock_.NowTicks();
+  tick_clock_.Advance(base::Microseconds(10));
+  std::unique_ptr<cc::EventMetrics> metrics =
+      cc::ScrollUpdateEventMetrics::CreateForTesting(
+          ui::EventType::kGestureScrollUpdate,
+          ui::ScrollInputType::kTouchscreen, param.is_inertial,
+          param.scroll_update_type,
+          /* delta= */ 1.0f, timestamp, arrived_in_browser_main_timestamp,
+          &tick_clock_, /* trace_id= */ std::nullopt);
+
+  input_handler_proxy_.HandleInputEventWithLatencyInfo(
+      std::move(coalesced_event), std::move(metrics),
+      /* callback= */ base::DoNothing());
+
+  EXPECT_THAT(
+      mock_input_handler_.events_metrics_manager.TakeSavedEventsMetrics(),
+      testing::ElementsAre(testing::Pointee(testing::Property(
+          &cc::EventMetrics::type, param.expected_event_type))));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InputHandlerProxyScrollUpdateEventMetricsTest,
+    InputHandlerProxyScrollUpdateEventMetricsTest,
+    testing::ValuesIn<InputHandlerProxyScrollUpdateEventMetricsTestCase>(
+        {{.inertial_phase = WebGestureEvent::InertialPhaseState::kNonMomentum,
+          .is_inertial = false,
+          .scroll_update_type =
+              cc::ScrollUpdateEventMetrics::ScrollUpdateType::kStarted,
+          .expected_event_type =
+              cc::EventMetrics::EventType::kFirstGestureScrollUpdate,
+          .test_name = "FirstScroll"},
+         {.inertial_phase = WebGestureEvent::InertialPhaseState::kNonMomentum,
+          .is_inertial = false,
+          .scroll_update_type =
+              cc::ScrollUpdateEventMetrics::ScrollUpdateType::kContinued,
+          .expected_event_type =
+              cc::EventMetrics::EventType::kGestureScrollUpdate,
+          .test_name = "RegularScroll"},
+         {.inertial_phase = WebGestureEvent::InertialPhaseState::kMomentum,
+          .is_inertial = true,
+          .scroll_update_type =
+              cc::ScrollUpdateEventMetrics::ScrollUpdateType::kContinued,
+          .expected_event_type =
+              cc::EventMetrics::EventType::kInertialGestureScrollUpdate,
+          .test_name = "InertialScroll"}}),
+    [](const testing::TestParamInfo<
+        InputHandlerProxyScrollUpdateEventMetricsTest::ParamType>& info) {
       return info.param.test_name;
     });
 

@@ -13,8 +13,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/optimization_guide/model_execution/optimization_guide_global_state.h"
 #include "chrome/browser/permissions/system/platform_handle.h"
+#include "chrome/browser/safe_browsing/application_advanced_protection_status_detector.h"
 #include "chrome/common/chrome_features.h"
 #include "components/application_locale_storage/application_locale_storage.h"
+#include "components/safe_browsing/core/common/features.h"
 
 #if BUILDFLAG(ENABLE_GLIC)
 // This causes a gn error on Android builds, because gn does not understand
@@ -28,6 +30,7 @@
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 // This causes a gn error on Android builds, because gn does not understand
 // buildflags, so we include it only on platforms where it is used.
+#include "chrome/browser/default_browser/default_browser_manager.h"
 #include "chrome/browser/ui/webui/whats_new/whats_new_registrar.h"
 #include "components/user_education/common/user_education_features.h"  // nogncheck
 #endif
@@ -73,6 +76,9 @@ void GlobalFeatures::Init() {
   system_permissions_platform_handle_ = CreateSystemPermissionsPlatformHandle();
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
   whats_new_registry_ = CreateWhatsNewRegistry();
+
+  default_browser_manager_ =
+      std::make_unique<default_browser::DefaultBrowserManager>();
 #endif
 
 #if BUILDFLAG(ENABLE_GLIC)
@@ -101,6 +107,13 @@ void GlobalFeatures::Init() {
 #endif
   optimization_guide_global_feature_ =
       std::make_unique<optimization_guide::OptimizationGuideGlobalFeature>();
+
+  if (base::FeatureList::IsEnabled(
+          safe_browsing::kRelaunchNotificationForAdvancedProtection)) {
+    application_advanced_protection_status_detector_ = std::make_unique<
+        safe_browsing::ApplicationAdvancedProtectionStatusDetector>(
+        g_browser_process->profile_manager());
+  }
 }
 
 void GlobalFeatures::Shutdown() {
@@ -116,6 +129,8 @@ void GlobalFeatures::Shutdown() {
   synthetic_trial_manager_.reset();
 #endif
   optimization_guide_global_feature_.reset();
+
+  application_advanced_protection_status_detector_.reset();
 }
 
 std::unique_ptr<system_permission_settings::PlatformHandle>

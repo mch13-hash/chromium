@@ -53,7 +53,7 @@
 <translation id="1644574205037202324">历史记录</translation>
 <translation id="1652197001188145583">开启此设置后，网站可以请求使用 NFC 设备。关闭此设置后，网站无法使用 NFC 设备。</translation>
 <translation id="1660204651932907780">允许网站播放声音（推荐）</translation>
-<translation id="1677097821151855053">系统会使用 Cookie 和其他网站数据来记住您，以便实现某些功能或目的（例如帮您登录或向您展示个性化广告）。如需管理所有网站的 Cookie，请查看<ph name="BEGIN_LINK" />设置<ph name="END_LINK" />。</translation>
+<translation id="1677097821151855053">网站会使用 Cookie 和其他数据来记住您，以便帮您登录或向您展示个性化广告等。如需管理所有网站的 Cookie，请前往<ph name="BEGIN_LINK" />设置<ph name="END_LINK" />。</translation>
 <translation id="1679305402657584804">网站可以请求使用 NFC 设备</translation>
 <translation id="1686785653877010442">网站通常会发送通知，告知您重大新闻或聊天消息。</translation>
 <translation id="169515064810179024">禁止网站使用移动传感器</translation>
@@ -121,6 +121,7 @@
 <translation id="2359808026110333948">继续</translation>
 <translation id="2379925928934107488">当 Chrome 使用深色主题时，尽可能对网站应用深色主题</translation>
 <translation id="2390272837142897736">放大</translation>
+<translation id="2397689164757137845">允许 • 精确位置</translation>
 <translation id="2402980924095424747"><ph name="MEGABYTES" /> MB</translation>
 <translation id="2403474027143565107">精确位置</translation>
 <translation id="2404630663942400771">{PERMISSIONS_SUMMARY_ALLOWED,plural, =1{已授予“<ph name="PERMISSION_1" />”权限、“<ph name="PERMISSION_2" />”权限和另外 <ph name="NUM_MORE" /> 项权限}other{已授予“<ph name="PERMISSION_1" />”权限、“<ph name="PERMISSION_2" />”权限和另外 <ph name="NUM_MORE" /> 项权限}}</translation>
@@ -140,6 +141,7 @@
 <translation id="2498359688066513246">帮助和反馈</translation>
 <translation id="2501278716633472235">返回</translation>
 <translation id="2533138527374486328">开启后，网站可以请求连接到本地网络上的任何设备。关闭后，网站无法连接到本地网络上的设备。</translation>
+<translation id="2536779053640817375">这次允许使用 • 精确位置</translation>
 <translation id="2544997614631598250">主题颜色：深色</translation>
 <translation id="2546283357679194313">Cookie 和网站数据</translation>
 <translation id="2570922361219980984">此设备的位置信息使用权也已关闭；若想开启这项权限，请转到 <ph name="BEGIN_LINK" />Android 设置<ph name="END_LINK" />。</translation>
@@ -200,6 +202,7 @@
 <translation id="3123473560110926937">已禁止部分网站显示广告</translation>
 <translation id="3132996321662585180">每日刷新</translation>
 <translation id="3143754809889689516">从头播放</translation>
+<translation id="3164169438034704658">您可以在 <ph name="BEGIN_LINK" />Android 设置<ph name="END_LINK" />中开启“精确位置”。</translation>
 <translation id="3165022941318558018">允许网站使用第三方 Cookie</translation>
 <translation id="3167868116600277716">探索信息流</translation>
 <translation id="3198916472715691905">已存储 <ph name="STORAGE_AMOUNT" /> 数据</translation>
@@ -442,6 +445,7 @@
 <translation id="5876056640971328065">暂停视频</translation>
 <translation id="5877248419911025165">收起所有请求</translation>
 <translation id="5878945009165002849">屏蔽来自身份服务的登录提示</translation>
+<translation id="588258955323874662">全屏</translation>
 <translation id="5884085660368669834">网站偏好设置</translation>
 <translation id="5887687176710214216">上次访问时间：昨天</translation>
 <translation id="5908617755156109052">不允许网站为您的周边环境创建 3D 地图或跟踪摄像头位置</translation>
@@ -537,9 +541,11 @@
 <translation id="6965382102122355670">确定</translation>
 <translation id="6980861169612950611">要删除网站数据吗？<ph name="SITE_NAME" /></translation>
 <translation id="6981982820502123353">无障碍</translation>
+<translation id="6991142177939282156">允许 • 使用大致位置</translation>
 <translation id="6992289844737586249">在允许网站使用您的麦克风前先询问（推荐）</translation>
 <translation id="7000754031042624318">已在 Android 设置中关闭</translation>
 <translation id="702275896380648118">此网站会先判断您的喜好，然后向其他网站建议相关广告。此网站还会从 Chrome 中了解您的广告主题，从而向您展示与您更相关的广告。</translation>
+<translation id="7036823721811529709">后台播放</translation>
 <translation id="7044081119134178347">这次可以使用摄像头</translation>
 <translation id="7053983685419859001">屏蔽</translation>
 <translation id="7055552182600664515">网站可能需要使用一项内容保护服务，才能播放受版权保护的内容。<ph name="BEGIN_LINK" />了解详情<ph name="END_LINK" /></translation>
@@ -569,6 +575,7 @@
 <translation id="7406113532070524618">处于启用状态时，此设置不会识别您的身份，也不会允许网站查看您的浏览记录。不过，在验证过程中，网站可能会分享少量信息</translation>
 <translation id="7409735910987429903">网站可能会发送弹出式窗口以展示广告，或者使用重定向将您引导至您可能不想访问的网站</translation>
 <translation id="7412160840120117304">主颜色十六进制代码</translation>
+<translation id="7412223528111026033">{ZOOM_PERCENTAGE,plural, =1{缩放}other{缩放：<ph name="ZOOM_PERCENTAGE_NUMBER" />%%}}</translation>
 <translation id="7423098979219808738">先询问</translation>
 <translation id="7423538860840206698">已阻止读取剪贴板中的内容</translation>
 <translation id="7425915948813553151">为网站开启深色主题</translation>
@@ -639,12 +646,13 @@
 <translation id="8186479265534291036">网站无法正常运行？这是因为第三方 Cookie 已被屏蔽</translation>
 <translation id="8197286292360124385">已授予“<ph name="PERMISSION_1" />”权限</translation>
 <translation id="8200772114523450471">继续</translation>
-<translation id="8211406090763984747">连接安全</translation>
+<translation id="8211406090763984747">连接是安全的</translation>
 <translation id="822964464349305906"><ph name="TYPE_1" />、<ph name="TYPE_2" /></translation>
 <translation id="8249310407154411074">移至顶部</translation>
 <translation id="8261506727792406068">删除</translation>
 <translation id="8284326494547611709">字幕</translation>
 <translation id="8300705686683892304">由应用管理</translation>
+<translation id="8301363963630676147">这次允许 • 使用大致位置</translation>
 <translation id="8315509175050791576">正在共享标签页</translation>
 <translation id="8324158725704657629">别再询问</translation>
 <translation id="8362795839483915693">您可以放大或缩小所访问网站的内容</translation>
@@ -700,9 +708,8 @@
 <translation id="8803526663383843427">开启时</translation>
 <translation id="8805385115381080995">由于网站要求您验证自己是真实用户的情况随之减少，浏览体验将变得更加流畅。</translation>
 <translation id="8816026460808729765">禁止网站使用传感器</translation>
-<translation id="884765916894384048">转为后台播放</translation>
 <translation id="8847988622838149491">USB</translation>
-<translation id="8874790741333031443">尝试暂时允许使用第三方 Cookie，这意味着您将采用较低级别的浏览保护措施，但网站功能更有可能会按预期运行。</translation>
+<translation id="8874790741333031443">尝试暂时允许使用第三方 Cookie，这样浏览保护会降低，但网站功能更可能正常运行。</translation>
 <translation id="8889294078294184559">随着您继续浏览，所访问的网站可从 Chrome 中获取上一个网站提供的相关信息来验证您可能是真实的用户</translation>
 <translation id="8899807382908246773">侵扰性广告</translation>
 <translation id="8903921497873541725">放大</translation>

@@ -11,6 +11,7 @@
 #include "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_manager_mac.h"
+#include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/ui/browser_command_controller.h"
@@ -32,6 +33,7 @@
 #include "components/dom_distiller/core/url_utils.h"
 #include "components/input/native_web_keyboard_event.h"
 #include "components/lens/lens_features.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/omnibox_prefs.h"
 #import "components/omnibox/common/omnibox_feature_configs.h"
 #import "components/remote_cocoa/app_shim/native_widget_mac_nswindow.h"
@@ -50,12 +52,12 @@
 
 namespace {
 
-AppShimHost* GetHostForBrowser(Browser* browser) {
+AppShimHost* GetHostForBrowser(BrowserView* browser_view) {
   auto* const shim_manager = apps::AppShimManager::Get();
-  if (!shim_manager) {
+  if (!browser_view || !shim_manager) {
     return nullptr;
   }
-  return shim_manager->GetHostForRemoteCocoaBrowser(browser);
+  return shim_manager->GetHostForRemoteCocoaBrowser(browser_view->browser());
 }
 
 bool UsesRemoteCocoaApplicationHost(Browser* browser) {
@@ -124,6 +126,8 @@ bool ShouldHandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) {
 BrowserNativeWidgetMac::BrowserNativeWidgetMac(BrowserWidget* browser_widget,
                                                BrowserView* browser_view)
     : views::NativeWidgetMac(browser_widget), browser_view_(browser_view) {
+  CHECK(browser_widget);
+  CHECK(browser_view);
   if (GetRemoteCocoaApplicationHost()) {
     // Only add observer on PWA.
     chrome::AddCommandObserver(browser_view_->browser(), IDC_BACK, this);
@@ -142,6 +146,10 @@ BrowserWindowTouchBarController* BrowserNativeWidgetMac::GetTouchBarController()
 // BrowserNativeWidgetMac, views::NativeWidgetMac implementation:
 
 int32_t BrowserNativeWidgetMac::SheetOffsetY() {
+  if (!browser_view_) {
+    return 0;
+  }
+
   // ModalDialogHost::GetDialogPosition() is relative to the host view. In
   // practice, this ends up being the widget's content view.
   web_modal::WebContentsModalDialogHost* dialog_host =
@@ -170,18 +178,25 @@ void BrowserNativeWidgetMac::GetWindowFrameTitlebarHeight(
 }
 
 void BrowserNativeWidgetMac::OnFocusWindowToolbar() {
-  chrome::ExecuteCommand(browser_view_->browser(), IDC_FOCUS_TOOLBAR);
+  if (browser_view_) {
+    chrome::ExecuteCommand(browser_view_->browser(), IDC_FOCUS_TOOLBAR);
+  }
 }
 
 void BrowserNativeWidgetMac::OnWindowFullscreenTransitionStart() {
-  browser_view_->FullscreenStateChanging();
+  if (browser_view_) {
+    browser_view_->FullscreenStateChanging();
+  }
 }
 
 void BrowserNativeWidgetMac::OnWindowFullscreenTransitionComplete() {
-  browser_view_->FullscreenStateChanged();
+  if (browser_view_) {
+    browser_view_->FullscreenStateChanged();
+  }
 }
 
 void BrowserNativeWidgetMac::OnWidgetDestroyed(views::Widget* widget) {
+  CHECK(browser_view_);
   if (UsesRemoteCocoaApplicationHost(browser_view_->browser())) {
     chrome::RemoveCommandObserver(browser_view_->browser(), IDC_BACK, this);
     chrome::RemoveCommandObserver(browser_view_->browser(), IDC_FORWARD, this);
@@ -194,8 +209,8 @@ void BrowserNativeWidgetMac::OnWidgetDestroyed(views::Widget* widget) {
 void BrowserNativeWidgetMac::ValidateUserInterfaceItem(
     int32_t tag,
     remote_cocoa::mojom::ValidateUserInterfaceItemResult* result) {
-  Browser* browser = browser_view_->browser();
-  if (!chrome::SupportsCommand(browser, tag)) {
+  Browser* const browser = browser_view_ ? browser_view_->browser() : nullptr;
+  if (!browser || !chrome::SupportsCommand(browser, tag)) {
     result->enable = false;
     return;
   }
@@ -291,6 +306,19 @@ void BrowserNativeWidgetMac::ValidateUserInterfaceItem(
                            ->IsEnabled();
       break;
     }
+    case IDC_SHOW_AI_MODE_OMNIBOX_BUTTON: {
+      PrefService* prefs = browser->profile()->GetPrefs();
+      result->new_toggle_state =
+          prefs->GetBoolean(omnibox::kShowAiModeOmniboxButton);
+      const auto* aim_eligibility_service =
+          AimEligibilityServiceFactory::GetForProfile(browser->profile());
+      const bool is_aim_entrypoint_enabled =
+          OmniboxFieldTrial::IsAimOmniboxEntrypointEnabled(
+              aim_eligibility_service);
+      // Disable this menu option if the AI Mode feature is not enabled.
+      result->enable = is_aim_entrypoint_enabled;
+      break;
+    }
     case IDC_SHOW_SEARCH_TOOLS: {
       PrefService* prefs = browser->profile()->GetPrefs();
       result->new_toggle_state = prefs->GetBoolean(omnibox::kShowSearchTools);
@@ -333,7 +361,11 @@ bool BrowserNativeWidgetMac::WillExecuteCommand(
     int32_t command,
     WindowOpenDisposition window_open_disposition,
     bool is_before_first_responder) {
-  Browser* browser = browser_view_->browser();
+  if (!browser_view_) {
+    return false;
+  }
+
+  Browser* const browser = browser_view_->browser();
 
   if (is_before_first_responder) {
     // The specification for this private extensions API is incredibly vague.
@@ -384,7 +416,7 @@ void BrowserNativeWidgetMac::PopulateCreateWindowParams(
   params->style_mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                        NSWindowStyleMaskMiniaturizable |
                        NSWindowStyleMaskResizable;
-
+  CHECK(browser_view_);
   if (browser_view_->GetIsPictureInPictureType()) {
     // Picture in Picture windows, even if they are part of a web app, draw
     // their own title bar and decorations.  Note that `GetIsWebAppType()` might
@@ -392,6 +424,7 @@ void BrowserNativeWidgetMac::PopulateCreateWindowParams(
     params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
     params->style_mask = NSWindowStyleMaskFullSizeContentView |
                          NSWindowStyleMaskTitled | NSWindowStyleMaskResizable;
+    params->window_title_hidden = true;
   } else if (browser_view_->GetIsNormalType() ||
              browser_view_->GetIsWebAppType()) {
     params->window_class = remote_cocoa::mojom::WindowClass::kBrowser;
@@ -412,6 +445,7 @@ void BrowserNativeWidgetMac::PopulateCreateWindowParams(
 
 NativeWidgetMacNSWindow* BrowserNativeWidgetMac::CreateNSWindow(
     const remote_cocoa::mojom::CreateWindowParams* params) {
+  CHECK(browser_view_);
   NativeWidgetMacNSWindow* ns_window = NativeWidgetMac::CreateNSWindow(params);
   touch_bar_delegate_ = [[BrowserWindowTouchBarViewsDelegate alloc]
       initWithBrowser:browser_view_->browser()
@@ -423,7 +457,7 @@ NativeWidgetMacNSWindow* BrowserNativeWidgetMac::CreateNSWindow(
 
 remote_cocoa::ApplicationHost*
 BrowserNativeWidgetMac::GetRemoteCocoaApplicationHost() {
-  if (auto* host = GetHostForBrowser(browser_view_->browser())) {
+  if (auto* host = GetHostForBrowser(browser_view_)) {
     return host->GetRemoteCocoaApplicationHost();
   }
   return nullptr;
@@ -434,7 +468,7 @@ void BrowserNativeWidgetMac::OnWindowInitialized() {
     bridge->SetCommandDispatcher([[ChromeCommandDispatcherDelegate alloc] init],
                                  [[BrowserWindowCommandHandler alloc] init]);
   } else {
-    if (auto* host = GetHostForBrowser(browser_view_->browser())) {
+    if (auto* host = GetHostForBrowser(browser_view_)) {
       host->GetAppShim()->CreateCommandDispatcherForWidget(
           GetNSWindowHost()->bridged_native_widget_id());
     }
@@ -476,7 +510,7 @@ views::Widget::InitParams BrowserNativeWidgetMac::GetWidgetParams(
 }
 
 bool BrowserNativeWidgetMac::UseCustomFrame() const {
-  return browser_view_->GetIsPictureInPictureType();
+  return browser_view_ && browser_view_->GetIsPictureInPictureType();
 }
 
 bool BrowserNativeWidgetMac::UsesNativeSystemMenu() const {

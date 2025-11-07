@@ -5,7 +5,13 @@
 #ifndef COMPONENTS_WEBAUTHN_IOS_PASSKEY_TAB_HELPER_H_
 #define COMPONENTS_WEBAUTHN_IOS_PASSKEY_TAB_HELPER_H_
 
+#import "components/webauthn/ios/ios_passkey_client.h"
+#import "ios/web/public/web_state_observer.h"
 #import "ios/web/public/web_state_user_data.h"
+
+namespace sync_pb {
+class WebauthnCredentialSpecifics;
+}  // namespace sync_pb
 
 namespace webauthn {
 class PasskeyModel;
@@ -13,7 +19,8 @@ class PasskeyModel;
 
 // Handles script messages received from PasskeyJavaScriptFeature related to
 // interactions with WebAuthn credentials and for now logs appropriate metrics.
-class PasskeyTabHelper : public web::WebStateUserData<PasskeyTabHelper> {
+class PasskeyTabHelper : public web::WebStateObserver,
+                         public web::WebStateUserData<PasskeyTabHelper> {
  public:
   PasskeyTabHelper(const PasskeyTabHelper&) = delete;
   PasskeyTabHelper& operator=(const PasskeyTabHelper&) = delete;
@@ -31,14 +38,27 @@ class PasskeyTabHelper : public web::WebStateUserData<PasskeyTabHelper> {
       const std::string& credential_id_base64url_encoded,
       const std::string& rp_id);
 
+  // Adds a passkey to the passkey model while enabling the passkey creation
+  // infobar to be displayed if possible.
+  void AddNewPasskey(sync_pb::WebauthnCredentialSpecifics& passkey);
+
  private:
   friend class web::WebStateUserData<PasskeyTabHelper>;
 
   explicit PasskeyTabHelper(web::WebState* web_state,
-                            webauthn::PasskeyModel* passkey_model);
+                            webauthn::PasskeyModel* passkey_model,
+                            std::unique_ptr<IOSPasskeyClient> client);
+
+  // WebStateObserver:
+  void DidFinishNavigation(web::WebState* web_state,
+                           web::NavigationContext* navigation_context) override;
+  void WebStateDestroyed(web::WebState* web_state) override;
 
   // Provides access to stored WebAuthn credentials.
-  raw_ptr<webauthn::PasskeyModel> passkey_model_;
+  const raw_ref<webauthn::PasskeyModel> passkey_model_;
+
+  // The client used to perform user facing tasks for the PasskeyTabHelper.
+  std::unique_ptr<IOSPasskeyClient> client_;
 };
 
 #endif  // COMPONENTS_WEBAUTHN_IOS_PASSKEY_TAB_HELPER_H_

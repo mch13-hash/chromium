@@ -35,7 +35,6 @@
 #include "third_party/skia/include/core/SkAlphaType.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColorType.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gl/trace_util.h"
 
 namespace cc {
@@ -141,10 +140,7 @@ std::unique_ptr<RasterBuffer>
 OneCopyRasterBufferProvider::AcquireBufferForRaster(
     const ResourcePool::InUsePoolResource& resource,
     uint64_t resource_content_id,
-    uint64_t previous_content_id,
-    bool depends_on_at_raster_decodes,
-    bool depends_on_hardware_accelerated_jpeg_candidates,
-    bool depends_on_hardware_accelerated_webp_candidates) {
+    uint64_t previous_content_id) {
   // TODO(danakj): If resource_content_id != 0, we only need to copy/upload
   // the dirty rect.
   return std::make_unique<RasterBufferImpl>(this, resource,

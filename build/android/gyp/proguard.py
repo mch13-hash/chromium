@@ -50,6 +50,8 @@ _IGNORE_WARNINGS = (
         r'PaymentRequest[BH]',
         # This service is defined in Native not Java.
         r'NativeServiceSandboxedProcessService',
+        # TODO(450243304): Temporary.
+        r'DnsNameResolverProvider',
     ]) + ')',
     # We enforce that this class is removed via -checkdiscard.
     r'FastServiceLoader\.class:.*Could not inline ServiceLoader\.load',
@@ -83,6 +85,8 @@ _IGNORE_WARNINGS = (
     # so safe to ignore. b/431248021
     r'.*AndroidComposeUiTestEnvironment.*',
     r'.*ComposeUiTest.*',
+    # We don't use this, so safe to ignore. crbug.com/453685303
+    r'.*AndroidComposeTestRule.*',
 )
 
 _BLOCKLISTED_EXPECTATION_PATHS = [
@@ -396,6 +400,7 @@ def _OptimizeWithR8(options, config_paths, libraries, dynamic_config_data):
 
     if options.disable_checks:
       cmd += ['--map-diagnostics:CheckDiscardDiagnostic', 'error', 'none']
+      cmd += ['--map-diagnostics:CheckEnumUnboxedDiagnostic', 'error', 'none']
     # Triggered by rules from deps we cannot control.
     cmd += [('--map-diagnostics:EmptyMemberRulesToDefaultInitRuleConversion'
              'Diagnostic'), 'warning', 'none']

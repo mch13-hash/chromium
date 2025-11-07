@@ -695,6 +695,8 @@ std::unique_ptr<SyncEngine> SyncServiceImpl::ResetEngine(
   TRACE_EVENT0("sync", "SyncServiceImpl::ResetEngine");
   CHECK(data_type_manager_);
 
+  tasks_waiting_for_engine_initialization_.clear();
+
   const ShutdownReason shutdown_reason =
       ShutdownReasonForResetEngineReason(reset_reason);
 
@@ -902,9 +904,9 @@ SyncService::UserActionableError SyncServiceImpl::GetUserActionableError()
     if (!GetUserSettings()->IsInitialSyncFeatureSetupComplete()) {
       return UserActionableError::kNeedsSettingsConfirmation;
     }
-    // RequiresClientUpgrade() is unrecoverable, but is treated separately
-    // below.
-    if (HasUnrecoverableError() && !RequiresClientUpgrade()) {
+    // UPGRADE_CLIENT error is unrecoverable, but is treated separately below.
+    if (HasUnrecoverableError() &&
+        last_actionable_error_.action != UPGRADE_CLIENT) {
       return UserActionableError::kUnrecoverableError;
     }
   }
@@ -913,7 +915,7 @@ SyncService::UserActionableError SyncServiceImpl::GetUserActionableError()
   if (GetAuthError().state() != GoogleServiceAuthError::NONE) {
     return UserActionableError::kSignInNeedsUpdate;
   }
-  if (RequiresClientUpgrade()) {
+  if (last_actionable_error_.action == UPGRADE_CLIENT) {
     return UserActionableError::kNeedsClientUpgrade;
   }
   if (user_settings_->IsPassphraseRequiredForPreferredDataTypes()) {
@@ -1031,6 +1033,12 @@ void SyncServiceImpl::OnEngineInitialized(bool success,
 
   crypto_.SetSyncEngine(GetAccountInfo(), engine_.get());
 
+  std::vector<base::OnceClosure> tasks;
+  tasks.swap(tasks_waiting_for_engine_initialization_);
+  for (base::OnceClosure& task : tasks) {
+    std::move(task).Run();
+  }
+
   sync_prefs_.MaybeMigratePrefsForSyncToSigninPart2(
       GetAccountInfo().gaia, user_settings_->IsUsingExplicitPassphrase());
 
@@ -1052,7 +1060,7 @@ void SyncServiceImpl::OnEngineInitialized(bool success,
   // to CONFIGURE_REASON_NEW_CLIENT. The overriding code is needed
   // anyway in case sync setup is in progress and configuration cannot
   // be started right away.
-  ConfigureDataTypeManager(CONFIGURE_REASON_EXISTING_CLIENT_RESTART,
+  ConfigureDataTypeManager(ConfigureReason::kExistingClientRestart,
                            /*bypass_setup_in_progress_check=*/false);
 }
 
@@ -1270,7 +1278,7 @@ void SyncServiceImpl::SyncAuthAccountStateChanged() {
       TryStart();
       NotifyObservers();
     } else {
-      ConfigureDataTypeManager(CONFIGURE_REASON_RECONFIGURATION,
+      ConfigureDataTypeManager(ConfigureReason::kReconfiguration,
                                /*bypass_setup_in_progress_check=*/false);
     }
   }
@@ -1370,7 +1378,7 @@ void SyncServiceImpl::MaybeRecordTrustedVaultHistograms() {
 
 void SyncServiceImpl::ReconfigureDataTypesDueToCrypto() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  ConfigureDataTypeManager(CONFIGURE_REASON_CRYPTO,
+  ConfigureDataTypeManager(ConfigureReason::kCrypto,
                            /*bypass_setup_in_progress_check=*/false);
 }
 
@@ -1450,7 +1458,7 @@ void SyncServiceImpl::OnSyncFeatureDisabledViaDashboardCleared() {
   // If the Sync engine was already initialized (probably running in transport
   // mode), just reconfigure.
   if (engine_ && engine_->IsInitialized()) {
-    ConfigureDataTypeManager(CONFIGURE_REASON_RECONFIGURATION,
+    ConfigureDataTypeManager(ConfigureReason::kReconfiguration,
                              /*bypass_setup_in_progress_check=*/false);
   } else {
     // Otherwise try to start up. Note that there might still be other disable
@@ -1493,10 +1501,6 @@ base::Time SyncServiceImpl::GetAuthErrorTime() const {
 bool SyncServiceImpl::HasCachedPersistentAuthErrorForMetrics() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_prefs_.HasCachedPersistentAuthErrorForMetrics();
-}
-
-bool SyncServiceImpl::RequiresClientUpgrade() const {
-  return last_actionable_error_.action == UPGRADE_CLIENT;
 }
 
 std::unique_ptr<SyncSetupInProgressHandle>
@@ -1545,11 +1549,7 @@ base::Time SyncServiceImpl::GetLastSyncedTimeForDebugging() const {
 void SyncServiceImpl::OnSelectedTypesChanged() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (data_type_manager_) {
-    data_type_manager_->ResetDataTypeErrors();
-  }
-
-  ConfigureDataTypeManager(CONFIGURE_REASON_RECONFIGURATION,
+  ConfigureDataTypeManager(ConfigureReason::kReconfiguration,
                            /*bypass_setup_in_progress_check=*/false);
 }
 
@@ -1567,6 +1567,11 @@ void SyncServiceImpl::ReportDataTypeErrorForTest(DataType type) {
       data_type_manager_->GetControllerForTest(type);  // IN-TEST
   CHECK(controller);
   controller->ReportBridgeErrorForTest();  // IN-TEST
+}
+
+void SyncServiceImpl::RunOrQueueTaskOnEngineInitializedForTest(
+    base::OnceClosure task) {
+  RunOrQueueTaskOnEngineInitialized(std::move(task));
 }
 
 void SyncServiceImpl::AddObserver(SyncServiceObserver* observer) {
@@ -1621,14 +1626,13 @@ DataTypeSet SyncServiceImpl::GetDataTypesForTransportOnlyMode() const {
 DataTypeSet SyncServiceImpl::GetActiveDataTypes() const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  if (!engine_ || !engine_->IsInitialized() || !data_type_manager_) {
+  // Return an empty set unless the TransportState is ACTIVE. (There may in fact
+  // also be active types while it is CONFIGURING, but those are not exposed to
+  // clients, mostly for historic reasons.)
+  if (GetTransportState() != TransportState::ACTIVE) {
     return DataTypeSet();
   }
-
-  // Persistent auth errors lead to PAUSED, which implies
-  // engine_==null above.
-  CHECK(!GetAuthError().IsPersistentError());
-
+  CHECK(data_type_manager_);
   return data_type_manager_->GetActiveDataTypes();
 }
 
@@ -1701,21 +1705,21 @@ void SyncServiceImpl::ConfigureDataTypeManager(
     migrator_ = std::make_unique<BackendMigrator>(
         debug_identifier_, data_type_manager_.get(),
         base::BindRepeating(&SyncServiceImpl::ConfigureDataTypeManager,
-                            base::Unretained(this), CONFIGURE_REASON_MIGRATION,
+                            base::Unretained(this), ConfigureReason::kMigration,
                             /*bypass_setup_in_progress_check=*/true),
         base::BindRepeating(&SyncServiceImpl::StartSyncingWithServer,
                             base::Unretained(this)));
 
     // Override reason if no configuration has completed ever.
     if (is_first_time_sync_configure_) {
-      configure_context.reason = CONFIGURE_REASON_NEW_CLIENT;
+      configure_context.reason = ConfigureReason::kNewClient;
     }
   }
 
   DCHECK(!configure_context.authenticated_gaia_id.empty() ||
          IsLocalSyncEnabled());
   DCHECK(!configure_context.cache_guid.empty());
-  DCHECK_NE(configure_context.reason, CONFIGURE_REASON_UNKNOWN);
+  DCHECK_NE(configure_context.reason, ConfigureReason::kUnknown);
 
   data_type_manager_->Configure(GetPreferredDataTypes(), configure_context);
 
@@ -1734,6 +1738,9 @@ void SyncServiceImpl::ConfigureDataTypeManager(
                                 use_transport_only_mode
                                     ? ConfigureDataTypeManagerOption::kTransport
                                     : ConfigureDataTypeManagerOption::kFeature);
+
+  base::UmaHistogramEnumeration("Sync.ConfigureDataTypeManagerReason",
+                                configure_context.reason);
 
   base::UmaHistogramBoolean("Sync.ConfigureDataTypeManager.Start",
                             is_first_time_sync_configure_);
@@ -1884,7 +1891,7 @@ void SyncServiceImpl::OnSyncClientDisabledByPolicyChanged() {
 
 #if !BUILDFLAG(IS_CHROMEOS)
 void SyncServiceImpl::OnInitialSyncFeatureSetupCompleted() {
-  ConfigureDataTypeManager(CONFIGURE_REASON_RECONFIGURATION,
+  ConfigureDataTypeManager(ConfigureReason::kReconfiguration,
                            /*bypass_setup_in_progress_check=*/false);
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
@@ -2116,7 +2123,14 @@ void SyncServiceImpl::SetInvalidationsForSessionsEnabled(bool enabled) {
 }
 
 void SyncServiceImpl::SendExplicitPassphraseToPlatformClient() {
+  RunOrQueueTaskOnEngineInitialized(base::BindOnce(
+      &SyncServiceImpl::SendExplicitPassphraseToPlatformClientImpl,
+      weak_factory_.GetWeakPtr()));
+}
+
+void SyncServiceImpl::SendExplicitPassphraseToPlatformClientImpl() {
 #if BUILDFLAG(IS_ANDROID)
+  CHECK(engine_ && engine_->IsInitialized());
   int version_code = 0;
   bool has_min_gms_version =
       base::StringToInt(base::android::device_info::gms_version_code(),
@@ -2129,7 +2143,7 @@ void SyncServiceImpl::SendExplicitPassphraseToPlatformClient() {
   }
 
   std::unique_ptr<syncer::Nigori> nigori_key =
-      user_settings_->GetExplicitPassphraseDecryptionNigoriKey();
+      crypto_.GetExplicitPassphraseDecryptionNigoriKey();
   if (!nigori_key) {
     return;
   }
@@ -2305,8 +2319,18 @@ void SyncServiceImpl::OnSetupInProgressHandleDestroyed() {
   // The user closed a setup UI, and will expect their changes to actually
   // take effect now. So we reconfigure here even if another setup UI happens
   // to be open right now.
-  ConfigureDataTypeManager(CONFIGURE_REASON_RECONFIGURATION,
+  ConfigureDataTypeManager(ConfigureReason::kReconfiguration,
                            /*bypass_setup_in_progress_check=*/true);
+}
+
+void SyncServiceImpl::RunOrQueueTaskOnEngineInitialized(
+    base::OnceClosure task) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (engine_ && engine_->IsInitialized()) {
+    std::move(task).Run();
+    return;
+  }
+  tasks_waiting_for_engine_initialization_.push_back(std::move(task));
 }
 
 void SyncServiceImpl::GetTypesWithUnsyncedData(

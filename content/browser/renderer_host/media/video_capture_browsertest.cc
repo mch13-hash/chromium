@@ -221,8 +221,7 @@ class VideoCaptureBrowserTest
         &mock_controller_event_handler_, std::nullopt,
         base::BindOnce(
             &VideoCaptureBrowserTest::OnConnectClientToControllerAnswer,
-            base::Unretained(this), std::move(continuation)),
-        /*browser_context=*/nullptr);
+            base::Unretained(this), std::move(continuation)));
   }
 
   void OnConnectClientToControllerAnswer(
@@ -266,7 +265,8 @@ IN_PROC_BROWSER_TEST_P(VideoCaptureBrowserTest, StartAndImmediatelyStop) {
 }
 
 // Flaky on MSAN. https://crbug.com/840294
-#if defined(MEMORY_SANITIZER) || BUILDFLAG(IS_MAC)
+// Flaky on Android. https://crbug.com/456328657
+#if defined(MEMORY_SANITIZER) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_ReceiveFramesFromFakeCaptureDevice \
   DISABLED_ReceiveFramesFromFakeCaptureDevice
 #else

@@ -16,6 +16,7 @@ source_set("variations") {
     "//chrome/browser/autocomplete:aim_eligibility_service",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/search_engines",
+    "//components/contextual_search:public",
     "//components/omnibox/browser",
     "//components/omnibox/common",
     "//components/variations/service",

@@ -52,6 +52,7 @@
 #include "pdf/loader/url_loader.h"
 #include "pdf/loader/url_loader_wrapper_impl.h"
 #include "pdf/page_character_index.h"
+#include "pdf/pdf_accessibility_constants.h"
 #include "pdf/pdf_caret.h"
 #include "pdf/pdf_features.h"
 #include "pdf/pdf_transform.h"
@@ -976,11 +977,18 @@ void PDFiumEngine::ExtendAndInvalidateSelectionByChar(
 
   SelectionChangeInvalidator selection_invalidator(this);
   ExtendSelectionByChar(index);
+  if (caret_) {
+    caret_->SetVisible(!IsSelecting());
+  }
 }
 
 uint32_t PDFiumEngine::GetCharCount(uint32_t page_index) const {
   CHECK(PageIndexInBounds(page_index));
   return base::checked_cast<uint32_t>(pages_[page_index]->GetCharCount());
+}
+
+PageOrientation PDFiumEngine::GetCurrentOrientation() const {
+  return layout_.options().default_page_orientation();
 }
 
 std::vector<gfx::Rect> PDFiumEngine::GetScreenRectsForCaret(
@@ -997,6 +1005,21 @@ std::vector<gfx::Rect> PDFiumEngine::GetScreenRectsForCaret(
   PDFiumRange range(page, index.char_index, 1);
   return range.GetScreenRects(GetVisibleRect().origin(), current_zoom_,
                               GetCurrentOrientation());
+}
+
+std::optional<AccessibilityTextRunInfo> PDFiumEngine::GetTextRunInfoAt(
+    const PageCharacterIndex& index) const {
+  if (!PageIndexInBounds(index.page_index)) {
+    return std::nullopt;
+  }
+
+  PDFiumPage* page = pages_[index.page_index].get();
+  if (page->GetCharCount() == 0 ||
+      !page->IsCharIndexInBounds(index.char_index)) {
+    return std::nullopt;
+  }
+
+  return page->GetTextRunInfoAt(index.char_index).value();
 }
 
 void PDFiumEngine::InvalidateRect(const gfx::Rect& rect) {
@@ -1026,6 +1049,21 @@ bool PDFiumEngine::IsSynthesizedNewline(const PageCharacterIndex& index) const {
 
 bool PDFiumEngine::PageIndexInBounds(int index) const {
   return index >= 0 && index < static_cast<int>(pages_.size());
+}
+
+void PDFiumEngine::ScrollToChar(const PageCharacterIndex& index) {
+  CHECK(PageIndexInBounds(index.page_index));
+  PDFiumPage* page = pages_[index.page_index].get();
+
+  if (page->GetCharCount() == 0 && index.char_index == 0) {
+    ScrollToPage(index.page_index);
+    return;
+  }
+
+  CHECK(page->IsCharIndexInBounds(index.char_index));
+
+  PDFiumRange range(page, index.char_index, 1);
+  ScrollToBoundingRects(range, /*force_smooth_scroll=*/false);
 }
 
 void PDFiumEngine::StartSelection(const PageCharacterIndex& index) {
@@ -1193,7 +1231,7 @@ void PDFiumEngine::SetCaretBrowsingEnabled(bool enabled) {
   }
 
   // TODO(crbug.com/427778119): Set caret blink interval.
-  caret_->SetVisibility(enabled);
+  caret_->SetEnabled(enabled);
 }
 
 void PDFiumEngine::ContinueFind(bool case_sensitive) {
@@ -1343,6 +1381,7 @@ void PDFiumEngine::UpdateFocus(bool has_focus) {
       if (last_focused_annot) {
         FPDF_BOOL ret = FORM_SetFocusedAnnot(form(), last_focused_annot.get());
         DCHECK(ret);
+        return;
       }
     }
   } else {
@@ -1362,6 +1401,12 @@ void PDFiumEngine::UpdateFocus(bool has_focus) {
       FPDFPage_CloseAnnot(last_focused_annot);
     }
     KillFormFocus();
+    if (has_focus) {
+      return;
+    }
+  }
+  if (caret_) {
+    caret_->SetVisible(has_focus && !IsSelecting());
   }
 }
 
@@ -1402,6 +1447,23 @@ AccessibilityFocusInfo PDFiumEngine::GetFocusInfo() {
 
 bool PDFiumEngine::IsPDFDocTagged() const {
   return FPDFCatalog_IsTagged(doc());
+}
+
+std::unique_ptr<AccessibilityStructureElement> PDFiumEngine::GetStructureTree()
+    const {
+  auto structure_tree_root = std::make_unique<AccessibilityStructureElement>();
+  structure_tree_root->type = PdfTagType::kDocument;
+  structure_tree_root->children.reserve(pages_.size());
+  // TODO(crbug.com/40707542): Get the /Lang string from
+  // AccessibilityStructureElement.
+  for (const std::unique_ptr<PDFiumPage>& page : pages_) {
+    auto page_structure = page->GetStructureTree();
+    if (page_structure) {
+      page_structure->parent = structure_tree_root.get();
+    }
+    structure_tree_root->children.push_back(std::move(page_structure));
+  }
+  return structure_tree_root;
 }
 
 uint32_t PDFiumEngine::GetLoadedByteSize() {
@@ -1565,6 +1627,7 @@ void PDFiumEngine::OnTextOrLinkAreaClickInternal(const PointData& point_data,
     if (caret_) {
       caret_->SetCharAndDraw(
           PageCharacterIndex(point_data.page_index, char_index));
+      caret_->SetVisible(true);
     }
   } else if (click_count >= 2) {
     OnMultipleClick(click_count, point_data.page_index, point_data.char_index);
@@ -1944,10 +2007,12 @@ bool PDFiumEngine::ExtendSelection(const PointData& point_data) {
   const uint32_t char_index = GetCharIndexBasedOnPointData(point_data);
   PageCharacterIndex index{static_cast<uint32_t>(point_data.page_index),
                            char_index};
+  const bool extended = ExtendSelectionByChar(index);
   if (caret_) {
     caret_->SetChar(index);
+    caret_->SetVisible(!IsSelecting());
   }
-  return ExtendSelectionByChar(index);
+  return extended;
 }
 
 bool PDFiumEngine::ExtendSelectionByChar(const PageCharacterIndex& index) {
@@ -2031,8 +2096,8 @@ bool PDFiumEngine::OnKeyDown(const blink::WebKeyboardEvent& event) {
   if (event.windows_key_code == FWL_VKEY_Tab) {
     return HandleTabEvent(event.GetModifiers());
   }
-
-  if (caret_ && caret_->OnKeyDown(event)) {
+  if (focus_field_type_ == FocusFieldType::kNoFocus && caret_ &&
+      caret_->OnKeyDown(event)) {
     return true;
   }
 
@@ -2660,6 +2725,10 @@ void PDFiumEngine::SelectAll() {
     if (page->GetCharCount()) {
       selection_.push_back(PDFiumRange::AllTextOnPage(page.get()));
     }
+  }
+
+  if (caret_ && IsSelecting()) {
+    caret_->SetVisible(false);
   }
 }
 
@@ -3341,10 +3410,6 @@ bool PDFiumEngine::IsPageVisible(int page_index) const {
   return base::Contains(visible_pages_, page_index);
 }
 
-PageOrientation PDFiumEngine::GetCurrentOrientation() const {
-  return layout_.options().default_page_orientation();
-}
-
 void PDFiumEngine::ScrollToPage(int page) {
   if (!PageIndexInBounds(page)) {
     return;
@@ -3479,8 +3544,8 @@ bool PDFiumEngine::ContinuePaint(size_t progressive_index,
   return FPDF_RenderPageBitmap_Start(
              new_bitmap_ptr, page, pdfium_rect.x(), pdfium_rect.y(),
              pdfium_rect.width(), pdfium_rect.height(),
-             ToPDFiumRotation(GetCurrentOrientation()), GetRenderingFlags(),
-             this) != FPDF_RENDER_TOBECONTINUED;
+             GetClockwiseRotationSteps(GetCurrentOrientation()),
+             GetRenderingFlags(), this) != FPDF_RENDER_TOBECONTINUED;
 }
 
 void PDFiumEngine::FinishPaint(size_t progressive_index, SkBitmap& image_data) {
@@ -3495,7 +3560,8 @@ void PDFiumEngine::FinishPaint(size_t progressive_index, SkBitmap& image_data) {
   // Draw the forms.
   FPDF_FFLDraw(form(), bitmap, pages_[page_index]->GetPage(), pdfium_rect.x(),
                pdfium_rect.y(), pdfium_rect.width(), pdfium_rect.height(),
-               ToPDFiumRotation(GetCurrentOrientation()), GetRenderingFlags());
+               GetClockwiseRotationSteps(GetCurrentOrientation()),
+               GetRenderingFlags());
 
   FillPageSides(progressive_index);
 
@@ -3784,16 +3850,16 @@ gfx::Rect PDFiumEngine::GetScreenRect(const gfx::Rect& rect) const {
 
 std::vector<gfx::Rect> PDFiumEngine::GetNoTextPageScreenRectsForCaret(
     PDFiumPage* page) const {
-  // TODO(crbug.com/437807125): Determine default caret offset and height.
+  // TODO(crbug.com/437807125): Determine default caret offset and size.
   static constexpr float kCaretOffset = 10.0f;
-  static constexpr float kCaretHeight = 12.0f;
+  static constexpr float kCaretSize = 12.0f;
 
   const PdfRect page_bounds = GetPageBoundingBox(page->GetPage()).value();
   const float caret_left = page_bounds.left() + kCaretOffset;
   const float caret_top = page_bounds.top() - kCaretOffset;
   const PdfRect caret_rect(/*left=*/caret_left,
-                           /*bottom=*/caret_top - kCaretHeight,
-                           /*right=*/caret_left + PdfCaret::kCaretWidth,
+                           /*bottom=*/caret_top - kCaretSize,
+                           /*right=*/caret_left + kCaretSize,
                            /*top=*/caret_top);
 
   // The PDF page is too small to display the default caret size.
@@ -4021,7 +4087,7 @@ gfx::PointF PDFiumEngine::DeviceToPdf(uint32_t page_index,
   double page_y = 0;
   FPDF_BOOL ret = FPDF_DeviceToPage(
       page->GetPage(), 0, 0, page_rect.width(), page_rect.height(),
-      ToPDFiumRotation(GetCurrentOrientation()), screen_point.x(),
+      GetClockwiseRotationSteps(GetCurrentOrientation()), screen_point.x(),
       screen_point.y(), &page_x, &page_y);
   DCHECK(ret);
   return gfx::PointF(page_x, page_y);
@@ -4255,6 +4321,11 @@ void PDFiumEngine::SetFieldFocus(PDFiumEngineClient::FocusFieldType type) {
   // Clear `editable_form_text_area_` when focus no longer in form text area.
   if (focus_field_type_ != FocusFieldType::kText) {
     editable_form_text_area_ = false;
+  }
+
+  if (caret_) {
+    caret_->SetVisible(focus_field_type_ == FocusFieldType::kNoFocus &&
+                       !IsSelecting());
   }
 }
 
@@ -5029,10 +5100,13 @@ gfx::Transform PDFiumEngine::GetCanonicalToPdfTransform(int page_index) {
 std::map<int, std::vector<PdfRect>> PDFiumEngine::GetSelectionRectMap() {
   std::map<int, std::vector<PdfRect>> results;
   for (auto& selection : selection_) {
-    auto& page_results = results[selection.page_index()];
     std::vector<PdfRect> pdf_rects = selection.GetRectsWithTightness(
         PDFiumRange::PdfBoundsTightness::kTightVertical);
-    page_results.insert(page_results.end(), pdf_rects.begin(), pdf_rects.end());
+    if (!pdf_rects.empty()) {
+      auto& page_results = results[selection.page_index()];
+      page_results.insert(page_results.end(), pdf_rects.begin(),
+                          pdf_rects.end());
+    }
   }
   return results;
 }

@@ -10,6 +10,7 @@
 #include "base/observer_list_types.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/signin/chrome_signout_confirmation_prompt.h"
+#include "chrome/browser/ui/webui/signin/history_sync_optin_helper.h"
 #include "chrome/browser/ui/webui/signin/signin_url_utils.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "components/signin/public/base/signin_buildflags.h"
@@ -55,8 +56,9 @@ class SigninViewControllerDelegate {
   // delete itself when the window it's managing is closed.
   static SigninViewControllerDelegate* CreateSyncHistoryOptInDelegate(
       Browser* browser,
+      bool should_close_modal_dialog,
       HistorySyncOptinLaunchContext launch_context,
-      base::OnceClosure history_optin_completed_closure);
+      HistorySyncOptinHelper::FlowCompletedCallback callback);
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
   // Returns a platform-specific SigninViewControllerDelegate instance that

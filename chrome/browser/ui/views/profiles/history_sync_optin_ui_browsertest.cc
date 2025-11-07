@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/signin/history_sync_optin/history_sync_optin_ui.h"
 
+#include <optional>
+
 #include "base/functional/callback_helpers.h"
 #include "base/strings/strcat.h"
 #include "base/test/scoped_feature_list.h"
@@ -38,8 +40,6 @@ std::string ParamToTestSuffix(
 const PixelTestParam kDialogTestParams[] = {
     {.test_suffix = "Regular"},
     {.test_suffix = "DarkTheme", .use_dark_theme = true},
-    /* TODO(crbug.com/406751006): Until the strings are translatable the RTL
-       language does not fully apply. */
     {.test_suffix = "Rtl", .use_right_to_left_language = true},
 };
 }  // namespace
@@ -76,12 +76,15 @@ class HistorySyncOptinUIDialogPixelTest
         "SigninViewControllerDelegateViews");
 
     auto* controller = browser()->GetFeatures().signin_view_controller();
-    controller->ShowModalHistorySyncOptInDialog(base::DoNothing());
+    controller->ShowModalHistorySyncOptInDialog(
+        should_close_modal_dialog_,
+        HistorySyncOptinHelper::FlowCompletedCallback(base::DoNothing()));
     widget_waiter.WaitIfNeededAndGet();
     observer.Wait();
   }
 
  private:
+  bool should_close_modal_dialog_ = true;
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
@@ -128,7 +131,9 @@ class HistorySyncOptinStepControllerForTest
 
     history_sync_optin_ui->Initialize(
         /*browser=*/nullptr,
-        /*history_optin_completed_closure=*/base::DoNothing());
+        // Value does not matter when browser is null (window mode).
+        /*should_close_modal_dialog=*/std::nullopt,
+        HistorySyncOptinHelper::FlowCompletedCallback(base::DoNothing()));
 
     if (!step_shown_callback->is_null()) {
       std::move(step_shown_callback.value()).Run(/*success=*/true);

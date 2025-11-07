@@ -2273,7 +2273,7 @@ even if they fit the naming pattern. -->
 </histogram>
 
 <histogram name="Accessibility.LiveTranslate.TranslationDispatcher.LoadResult"
-    enum="TranslationDispatcherLoadResult" expires_after="2026-02-01">
+    enum="TranslationDispatcherLoadResult" expires_after="2026-04-05">
   <owner>evanliu@google.com</owner>
   <owner>chrome-accessibility-eng@google.com</owner>
   <summary>
@@ -2283,7 +2283,7 @@ even if they fit the naming pattern. -->
 </histogram>
 
 <histogram name="Accessibility.LiveTranslate.TranslationDispatcher.ParseResult"
-    enum="TranslationDispatcherParseResult" expires_after="2026-02-01">
+    enum="TranslationDispatcherParseResult" expires_after="2026-04-05">
   <owner>evanliu@google.com</owner>
   <owner>chrome-accessibility-eng@google.com</owner>
   <summary>
@@ -3092,16 +3092,6 @@ even if they fit the naming pattern. -->
   </summary>
 </histogram>
 
-<histogram name="Accessibility.ReadAnything.ReadAloud.HighlightState"
-    enum="ReadAnythingHighlightState" expires_after="2026-06-01">
-  <owner>kristislee@google.com</owner>
-  <owner>komo-eng@google.com</owner>
-  <summary>
-    Records the user-chosen highlight state for reading aloud in the Read
-    Anything panel.
-  </summary>
-</histogram>
-
 <histogram name="Accessibility.ReadAnything.ReadAloud.Language"
     enum="LocaleCodeBCP47" expires_after="2026-06-01">
   <owner>kristislee@google.com</owner>
@@ -3902,17 +3892,6 @@ even if they fit the naming pattern. -->
     Records the maximum memory usage of {ServiceName} service. The metric is
     stored after the process shuts down or crashes and up to 1GB and only if the
     process runs for more than one second.
-  </summary>
-  <token key="ServiceName" variants="ScreenAIServices"/>
-</histogram>
-
-<histogram name="Accessibility.{ServiceName}.Service.ResourceMonitorCreated"
-    enum="Boolean" expires_after="2025-12-01">
-  <owner>rhalavati@chromium.org</owner>
-  <owner>chrome-a11y-core@google.com</owner>
-  <summary>
-    Records if resource monitor could be created when {ServiceName} service was
-    initialized.
   </summary>
   <token key="ServiceName" variants="ScreenAIServices"/>
 </histogram>

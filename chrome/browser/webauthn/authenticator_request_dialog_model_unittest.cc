@@ -507,7 +507,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest, Mechanisms) {
       AuthenticatorRequestDialogModel::Mechanism::ICloudKeychain();
   const auto usb_ui = Step::kUsbInsertAndActivate;
   const auto mss = Step::kMechanismSelection;
-  const auto plat_ui = Step::kNotStarted;
+  const auto plat_ui = Step::kPlatformAuthenticator;
   const auto cable_ui = Step::kCableActivate;
   [[maybe_unused]] const auto create_pk = Step::kCreatePasskey;
   const auto create_pk_or_mss =
@@ -520,7 +520,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest, Mechanisms) {
 #if BUILDFLAG(IS_MAC)
       Step::kCreatePasskey;
 #else
-      Step::kNotStarted;
+      Step::kPlatformAuthenticator;
 #endif
   const auto create_pk_or_qr =
 #if BUILDFLAG(IS_MAC)
@@ -1316,7 +1316,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest, WinCancel) {
         continue;
       }
 
-      EXPECT_EQ(model->step(), Step::kNotStarted);
+      EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
 
       if (win_webauthn_api_version >= 7) {
         // Windows handles hybrid itself starting with this version, so
@@ -1369,7 +1369,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
   controller.StartFlow(std::move(tai), {});
 
   // The Windows native UI should have been triggered.
-  EXPECT_EQ(model->step(), Step::kNotStarted);
+  EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
 
   // Canceling the Windows native UI should be handled.
   EXPECT_TRUE(controller.OnWinUserCancelled());
@@ -1430,7 +1430,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest, WinCredMatchEmptyAllowList) {
         FAIL() << "Should not have narrowed the allow list";
       }));
   controller.StartFlow(std::move(tai), {});
-  EXPECT_EQ(model->step(), Step::kNotStarted);
+  EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
   run_loop.Run();
 }
 #endif
@@ -2435,7 +2435,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest, Dispatch) {
           device::AuthenticatorType::kICloudKeychain);
       controller.OnUserConsentDenied();
 
-      EXPECT_EQ(model->step(), Step::kNotStarted);
+      EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
     }
   }
 }
@@ -2477,7 +2477,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
                                /*is_off_the_record=*/false);
     controller.StartFlow(std::move(transports_info), {});
 
-    EXPECT_EQ(model->step(), Step::kNotStarted);
+    EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
     device::DiscoverableCredentialMetadata descriptor =
         account_preselected_callback.WaitForResult();
     if (credential_source == device::AuthenticatorType::kTouchID) {
@@ -2603,57 +2603,65 @@ struct {
   bool has_hybrid;
   bool has_internal;
   bool supports_hybrid;
+  bool has_uvpaa;
   HasCreds has_creds;
   int expected_button;
 } kWinHelloButtonGetAssertionTestCases[] = {
     // Windows v7+ with all transports.
-    {L, true, true, true, true, HasCreds::kHasRecognizedCredential, kPhoneOrSk},
+    {L, true, true, true, true, true, HasCreds::kHasRecognizedCredential,
+     kPhoneOrSk},
 
     // Windows v7+ with only security keys.
-    {L, true, false, false, true, HasCreds::kNoRecognizedCredential, kSk},
+    {L, true, false, false, true, true, HasCreds::kNoRecognizedCredential, kSk},
 
     // Windows v7+ with only phones.
-    {L, false, true, false, true, HasCreds::kNoRecognizedCredential, kPhone},
+    {L, false, true, false, true, true, HasCreds::kNoRecognizedCredential,
+     kPhone},
 
     // Windows v7+ with only internal creds.
-    {L, false, false, true, true, HasCreds::kHasRecognizedCredential,
+    {L, false, false, true, true, true, HasCreds::kHasRecognizedCredential,
      kNoChromeUI},
 
     // Windows v7+ with empty allow-list.
-    {L, false, false, false, true, HasCreds::kHasRecognizedCredential,
+    {L, false, false, false, true, true, HasCreds::kHasRecognizedCredential,
      kPhoneOrSk},
 
     // Windows v5+ with all transports.
-    {L, true, true, true, false, HasCreds::kHasRecognizedCredential, kSk},
+    {L, true, true, true, false, true, HasCreds::kHasRecognizedCredential, kSk},
 
     // Windows v5+ with only security keys
-    {L, true, false, false, false, HasCreds::kNoRecognizedCredential, kSk},
+    {L, true, false, false, false, true, HasCreds::kNoRecognizedCredential,
+     kSk},
 
     // Windows v5+ with only phones.
-    {L, false, true, false, false, HasCreds::kNoRecognizedCredential,
+    {L, false, true, false, false, true, HasCreds::kNoRecognizedCredential,
      kNoWinButton},
 
     // Windows v5+ with only internal creds.
-    {L, false, false, true, false, HasCreds::kHasRecognizedCredential,
+    {L, false, false, true, false, true, HasCreds::kHasRecognizedCredential,
      kNoChromeUI},
 
     // Windows v5+ with empty allow-list.
-    {L, false, false, false, false, HasCreds::kHasRecognizedCredential, kSk},
+    {L, false, false, false, false, true, HasCreds::kHasRecognizedCredential,
+     kSk},
 
     // Windows <v4 with all transports.
-    {L, true, true, true, false, HasCreds::kUnknown, kHelloOrSk},
+    {L, true, true, true, false, true, HasCreds::kUnknown, kHelloOrSk},
 
     // Windows <v4 with only security keys.
-    {L, true, false, false, false, HasCreds::kUnknown, kSk},
+    {L, true, false, false, false, true, HasCreds::kUnknown, kSk},
 
     // Windows <v4 with only phones.
-    {L, false, true, false, false, HasCreds::kUnknown, kNoWinButton},
+    {L, false, true, false, false, true, HasCreds::kUnknown, kNoWinButton},
 
     // Windows <v4 with only internal creds.
-    {L, false, false, true, false, HasCreds::kUnknown, kHello},
+    {L, false, false, true, false, true, HasCreds::kUnknown, kHello},
 
     // Windows <v4 with empty allow-list.
-    {L, false, false, false, false, HasCreds::kUnknown, kHelloOrSk},
+    {L, false, false, false, false, true, HasCreds::kUnknown, kHelloOrSk},
+
+    // Windows <v4 with empty allow-list and no Win Hello.
+    {L, false, false, false, false, false, HasCreds::kUnknown, kSk},
 };
 #undef L
 
@@ -2676,6 +2684,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
     transports_info.transport_list_did_include_internal =
         test_case.has_internal;
     transports_info.has_platform_authenticator_credential = test_case.has_creds;
+    transports_info.win_is_uvpaa = test_case.has_uvpaa;
     if (test_case.has_creds == HasCreds::kHasRecognizedCredential) {
       transports_info.recognized_credentials = {kCred1};
     }
@@ -2687,6 +2696,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
     SCOPED_TRACE(testing::Message() << "SK: " << test_case.has_sk);
     SCOPED_TRACE(testing::Message() << "Hybrid: " << test_case.has_hybrid);
     SCOPED_TRACE(testing::Message() << "Internal: " << test_case.has_internal);
+    SCOPED_TRACE(testing::Message() << "Win isUVPAA: " << test_case.has_uvpaa);
     SCOPED_TRACE(testing::Message()
                  << "Has creds: " << static_cast<int>(test_case.has_creds));
     SCOPED_TRACE(testing::Message()
@@ -2703,7 +2713,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
       EXPECT_EQ(win_button_it, model->mechanisms.end());
     } else if (test_case.expected_button == kNoChromeUI) {
       // In these cases, Chrome should have invoked the Windows UI immediately.
-      EXPECT_EQ(model->step(), Step::kNotStarted);
+      EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
     } else {
       ASSERT_NE(win_button_it, model->mechanisms.end());
       EXPECT_EQ(win_button_it->name,
@@ -2729,14 +2739,16 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
 
 struct {
   device::AuthenticatorAttachment attachment;
+  bool has_uvpaa;
   int expected_button;
 } kWinHelloButtonMakeCredentialTestCases[] = {
     // For make credential, we will only show the authenticator picker when
     // Windows does not do hybrid. Therefore, there is no option for "Hello,
     // Security Key, or Phone".
-    {device::AuthenticatorAttachment::kAny, kHelloOrSk},
-    {device::AuthenticatorAttachment::kCrossPlatform, kSk},
-    {device::AuthenticatorAttachment::kPlatform, kHello},
+    {device::AuthenticatorAttachment::kAny, true, kHelloOrSk},
+    {device::AuthenticatorAttachment::kCrossPlatform, true, kSk},
+    {device::AuthenticatorAttachment::kPlatform, true, kHello},
+    {device::AuthenticatorAttachment::kAny, false, kSk},
 };
 
 TEST_F(AuthenticatorRequestDialogControllerTest,
@@ -2755,6 +2767,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
         device::AttestationConveyancePreference::kNone;
     transports_info.make_credential_attachment = test_case.attachment;
     fake_win_webauthn_api.set_version(4);
+    transports_info.win_is_uvpaa = test_case.has_uvpaa;
     SCOPED_TRACE(testing::Message()
                  << "Attachment: " << static_cast<int>(test_case.attachment));
     UpdateModelBeforeStartFlow(model.get(), transports_info,
@@ -2875,7 +2888,7 @@ TEST_F(AuthenticatorRequestDialogControllerTest,
   controller.HideDialogAndDispatchToPlatformAuthenticator(
       device::AuthenticatorType::kICloudKeychain);
   controller.OnUserConsentDenied();
-  EXPECT_EQ(model->step(), Step::kNotStarted);
+  EXPECT_EQ(model->step(), Step::kPlatformAuthenticator);
 }
 
 #endif  // BUILDFLAG(IS_MAC)

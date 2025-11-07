@@ -19,7 +19,8 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/sequence_checker.h"
 #include "base/system/sys_info.h"
-#include "ui/gfx/buffer_format_util.h"
+#include "components/viz/common/resources/shared_image_format.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gfx/client_native_pixmap.h"
 #include "ui/gfx/client_native_pixmap_factory.h"
 #include "ui/gfx/native_pixmap_handle.h"
@@ -66,12 +67,12 @@ class ClientNativePixmapFuchsia final : public gfx::ClientNativePixmap {
     // 1. all the planes are pointing to the same underlying VM objects.
     // 2. the end of last plane should cover all the memory blocks.
     // 3. vmo.get_size() should return a size to cover all the planes.
-    // 4. vmo.get_size() should return a size well aligned with ZX_PAGE_SIZE.
+    // 4. vmo.get_size() should return a size well aligned with system page size.
     // See checks being performed in the CreateFromHandle.
 
     CHECK(handle_.planes[0].vmo);
     CHECK_EQ(handle_.planes[0].vmo.get_size(&mapping_size_), ZX_OK);
-    CHECK_EQ(mapping_size_ % ZX_PAGE_SIZE, 0UL);
+    CHECK_EQ(mapping_size_ % zx_system_get_page_size(), 0UL);
 
     // Pre-commit the pages of the pixmap, since it is likely that every page
     // will be touched. This is also necessary to successfully pre-fill the page
@@ -122,7 +123,7 @@ class ClientNativePixmapFuchsia final : public gfx::ClientNativePixmap {
   static std::unique_ptr<gfx::ClientNativePixmap> CreateFromHandle(
       gfx::NativePixmapHandle handle,
       const gfx::Size& size,
-      gfx::BufferFormat format) {
+      viz::SharedImageFormat format) {
     // |planes| may be empty for non-mappable pixmaps. No need to validate the
     // handle in that case.
     if (handle.planes.empty()) {
@@ -165,7 +166,7 @@ class ClientNativePixmapFuchsia final : public gfx::ClientNativePixmap {
     // zx_vmo_get_size() should return a page-aligned size. This is important
     // because we request a page-aligned size in
     // ClientNativePixmapFuchsia::Map().
-    DCHECK_EQ(vmo_size % ZX_PAGE_SIZE, 0u);
+    DCHECK_EQ(vmo_size % zx_system_get_page_size(), 0u);
 
     // The CanFitImageForSizeAndFormat() call above should guarantee that the
     // (offset + size) for each plane is <= |last_plane_end|, and since we now
@@ -235,7 +236,7 @@ class FlatlandClientNativePixmapFactory final
   std::unique_ptr<gfx::ClientNativePixmap> ImportFromHandle(
       gfx::NativePixmapHandle handle,
       const gfx::Size& size,
-      gfx::BufferFormat format,
+      viz::SharedImageFormat format,
       gfx::BufferUsage usage) override {
     return ClientNativePixmapFuchsia::CreateFromHandle(std::move(handle), size,
                                                        format);

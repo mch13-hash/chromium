@@ -28,7 +28,6 @@
 #include "content/public/common/javascript_dialog_type.h"
 #include "media/base/picture_in_picture_events_info.h"
 #include "media/mojo/mojom/media_player.mojom.h"
-#include "media/mojo/services/media_metrics_provider.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -67,10 +66,6 @@
 #endif
 
 class GURL;
-
-namespace IPC {
-class Message;
-}
 
 namespace gfx {
 class Rect;
@@ -163,10 +158,6 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   using ClipboardPasteData = content::ClipboardPasteData;
   using ClipboardEndpoint = content::ClipboardEndpoint;
   using ClipboardMetadata = ui::ClipboardMetadata;
-
-  // This is used to give the delegate a chance to filter IPC messages.
-  virtual bool OnMessageReceived(RenderFrameHostImpl* render_frame_host,
-                                 const IPC::Message& message);
 
   // Notification from the renderer host that a suspicious navigation of the
   // main frame has been blocked. Allows the delegate to provide some UI to let
@@ -326,6 +317,12 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Get the accessibility mode for the WebContents that owns this frame.
   virtual ui::AXMode GetAccessibilityMode();
 
+  // Asks whether the page is in a state of ignoring accessibility input events.
+  // This means if accessibility actions (other than hit testing) should be
+  // blocked. This is active while a ScopedIgnoreInputEvents token exists. See
+  // WebContents::IgnoreInputEvents for more information.
+  virtual bool ShouldIgnoreA11yInputEvents();
+
   // Called whenever the AXTreeID for the topmost RenderFrameHost has changed.
   virtual void AXTreeIDForMainFrameHasChanged() {}
 
@@ -372,6 +369,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
       bool is_fullscreen,
       blink::mojom::FullscreenOptionsPtr options);
 
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   // Returns whether the RFH can use Additional Windowing Controls (AWC) APIs.
   // https://github.com/explainers-by-googlers/additional-windowing-controls/blob/main/README.md
   virtual bool CanUseWindowingControls(RenderFrameHostImpl* requesting_frame);
@@ -384,6 +382,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // Request to restore window.
   virtual void Restore() {}
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 #if BUILDFLAG(IS_ANDROID)
   // Updates information to determine whether a user gesture should carryover to

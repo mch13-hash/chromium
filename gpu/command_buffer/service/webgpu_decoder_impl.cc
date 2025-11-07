@@ -137,6 +137,8 @@ class DawnWireServer : public dawn::wire::WireServer {
     descriptor.procs = &procs;
     descriptor.serializer = serializer;
     descriptor.memoryTransferService = memory_transfer_service;
+    descriptor.useSpontaneousCallbacks =
+        features::kWebGPUSpontaneousWireServer.Get();
 
     return base::WrapUnique(new DawnWireServer(decoder, descriptor));
   }
@@ -241,14 +243,17 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
   void PerformIdleWork() override {}
 
   bool HasPollingWork() const override {
-    return has_polling_work_ || wire_serializer_->NeedsFlush();
+    return has_polling_work_ ||
+           (!use_spontaneous_wire_server_ && wire_serializer_->NeedsFlush());
   }
 
   void PerformPollingWork() override {
     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("gpu.dawn"),
                  "WebGPUDecoderImpl::PerformPollingWork");
     if (known_device_metadata_.empty()) {
-      wire_serializer_->Flush();
+      if (!use_spontaneous_wire_server_) {
+        wire_serializer_->Flush();
+      }
       return;
     }
 
@@ -268,7 +273,9 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
         ++it;
       }
     }
-    wire_serializer_->Flush();
+    if (!use_spontaneous_wire_server_) {
+      wire_serializer_->Flush();
+    }
   }
 
   TextureBase* GetTextureBase(uint32_t client_id) override { NOTREACHED(); }
@@ -379,7 +386,8 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
 
   wgpu::Adapter CreatePreferredAdapter(wgpu::PowerPreference power_preference,
                                        bool force_fallback,
-                                       wgpu::FeatureLevel feature_level) const;
+                                       wgpu::FeatureLevel feature_level,
+                                       bool webgpu_on_vk_gl_interop) const;
 
   // Decide if a device feature is exposed to render process.
   bool IsFeatureExposed(wgpu::FeatureName feature) const;
@@ -448,11 +456,13 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
   WebGPUPowerPreference use_webgpu_power_preference_ =
       WebGPUPowerPreference::kNone;
   bool force_fallback_adapter_ = false;
+  bool webgpu_on_vk_gl_interop_ = false;
   bool force_webgpu_compat_ = false;
   std::vector<std::string> require_enabled_toggles_;
   std::vector<std::string> require_disabled_toggles_;
   base::flat_set<std::string> runtime_unsafe_features_;
   bool tiered_adapter_limits_;
+  bool use_spontaneous_wire_server_;
 
   // Isolation key that is necessary for device requests. Optional to
   // differentiate between an empty isolation key, and an unset one.
@@ -639,7 +649,7 @@ class WebGPUDecoderImpl final : public WebGPUDecoder {
       DCHECK(buffer_size);
 
       base::CheckedNumeric<uint32_t> checked_bytes_per_row(
-          format.BitsPerPixel() / 8);
+          format.BytesPerPixel());
       checked_bytes_per_row *= size.width();
 
       uint32_t packed_bytes_per_row;
@@ -1142,6 +1152,7 @@ WebGPUDecoderImpl::WebGPUDecoderImpl(
 
   use_webgpu_adapter_ = gpu_preferences.use_webgpu_adapter;
   use_webgpu_power_preference_ = gpu_preferences.use_webgpu_power_preference;
+  webgpu_on_vk_gl_interop_ = gpu_preferences.enable_webgpu_on_vk_via_gl_interop;
   force_webgpu_compat_ = gpu_preferences.force_webgpu_compat;
   require_enabled_toggles_ = gpu_preferences.enabled_dawn_features_list;
   require_disabled_toggles_ = gpu_preferences.disabled_dawn_features_list;
@@ -1196,6 +1207,7 @@ WebGPUDecoderImpl::WebGPUDecoderImpl(
         std::forward<decltype(args)>(args)...);
   };
 
+  use_spontaneous_wire_server_ = features::kWebGPUSpontaneousWireServer.Get();
   wire_server_ = DawnWireServer::Create(
       this, wire_serializer_.get(), memory_transfer_service_.get(), wire_procs);
 
@@ -1256,10 +1268,13 @@ ContextResult WebGPUDecoderImpl::Initialize(
     force_fallback_adapter_ = true;
   }
 
-  // Create a Chrome-side EGL context. This isn't actually used by Dawn,
-  // but it prevents rendering artifacts in Chrome. This workaround should
-  // be revisited once EGL context creation is reworked. See crbug.com/1465911
-  if (use_webgpu_adapter_ == WebGPUAdapterName::kOpenGLES) {
+  // Create a Chrome-side EGL context. Dawn actually creates its own
+  // EGL contexts per-device, but since Chrome is unaware of those
+  // contexts, this wrapper context keeps Chrome's virtual context
+  // bookkeeping up-to-date.
+  // This is only an issue for native EGL/GLES, not ANGLE (which is
+  // aware of the the EGL contexts created by Dawn).
+  if (gl::GetGLImplementation() == gl::kGLImplementationEGLGLES2) {
     scoped_refptr<gl::GLSurface> gl_surface(new gl::SurfacelessEGL(
         gl::GLSurfaceEGL::GetGLDisplayEGL(), gfx::Size(1, 1)));
     gl::GLContextAttribs attribs;
@@ -1268,7 +1283,6 @@ ContextResult WebGPUDecoderImpl::Initialize(
     gl_context_ = new gl::GLContextEGL(nullptr);
     gl_context_->Initialize(gl_surface.get(), attribs);
     DCHECK(gl_context_->default_surface());
-    gl_context_->MakeCurrentDefault();
   }
   return ContextResult::kSuccess;
 }
@@ -1279,7 +1293,6 @@ bool WebGPUDecoderImpl::IsFeatureExposed(wgpu::FeatureName feature) const {
     case wgpu::FeatureName::MultiDrawIndirect:
     case wgpu::FeatureName::SharedBufferMemoryD3D12Resource:
     case wgpu::FeatureName::ChromiumExperimentalSubgroupMatrix:
-    case wgpu::FeatureName::TextureComponentSwizzle:
       return safety_level_ == webgpu::SafetyLevel::kUnsafe;
     case wgpu::FeatureName::AdapterPropertiesD3D:
     case wgpu::FeatureName::AdapterPropertiesVk:
@@ -1308,7 +1321,8 @@ bool WebGPUDecoderImpl::IsFeatureExposed(wgpu::FeatureName feature) const {
     case wgpu::FeatureName::DawnMultiPlanarFormats:
     case wgpu::FeatureName::TextureFormatsTier1:
     case wgpu::FeatureName::TextureFormatsTier2:
-    case wgpu::FeatureName::PrimitiveIndex: {
+    case wgpu::FeatureName::PrimitiveIndex:
+    case wgpu::FeatureName::TextureComponentSwizzle: {
       // Likely case when no features are blocked.
       if (runtime_unsafe_features_.empty() ||
           safety_level_ == webgpu::SafetyLevel::kUnsafe) {
@@ -1355,7 +1369,8 @@ WGPUFuture WebGPUDecoderImpl::RequestAdapterImpl(
 
   wgpu::Adapter adapter = CreatePreferredAdapter(
       static_cast<wgpu::PowerPreference>(options->powerPreference),
-      options->forceFallbackAdapter || force_fallback_adapter, feature_level);
+      options->forceFallbackAdapter || force_fallback_adapter, feature_level,
+      webgpu_on_vk_gl_interop_);
 
   if (adapter == nullptr) {
     // There are no adapters to return since webgpu is not supported here
@@ -1624,7 +1639,8 @@ bool WebGPUDecoderImpl::use_blocklist() const {
 wgpu::Adapter WebGPUDecoderImpl::CreatePreferredAdapter(
     wgpu::PowerPreference power_preference,
     bool force_fallback,
-    wgpu::FeatureLevel feature_level) const {
+    wgpu::FeatureLevel feature_level,
+    bool webgpu_on_vk_gl_interop) const {
   // Update power_preference based on command-line flag
   // use_webgpu_power_preference_.
   switch (use_webgpu_power_preference_) {
@@ -1749,10 +1765,12 @@ wgpu::Adapter WebGPUDecoderImpl::CreatePreferredAdapter(
       backend_types = {wgpu::BackendType::Metal};
 #elif BUILDFLAG(IS_LINUX)
       if (shared_context_state_->GrContextIsVulkan() ||
+          webgpu_on_vk_gl_interop_ ||
           shared_context_state_->IsGraphiteDawnVulkan()) {
         backend_types = {wgpu::BackendType::Vulkan};
       } else {
-        backend_types = {wgpu::BackendType::OpenGLES};
+        // Deliberately disable compat on linux.
+        backend_types = {wgpu::BackendType::Null};
       }
 #else
       backend_types = {wgpu::BackendType::Vulkan, wgpu::BackendType::OpenGLES};

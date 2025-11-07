@@ -872,21 +872,15 @@ class SharedDictionaryBrowserTest
   }
 
   bool HasPreloadedSharedDictionaryInfo() {
-    bool result = false;
-    base::RunLoop run_loop;
+    base::test::TestFuture<bool> future;
     GetTargetNetworkContext()->HasPreloadedSharedDictionaryInfoForTesting(
-        base::BindLambdaForTesting([&](bool value) {
-          result = value;
-          run_loop.Quit();
-        }));
-    run_loop.Run();
-    return result;
+        future.GetCallback());
+    return future.Get();
   }
 
   void SendMemoryPressureToNetworkService() {
     content::GetNetworkService()->OnMemoryPressure(
-        base::MemoryPressureListener::MemoryPressureLevel::
-            MEMORY_PRESSURE_LEVEL_CRITICAL);
+        base::MEMORY_PRESSURE_LEVEL_CRITICAL);
     // To make sure that OnMemoryPressure has been received by the network
     // service, send a GetNetworkList IPC and wait for the result.
     base::RunLoop run_loop;
@@ -1920,6 +1914,7 @@ IN_PROC_BROWSER_TEST_P(SharedDictionaryBrowserTest,
   GetTargetNetworkContext()->PreloadSharedDictionaryInfoForDocument(
       {GetURL("/")},
       preloaded_shared_dictionaries_handle.InitWithNewPipeAndPassReceiver());
+  FlushNetworkServiceInstanceForTesting();
   EXPECT_FALSE(HasPreloadedSharedDictionaryInfo());
 }
 

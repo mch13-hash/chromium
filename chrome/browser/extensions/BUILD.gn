@@ -88,6 +88,9 @@ source_set("extensions") {
     "api/developer_private/inspectable_views_finder.h",
     "api/developer_private/profile_info_generator.cc",
     "api/developer_private/profile_info_generator.h",
+    "api/downloads/download_extension_errors.h",
+    "api/downloads/downloads_api.cc",
+    "api/downloads/downloads_api.h",
     "api/gcm/gcm_api.cc",
     "api/gcm/gcm_api.h",
     "api/history/history_api.cc",
@@ -194,6 +197,8 @@ source_set("extensions") {
     "bookmarks/bookmarks_helpers.h",
     "browser_extension_window_controller.cc",
     "browser_extension_window_controller.h",
+    "browser_window_util.cc",
+    "browser_window_util.h",
     "chrome_app_icon.cc",
     "chrome_app_icon.h",
     "chrome_app_icon_delegate.h",
@@ -342,8 +347,6 @@ source_set("extensions") {
     "extension_web_ui.h",
     "extension_web_ui_override_registrar.cc",
     "extension_web_ui_override_registrar.h",
-    "extension_webkit_preferences.cc",
-    "extension_webkit_preferences.h",
     "external_component_loader.cc",
     "external_component_loader.h",
     "external_install_error.h",
@@ -375,16 +378,10 @@ source_set("extensions") {
     "forced_extensions/install_stage_tracker.h",
     "forced_extensions/install_stage_tracker_factory.cc",
     "forced_extensions/install_stage_tracker_factory.h",
-    "install_approval.cc",
-    "install_approval.h",
     "install_prompt_permissions.cc",
     "install_prompt_permissions.h",
-    "install_signer.cc",
-    "install_signer.h",
     "install_tracker_factory.cc",
     "install_tracker_factory.h",
-    "install_verifier.cc",
-    "install_verifier.h",
     "install_verifier_factory.cc",
     "install_verifier_factory.h",
     "installed_loader.cc",
@@ -397,7 +394,6 @@ source_set("extensions") {
     "managed_toolbar_pin_mode.h",
     "management/management_util.cc",
     "management/management_util.h",
-    "manifest_check_level.h",
     "manifest_v2_experiment_manager.cc",
     "manifest_v2_experiment_manager.h",
     "menu_manager.cc",
@@ -542,6 +538,7 @@ source_set("extensions") {
     "//chrome/browser/ui:ui_features",
     "//chrome/browser/ui/autofill",
     "//chrome/browser/ui/browser_window",
+    "//chrome/browser/ui/browser_window:create_browser_window",
     "//chrome/browser/ui/extensions",
     "//chrome/browser/ui/prefs",
     "//chrome/browser/ui/safety_hub",
@@ -557,6 +554,7 @@ source_set("extensions") {
     "//components/crx_file",
     "//components/data_sharing/public",
     "//components/data_sharing/public:features",
+    "//components/download/content/public",
     "//components/embedder_support",
     "//components/enterprise",
     "//components/guest_view/buildflags",
@@ -628,6 +626,8 @@ source_set("extensions") {
       "api/identity/identity_unimplemented_functions_android.cc",
       "api/identity/identity_unimplemented_functions_android.h",
       "api/management/chrome_management_api_delegate_android.cc",
+      "api/messaging/native_message_android_host.cc",
+      "api/messaging/native_message_android_host.h",
       "api/tabs/tabs_api_android.cc",
       "api/tabs/tabs_event_router_android.cc",
       "api/tabs/tabs_event_router_android.h",
@@ -645,7 +645,10 @@ source_set("extensions") {
       "api/tabs/tabs_api_non_android.cc",
       "chrome_extension_host_delegate_non_android.cc",
     ]
-    public_deps += [ "//components/app_icon_loader" ]
+    public_deps += [
+      "//chrome/browser/ui/tabs:utils",
+      "//components/app_icon_loader",
+    ]
     deps += [
       "//chrome/browser/ui/user_education",
       "//chrome/browser/ui/web_applications:launch_utils",
@@ -653,17 +656,19 @@ source_set("extensions") {
   }
 
   if (!is_chromeos) {
-    sources += [
-      "api/messaging/launch_context.cc",
-      "api/messaging/launch_context.h",
-      "api/messaging/native_message_process_host.cc",
-      "api/messaging/native_message_process_host.h",
-      "api/messaging/native_messaging_launch_from_native.cc",
-      "api/messaging/native_messaging_launch_from_native.h",
-      "api/messaging/native_process_launcher.cc",
-      "api/messaging/native_process_launcher.h",
-      "chrome_kiosk_delegate_non_chromeos.cc",
-    ]
+    sources += [ "chrome_kiosk_delegate_non_chromeos.cc" ]
+    if (!is_android) {
+      sources += [
+        "api/messaging/launch_context.cc",
+        "api/messaging/launch_context.h",
+        "api/messaging/native_message_process_host.cc",
+        "api/messaging/native_message_process_host.h",
+        "api/messaging/native_messaging_launch_from_native.cc",
+        "api/messaging/native_messaging_launch_from_native.h",
+        "api/messaging/native_process_launcher.cc",
+        "api/messaging/native_process_launcher.h",
+      ]
+    }
     if (is_posix) {
       sources += [ "api/messaging/launch_context_posix.cc" ]
     }
@@ -682,8 +687,6 @@ source_set("extensions") {
       "api/developer_private/developer_private_event_router_desktop.h",
       "api/developer_private/developer_private_functions_desktop.cc",
       "api/developer_private/developer_private_functions_desktop.h",
-      "api/downloads/downloads_api.cc",
-      "api/downloads/downloads_api.h",
       "api/enterprise_reporting_private/conversion_utils.cc",
       "api/enterprise_reporting_private/conversion_utils.h",
       "api/enterprise_reporting_private/enterprise_reporting_private_api.cc",
@@ -911,6 +914,7 @@ source_set("extensions") {
       "//chrome/browser/apps:user_type_filter",
       "//chrome/browser/apps/app_service:constants",
       "//chrome/browser/chooser_controller",
+      "//chrome/browser/device_identity",
       "//chrome/browser/feedback",
       "//chrome/browser/importer",
       "//chrome/browser/lifetime:termination_notification",
@@ -986,7 +990,6 @@ source_set("extensions") {
       "//components/device_signals/core/browser",
       "//components/device_signals/core/common",
       "//components/dom_distiller/core",
-      "//components/download/content/public",
       "//components/download/public/common:public",
       "//components/drive",
       "//components/embedder_support:user_agent",
@@ -1132,6 +1135,7 @@ source_set("extensions") {
       ]
 
       deps += [
+        "//chrome/browser/ash/certificate_provider",
         "//chrome/browser/chromeos/extensions/desk_api",
         "//chrome/browser/chromeos/extensions/external_loader",
         "//chrome/browser/chromeos/extensions/login_screen/login_state",
@@ -1166,6 +1170,7 @@ source_set("extensions") {
         ]
 
         deps += [
+          "//chrome/browser/ash/printing",
           "//chrome/browser/chromeos/extensions/printing_metrics",
           "//chrome/browser/chromeos/printing",
           "//chrome/browser/pdf:pdf_pref_names",
@@ -1745,6 +1750,7 @@ source_set("chrome_extensions_browser_client") {
 
     deps += [
       "//chrome/browser:browser_process",
+      "//chrome/browser/custom_handlers",
       "//chrome/browser/extensions",
       "//chrome/browser/extensions/api/runtime",
       "//chrome/browser/web_applications",

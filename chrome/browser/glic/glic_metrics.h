@@ -15,6 +15,7 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/browser/glic/public/glic_instance.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/display/display.h"
@@ -173,7 +174,11 @@ enum class ResponseSegmentation {
   kActorTaskIconAttachedAudio = 50,
   kActorTaskIconDetachedText = 51,
   kActorTaskIconDetachedAudio = 52,
-  kMaxValue = kActorTaskIconDetachedAudio,
+  kHandoffButtonAttachedText = 53,
+  kHandoffButtonAttachedAudio = 54,
+  kHandoffButtonDetachedText = 55,
+  kHandoffButtonDetachedAudio = 56,
+  kMaxValue = kHandoffButtonDetachedAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseSegmentation)
 
@@ -212,10 +217,13 @@ enum class GlicRequestEvent {
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicRequestEvent)
 
-// LINT.IfChange(GlicGetContextFromFocusedTabError)
-enum class GlicGetContextFromFocusedTabError {
+// Error types for when attempting to extract context from a tab.
+// LINT.IfChange(GlicGetContextFromTabError)
+enum class GlicGetContextFromTabError {
   kUnknown = 0,
-  kPermissionDeniedWindowNotShowing = 1,
+  // Tab context requests when the panel is hidden are now reported as both as
+  // "hidden" and "error" in Glic.Api.* histograms.
+  kPermissionDeniedWindowNotShowing_DEPRECATED = 1,
   kTabNotFound = 2,
   kPermissionDeniedContextPermissionNotEnabled = 3,
   kPermissionDenied = 4,
@@ -223,7 +231,7 @@ enum class GlicGetContextFromFocusedTabError {
   kPageContextNotEligible = 6,
   kMaxValue = kPageContextNotEligible,
 };
-// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicGetContextFromFocusedTabError)
+// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicGetContextFromTabError)
 
 // LINT.IfChange(GlicTabPinnedForSharingResult)
 enum class GlicTabPinnedForSharingResult {
@@ -247,7 +255,7 @@ enum class ActiveTabSharingState {
 
 class GlicEnabling;
 class GlicSharingManager;
-class GlicWindowController;
+class GlicWindowControllerInterface;
 
 namespace internal {
 class BrowserActivityObserver;
@@ -264,9 +272,11 @@ class GlicMetrics {
     virtual gfx::Size GetWindowSize() const = 0;
     virtual bool IsWindowShowing() const = 0;
     virtual bool IsWindowAttached() const = 0;
-    virtual content::WebContents* GetContents() = 0;
+    virtual content::WebContents* GetFocusedWebContents() = 0;
     virtual ActiveTabSharingState GetActiveTabSharingState() = 0;
     virtual int32_t GetNumPinnedTabs() const = 0;
+    virtual std::vector<content::WebContents*>
+    GetPinnedAndSharedWebContents() = 0;
   };
 
   GlicMetrics(Profile* profile, GlicEnabling* enabling);
@@ -287,6 +297,7 @@ class GlicMetrics {
   void OnResponseRated(bool positive);
   void OnTurnCompleted(mojom::WebClientModel model, base::TimeDelta duration);
   void OnModelChanged(mojom::WebClientModel model);
+  void OnRecordUseCounter(uint16_t counter);
 
   void OnAttachedToBrowser(AttachChangeReason reason);
   void OnDetachedFromBrowser(AttachChangeReason reason);
@@ -339,20 +350,32 @@ class GlicMetrics {
 
   // Logs an error that occurred while trying to get context from the focused
   // tab.
-  void LogGetContextFromFocusedTabError(
-      GlicGetContextFromFocusedTabError error);
+  void LogGetContextFromFocusedTabError(GlicGetContextFromTabError error);
 
-  // Must be called immediately after constructor before any calls from
-  // glic.mojom.
-  void SetControllers(GlicWindowController* window_controller,
+  // Logs an error that occurred while trying to get context from an arbitrary
+  // tab.
+  void LogGetContextFromTabError(GlicGetContextFromTabError error);
+
+  // Logs an error that occurred while an actor tried to get context from an
+  // arbitrary tab.
+  void LogGetContextForActorFromTabError(GlicGetContextFromTabError error);
+
+  // One of these three must be called immediately after constructor before any
+  // calls from glic.mojom.
+  void SetControllers(GlicWindowControllerInterface* window_controller,
                       GlicSharingManager* sharing_manager);
+  void SetControllersWithInstance(GlicInstance* glic_instance,
+                                  GlicSharingManager* sharing_manager);
+  void ClearControllers();
+
   void SetDelegateForTesting(std::unique_ptr<Delegate> delegate);
 
-  // Must be called when context is requested.
-  void DidRequestContextFromFocusedTab();
+  // Must be called when context is requested from a tab.
+  void DidRequestContextFromTab(content::WebContents& web_contents);
 
-  // Sets the starting input mode of the web client.
-  void SetStartingMode(mojom::WebClientMode mode);
+  // Sets the input mode of the web client. Should be called when the panel is
+  // opened and in every subsequent mode change.
+  void SetWebClientMode(mojom::WebClientMode mode);
 
   mojom::WebClientModel current_model() const { return current_model_; }
 
@@ -400,20 +423,25 @@ class GlicMetrics {
     // OnResponseStopped(). This is a workaround and should be removed, see
     // crbug.com/399151164.
     bool response_started_ = false;
-    bool did_request_context_ = false;
     bool reported_reaction_time_canned_ = false;
     bool reported_reaction_time_modelled_ = false;
-    // The source id at the time context is requested. If context
-    // was not requested then this is `no_url_source_id_`.
-    ukm::SourceId source_id_ = ukm::NoURLSourceId();
+    // A chosen source id from which context was requested.
+    ukm::SourceId chosen_source_id_ = ukm::NoURLSourceId();
   };
 
+  // Tracks information related to individual request/response turns.
+  // It is reset when new user input is submitted and populated as the turn
+  // progresses. It is also reset at when the response stops.
   TurnInfo turn_;
 
   // The last web client input mode used by the user.
   mojom::WebClientMode input_mode_ = mojom::WebClientMode::kUnknown;
   std::set<mojom::WebClientMode> inputs_modes_used_;
   int attach_change_count_ = 0;
+
+  // Tracks the source ID from the latest tab context requested by the web
+  // client. It is reset when user input is submitted.
+  ukm::SourceId last_tab_context_source_id_ = ukm::NoURLSourceId();
 
   mojom::WebClientModel current_model_ = mojom::WebClientModel::kDefault;
 

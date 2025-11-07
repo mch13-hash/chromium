@@ -49,7 +49,6 @@
 #include "cc/tiles/tile_priority.h"
 #include "cc/tiles/tile_task_manager.h"
 #include "cc/tiles/tiles_with_resource_iterator.h"
-#include "components/viz/common/resources/resource_sizes.h"
 #include "components/viz/common/traced_value.h"
 #include "third_party/perfetto/include/perfetto/tracing/track.h"
 #include "ui/gfx/geometry/axis_transform2d.h"
@@ -766,11 +765,7 @@ void TileManager::InitializeTilesWithResourcesForTesting(
         tiles[i]->desired_texture_size(), client_->GetTileFormat(),
         client_->GetTargetColorParams(gfx::ContentColorUsage::kSRGB)
             .color_space);
-    raster_buffer_provider_->AcquireBufferForRaster(
-        resource, 0, 0,
-        /*depends_on_at_raster_decodes=*/false,
-        /*depends_on_hardware_accelerated_jpeg_candidates=*/false,
-        /*depends_on_hardware_accelerated_webp_candidates=*/false);
+    raster_buffer_provider_->AcquireBufferForRaster(resource, 0, 0);
     // The raster here never really happened, cuz tests. So just add an
     // arbitrary sync token.
     if (resource.backing()) {
@@ -1511,12 +1506,8 @@ scoped_refptr<TileTask> TileManager::CreateRasterTask(
   ImageDecodeCache::TracingInfo tracing_info(
       prepare_tiles_count_, prioritized_tile.priority().priority_bin);
   bool has_at_raster_images = false;
-  bool has_hardware_accelerated_jpeg_candidates = false;
-  bool has_hardware_accelerated_webp_candidates = false;
-  image_controller_.ConvertImagesToTasks(
-      &sync_decoded_images, &decode_tasks, &has_at_raster_images,
-      &has_hardware_accelerated_jpeg_candidates,
-      &has_hardware_accelerated_webp_candidates, tracing_info);
+  image_controller_.ConvertImagesToTasks(&sync_decoded_images, &decode_tasks,
+                                         &has_at_raster_images, tracing_info);
   // Notify |decoded_image_tracker_| after |image_controller_| to ensure we've
   // taken new refs on the images before releasing the predecode API refs.
   decoded_image_tracker_.OnImagesUsedInDraw(sync_decoded_images);
@@ -1557,9 +1548,7 @@ scoped_refptr<TileTask> TileManager::CreateRasterTask(
 
   std::unique_ptr<RasterBuffer> raster_buffer =
       raster_buffer_provider_->AcquireBufferForRaster(
-          resource, resource_content_id, tile->invalidated_id(),
-          has_at_raster_images, has_hardware_accelerated_jpeg_candidates,
-          has_hardware_accelerated_webp_candidates);
+          resource, resource_content_id, tile->invalidated_id());
 
   std::optional<PlaybackImageProvider::Settings> settings;
   settings.emplace();
@@ -1952,9 +1941,26 @@ void TileManager::CheckIfMoreTilesNeedToBePrepared() {
       global_state_.memory_limit_policy == ALLOW_NOTHING;
 
   // If we have tiles left to raster for activation, and we don't allow
-  // activating without them, then skip activation and return early.
-  if (wait_for_all_required_tiles)
+  // activating without them, then skip activation and return early, unless last
+  // assign failed due to OOM.
+  // Reaching a steady memory state as OOM indicates that relaimable tile memory
+  // from previous frames have all been reclaimed, and we must mark unscheduled
+  // tiles as OOM in order to activate.
+  auto should_skip_wait =
+      base::FeatureList::IsEnabled(features::kTileOOMFreezeMitigation) &&
+      did_oom_on_last_assign_;
+  if (wait_for_all_required_tiles && !should_skip_wait) {
+    if (!all_tiles_that_need_to_be_rasterized_are_scheduled_) {
+      // When task limit is exceeded, and we didn't reclaim task budget since
+      // last `ScheduleTasks()`, `AssignGpuMemoryToTiles()` may not produce
+      // any new `work_to_schedule`, but we're still blocked on unscheduled
+      // tiles. Schedule `more_tiles_need_prepare_check_notifier_` again, so
+      // that we can assign gpu memory for more tiles when task budget gets
+      // reclaimed.
+      more_tiles_need_prepare_check_notifier_.Schedule();
+    }
     return;
+  }
 
   // Mark any required tiles that have not been been assigned memory after
   // reaching a steady memory state as OOM. This ensures that we activate/draw

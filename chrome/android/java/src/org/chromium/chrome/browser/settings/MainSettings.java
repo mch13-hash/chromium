@@ -8,6 +8,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.os.Bundle;
@@ -56,6 +57,7 @@ import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.safety_hub.SafetyHubMetricUtils;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
+import org.chromium.chrome.browser.settings.search.BaseSearchIndexProvider;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.ProfileDataCache;
 import org.chromium.chrome.browser.signin.services.SigninManager;
@@ -63,8 +65,8 @@ import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.sync.settings.ManageSyncSettings;
 import org.chromium.chrome.browser.sync.settings.SignInPreference;
 import org.chromium.chrome.browser.sync.settings.SyncSettingsUtils;
-import org.chromium.chrome.browser.toolbar.ToolbarPositionController;
 import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarStatePredictor;
+import org.chromium.chrome.browser.toolbar.settings.AddressBarPreference;
 import org.chromium.chrome.browser.toolbar.settings.AddressBarSettingsFragment;
 import org.chromium.chrome.browser.tracing.settings.DeveloperSettings;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
@@ -96,6 +98,8 @@ import java.util.Map;
 @NullMarked
 public class MainSettings extends ChromeBaseSettingsFragment
         implements TemplateUrlService.LoadListener,
+                TemplateUrlService.TemplateUrlServiceObserver,
+                SharedPreferences.OnSharedPreferenceChangeListener,
                 SyncService.SyncStateChangedListener,
                 SigninManager.SignInStateObserver,
                 SettingsCustomTabLauncher.SettingsCustomTabLauncherClient {
@@ -132,7 +136,7 @@ public class MainSettings extends ChromeBaseSettingsFragment
     private ManagedPreferenceDelegate mManagedPreferenceDelegate;
     private ChromeBasePreference mManageSync;
     private ObservableSupplier<@Nullable ModalDialogManager> mModalDialogManagerSupplier;
-    // TODO(crbug.com/343933167): This should be removed when the snackbar issue is addressed.
+    // TODO(crbug.com/354927682): This should be removed when the snackbar issue is addressed.
     // Will be true if `onSignedOut()` was called when the current activity state is not
     // `Lifecycle.State.STARTED`.
     private boolean mShouldShowSnackbar;
@@ -185,6 +189,17 @@ public class MainSettings extends ChromeBaseSettingsFragment
     @Override
     public void onStart() {
         super.onStart();
+        TemplateUrlService templateUrlService =
+                TemplateUrlServiceFactory.getForProfile(getProfile());
+        if (templateUrlService != null) {
+            templateUrlService.addObserver(this);
+        }
+
+        SharedPreferences sharedPreferences = ContextUtils.getAppSharedPreferences();
+        if (sharedPreferences != null) {
+            sharedPreferences.registerOnSharedPreferenceChangeListener(this);
+        }
+
         SyncService syncService = SyncServiceFactory.getForProfile(getProfile());
         if (syncService != null) {
             syncService.addSyncStateChangedListener(this);
@@ -202,6 +217,17 @@ public class MainSettings extends ChromeBaseSettingsFragment
         SyncService syncService = SyncServiceFactory.getForProfile(getProfile());
         if (syncService != null) {
             syncService.removeSyncStateChangedListener(this);
+        }
+
+        SharedPreferences sharedPreferences = ContextUtils.getAppSharedPreferences();
+        if (sharedPreferences != null) {
+            sharedPreferences.unregisterOnSharedPreferenceChangeListener(this);
+        }
+
+        TemplateUrlService templateUrlService =
+                TemplateUrlServiceFactory.getForProfile(getProfile());
+        if (templateUrlService != null) {
+            templateUrlService.removeObserver(this);
         }
     }
 
@@ -345,6 +371,14 @@ public class MainSettings extends ChromeBaseSettingsFragment
         ChromeBasePreference chromeBasePreference = (ChromeBasePreference) mAllPreferences.get(key);
         assumeNonNull(chromeBasePreference);
         chromeBasePreference.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
+    }
+
+    private void maybeUpdatePreferences() {
+        // `updatePreferences()` should be called only if the fragment is in the `STARTED` state,
+        // otherwise it will be called in `onStart()`.
+        if (getLifecycle().getCurrentState().isAtLeast(Lifecycle.State.STARTED)) {
+            updatePreferences();
+        }
     }
 
     private void updatePreferences() {
@@ -547,7 +581,10 @@ public class MainSettings extends ChromeBaseSettingsFragment
 
         if (showSetting) {
             Preference addressBarPreference = addPreferenceIfAbsent(PREF_ADDRESS_BAR);
-            addressBarPreference.setSummary(ToolbarPositionController.getToolbarPositionResId());
+            addressBarPreference.setSummary(
+                    AddressBarPreference.isToolbarConfiguredToShowOnTop()
+                            ? R.string.address_bar_settings_top
+                            : R.string.address_bar_settings_bottom);
             updateNewPreferenceAndIncrementViewCount(
                     addressBarPreference,
                     AddressBarSettingsFragment.getTitle(getContext()),
@@ -630,9 +667,9 @@ public class MainSettings extends ChromeBaseSettingsFragment
     // SigninManager.SignInStateObserver implementation.
     @Override
     public void onSignedIn() {
-        // After signing in or out of a managed account, preferences may change or become enabled
-        // or disabled.
-        new Handler().post(() -> updatePreferences());
+        // After signing in or out of a managed account, preferences may change or become enabled or
+        // disabled.
+        new Handler().post(() -> maybeUpdatePreferences());
     }
 
     @Override
@@ -663,6 +700,19 @@ public class MainSettings extends ChromeBaseSettingsFragment
     public void onTemplateUrlServiceLoaded() {
         TemplateUrlServiceFactory.getForProfile(getProfile()).unregisterLoadListener(this);
         updateSearchEnginePreference();
+    }
+
+    @Override
+    public void onTemplateURLServiceChanged() {
+        updateSearchEnginePreference();
+    }
+
+    @Override
+    public void onSharedPreferenceChanged(
+            SharedPreferences sharedPreferences, @Nullable String key) {
+        if (ChromePreferenceKeys.TOOLBAR_TOP_ANCHORED.equals(key)) {
+            updateAddressBarPreference();
+        }
     }
 
     @Override
@@ -715,4 +765,9 @@ public class MainSettings extends ChromeBaseSettingsFragment
     public @AnimationType int getAnimationType() {
         return AnimationType.PROPERTY;
     }
+
+    // TODO (adelm): Mimic logic from #createPreferences under #initPreferenceXml. Also, clear NO-OP
+    // for #updateDynamicPreferences.
+    public static final BaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
+            new BaseSearchIndexProvider(MainSettings.class.getName(), R.xml.main_preferences);
 }

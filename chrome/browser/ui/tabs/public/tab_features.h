@@ -15,6 +15,7 @@
 
 class AskBeforeHttpDialogController;
 class CollaborationMessagingPageActionController;
+class CookieControlsPageActionController;
 class FileSystemAccessPageActionController;
 class FromGWSNavigationAndKeepAliveRequestObserver;
 class IntentPickerViewPageActionController;
@@ -24,6 +25,7 @@ class MemorySaverChipTabHelper;
 class PinnedTranslateActionListener;
 class Profile;
 class PwaInstallPageActionController;
+class ReadAnythingController;
 class ReadAnythingSidePanelController;
 class RollBackModeBInfoBarController;
 class SidePanelRegistry;
@@ -95,7 +97,6 @@ class PermissionIndicatorsTabData;
 
 namespace privacy_sandbox {
 class PrivacySandboxTabObserver;
-class PrivacySandboxIncognitoTabObserver;
 }  // namespace privacy_sandbox
 
 namespace sync_sessions {
@@ -177,6 +178,8 @@ class TabFeatures {
     return side_panel_registry_.get();
   }
 
+  // TODO(crbug.com/447418049): This will be removed in the future when
+  // ownership of this controller is migrated to ReadAnythingController.
   ReadAnythingSidePanelController* read_anything_side_panel_controller() {
     return read_anything_side_panel_controller_.get();
   }
@@ -187,11 +190,6 @@ class TabFeatures {
 
   privacy_sandbox::PrivacySandboxTabObserver* privacy_sandbox_tab_observer() {
     return privacy_sandbox_tab_observer_.get();
-  }
-
-  privacy_sandbox::PrivacySandboxIncognitoTabObserver*
-  privacy_sandbox_incognito_tab_observer() {
-    return privacy_sandbox_incognito_tab_observer_.get();
   }
 
   extensions::ExtensionSidePanelManager* extension_side_panel_manager() {
@@ -331,6 +329,9 @@ class TabFeatures {
   std::unique_ptr<customize_chrome::SidePanelController>
       customize_chrome_side_panel_controller_;
 
+  // Responsible for managing the read anything (Reading mode) feature.
+  std::unique_ptr<ReadAnythingController> read_anything_controller_;
+
   std::unique_ptr<ReadAnythingSidePanelController>
       read_anything_side_panel_controller_;
 
@@ -343,9 +344,6 @@ class TabFeatures {
 
   std::unique_ptr<privacy_sandbox::PrivacySandboxTabObserver>
       privacy_sandbox_tab_observer_;
-
-  std::unique_ptr<privacy_sandbox::PrivacySandboxIncognitoTabObserver>
-      privacy_sandbox_incognito_tab_observer_;
 
   // The tab-scoped extension side-panel manager. There is a separate
   // window-scoped extension side-panel manager.
@@ -360,6 +358,13 @@ class TabFeatures {
   // tab counterpart from sync.
   std::unique_ptr<tab_groups::SavedTabGroupWebContentsListener>
       saved_tab_group_web_contents_listener_;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  // Manages the protocol handler picker dialog on ChromeOS. Must be destroyed
+  // after the `tab_dialog_manager_`.
+  std::unique_ptr<web_app::ProtocolHandlerPickerCoordinator>
+      protocol_handler_picker_coordinator_;
+#endif
 
   // Manages various tab modal dialogs.
   std::unique_ptr<TabDialogManager> tab_dialog_manager_;
@@ -414,6 +419,10 @@ class TabFeatures {
   std::unique_ptr<CollaborationMessagingPageActionController>
       collaboration_messaging_page_action_controller_;
 
+  // Manages the Cookie Controls page action.
+  std::unique_ptr<CookieControlsPageActionController>
+      cookie_controls_page_action_controller_;
+
 #if BUILDFLAG(ENABLE_GLIC)
   std::unique_ptr<glic::GlicInstanceHelper> glic_instance_helper_;
   std::unique_ptr<glic::GlicTabIndicatorHelper> glic_tab_indicator_helper_;
@@ -467,11 +476,6 @@ class TabFeatures {
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS)
   std::unique_ptr<wallet::ChromeWalletablePassClient> walletable_pass_client_;
-#endif
-
-#if BUILDFLAG(IS_CHROMEOS)
-  std::unique_ptr<web_app::ProtocolHandlerPickerCoordinator>
-      protocol_handler_picker_coordinator_;
 #endif
   // Must be the last member.
   base::WeakPtrFactory<TabFeatures> weak_factory_{this};

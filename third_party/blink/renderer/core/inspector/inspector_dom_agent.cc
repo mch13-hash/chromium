@@ -291,6 +291,10 @@ protocol::DOM::PseudoType InspectorDOMAgent::ProtocolPseudoElementType(
       return protocol::DOM::PseudoTypeEnum::ViewTransitionNew;
     case kPseudoIdViewTransitionOld:
       return protocol::DOM::PseudoTypeEnum::ViewTransitionOld;
+    case kPseudoIdOverscrollAreaParent:
+      return protocol::DOM::PseudoTypeEnum::OverscrollAreaParent;
+    case kPseudoIdOverscrollClientArea:
+      return protocol::DOM::PseudoTypeEnum::OverscrollClientArea;
     case kAfterLastInternalPseudoId:
     case kPseudoIdNone:
     case kPseudoIdInvalid:
@@ -2231,8 +2235,9 @@ std::unique_ptr<protocol::DOM::Node> InspectorDOMAgent::BuildObjectForNode(
     if (element->IsPseudoElement()) {
       value->setPseudoType(
           ProtocolPseudoElementType(element->GetPseudoIdForStyling()));
-      if (auto tag = To<PseudoElement>(element)->view_transition_name())
+      if (auto tag = To<PseudoElement>(element)->GetPseudoArgument()) {
         value->setPseudoIdentifier(tag);
+      }
     } else {
       if (!element->ownerDocument()->xmlVersion().empty())
         value->setXmlVersion(element->ownerDocument()->xmlVersion());

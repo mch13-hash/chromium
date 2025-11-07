@@ -57,7 +57,7 @@ static_library("browser") {
     sources += [ "browser_utils.cc" ]
 
     deps += [
-      "//components/policy/content",
+      "//components/policy/core/browser",
       "//content/public/browser",
     ]
   }
@@ -99,6 +99,10 @@ static_library("browser") {
 
   if (is_chromeos) {
     sources += [ "chromeos/browser_utils_chromeos.cc" ]
+  }
+
+  if (is_android) {
+    sources += [ "android/browser_utils_android.cc" ]
   }
 }
 

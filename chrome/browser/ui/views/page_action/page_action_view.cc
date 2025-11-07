@@ -119,13 +119,19 @@ void PageActionView::OnPageActionModelChanged(
   const bool was_chip_visible = IsChipVisible();
   if (!model.GetVisible()) {
     ResetSlideAnimation(/*show=*/false);
-  } else if (!model.GetShouldAnimateChip()) {
-    ResetSlideAnimation(/*show=*/model.ShouldShowSuggestionChip());
     NotifyIsChipShowingChange();
   } else if (model.ShouldShowSuggestionChip()) {
-    AnimateIn(/*string_id=*/std::nullopt);
-  } else {
+    if (model.GetShouldAnimateChipIn()) {
+      AnimateIn(/*string_id=*/std::nullopt);
+    } else {
+      ResetSlideAnimation(/*show=*/true);
+      NotifyIsChipShowingChange();
+    }
+  } else if (model.GetShouldAnimateChipOut()) {
     AnimateOut();
+  } else {
+    ResetSlideAnimation(/*show=*/false);
+    NotifyIsChipShowingChange();
   }
 
   // Announce the chip only if announcements are enabled and the chip was
@@ -248,10 +254,14 @@ const gfx::Insets PageActionView::GetInsetsForNonVectorIcon() const {
   const int vertical_padding =
       (icon_size_ + icon_insets_.height() - image_size.height()) / 2;
 
-  // TODO(crbug.com/437929704): Remove the DUMP_WILL_BE_CHECK with CHECK once
-  // sure about codepaths that might lead to negative paddings.
-  DUMP_WILL_BE_CHECK(horizontal_padding >= 0);
-  DUMP_WILL_BE_CHECK(vertical_padding >= 0);
+  CHECK(horizontal_padding >= 0)
+      << "Horizontal size of image exceeds maximum.\nIcon Size: " << icon_size_
+      << "\nInsets: " << icon_insets_.width()
+      << "\nImage Size: " << image_size.width();
+  CHECK(vertical_padding >= 0)
+      << "Vertical size of image exceeds maximum.\nIcon Size: " << icon_size_
+      << "\nInsets: " << icon_insets_.height()
+      << "\nImage Size: " << image_size.height();
 
   return gfx::Insets::VH(std::max(vertical_padding, 0),
                          std::max(horizontal_padding, 0));

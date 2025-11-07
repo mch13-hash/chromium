@@ -9,6 +9,7 @@
 
 #include "base/auto_reset.h"
 #include "base/metrics/user_metrics.h"
+#include "base/notreached.h"
 #include "base/strings/strcat.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/profiles/profile.h"
@@ -31,7 +32,6 @@
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/actions/action_id.h"
-#include "ui/actions/action_utils.h"
 #include "ui/actions/actions.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/menu_separator_types.h"
@@ -339,11 +339,26 @@ void PinnedActionToolbarButtonActionViewInterface::ActionItemChangedImpl(
   action_view_->SetActionEngaged(
       action_item->GetProperty(kActionItemUnderlineIndicatorKey));
 
+  bool is_pinnable = true;
+  switch (static_cast<actions::ActionPinnableState>(
+      action_item->GetProperty(actions::kActionItemPinnableKey))) {
+    case actions::ActionPinnableState::kNotPinnable:
+      is_pinnable = false;
+      break;
+    case actions::ActionPinnableState::kPinnable:
+    case actions::ActionPinnableState::kEnterpriseControlled:
+      is_pinnable = true;
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  if (!is_pinnable && action_view_->IsPinned()) {
+    action_view_->SetVisible(false);
+  }
+
   OnViewChangedImpl(action_item);
-  action_view_->SetIsPinnable(
-      action_item->GetProperty(actions::kActionItemPinnableKey) ==
-      std::underlying_type_t<actions::ActionPinnableState>(
-          actions::ActionPinnableState::kPinnable));
+
   action_view_->SetIsActionShowingBubble(action_item->GetIsShowingBubble());
 }
 
@@ -380,7 +395,8 @@ void PinnedActionToolbarButtonActionViewInterface::OnViewChangedImpl(
   // item, use the stateful image. Otherwise, use the action item's image.
   ui::ImageModel image_model;
 
-  if (IsActionItemClass<actions::StatefulImageActionItem>(action_item)) {
+  if (actions::IsActionItemClass<actions::StatefulImageActionItem>(
+          action_item)) {
     image_model = static_cast<actions::StatefulImageActionItem*>(action_item)
                       ->GetStatefulImage();
   } else {

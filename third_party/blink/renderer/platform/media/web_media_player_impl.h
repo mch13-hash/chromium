@@ -248,8 +248,6 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
   uint64_t AudioDecodedByteCount() const override;
   uint64_t VideoDecodedByteCount() const override;
 
-  bool PassedTimingAllowOriginCheck() const override;
-
   void SetVolumeMultiplier(double multiplier) override;
   void SetPersistentState(bool persistent) override;
   void SetPowerExperimentState(bool state) override;
@@ -446,8 +444,10 @@ class PLATFORM_EXPORT WebMediaPlayerImpl
   void DemuxerRequestsSeek(base::TimeDelta seek_time) override;
 
 #if BUILDFLAG(ENABLE_FFMPEG) || BUILDFLAG(ENABLE_HLS_DEMUXER)
-  void AddMediaTrack(const media::MediaTrack&) override;
-  void RemoveMediaTrack(const media::MediaTrack&) override;
+  void AddTrack(const media::MediaTrack&) override;
+  void RemoveTrack(const media::MediaTrack&) override;
+  void SetTrackState(const media::MediaTrack&,
+                     media::MediaTrack::State) override;
 #endif  // BUILDFLAG(ENABLE_FFMPEG) || BUILDFLAG(ENABLE_HLS_DEMUXER)
 
 #if BUILDFLAG(ENABLE_HLS_DEMUXER)

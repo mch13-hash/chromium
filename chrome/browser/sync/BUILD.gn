@@ -86,10 +86,12 @@ source_set("sync") {
     "//chrome/app:generated_resources",
     "//chrome/app:generated_resources_grit",
     "//chrome/browser:browser_process",
+    "//chrome/browser/consent_auditor",
     "//chrome/browser/history",
     "//chrome/browser/password_manager/factories",
     "//chrome/browser/plus_addresses",
     "//chrome/browser/signin",
+    "//chrome/browser/subscription_eligibility",
     "//chrome/browser/ui/sync",
     "//chrome/browser/ui/toolbar",
     "//chrome/browser/webauthn",
@@ -147,6 +149,8 @@ source_set("sync") {
     "//chrome/browser/android/webapk/proto",
     "//components/webapps/browser",
   ]
+
+  allow_circular_includes_from = []
 
   if (enable_extensions) {
     deps += [ "//chrome/browser/web_applications" ]
@@ -240,12 +244,14 @@ source_set("sync") {
       "//components/desks_storage",
       "//ui/events/ash",
     ]
-    allow_circular_includes_from = [
+    allow_circular_includes_from += [
       "//chrome/browser/ash/app_list",
       "//chrome/browser/ash/app_list/arc",
       "//chrome/browser/ash/login/session",
     ]
   }
+
+  allow_circular_includes_from += [ "//chrome/browser/consent_auditor" ]
 
   if (enable_glic) {
     deps += [ "//chrome/browser/glic" ]

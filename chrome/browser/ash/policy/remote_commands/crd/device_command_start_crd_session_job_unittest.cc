@@ -73,9 +73,6 @@ constexpr RemoteCommandJob::UniqueIDType kUniqueID = 123456789;
 // Common template used in all UMA histograms for session result logs.
 constexpr char kHistogramResultTemplate[] =
     "Enterprise.DeviceRemoteCommand.Crd.%s.%s.Result";
-// Common template used in all UMA histograms for session duration logs.
-constexpr char kHistogramDurationTemplate[] =
-    "Enterprise.DeviceRemoteCommand.Crd.%s.%s.SessionDuration";
 
 // Created for session type logged to UMA.
 const char* SessionTypeToUmaString(TestSessionType session_type) {
@@ -273,6 +270,10 @@ class DeviceCommandStartCrdSessionJobTest : public ash::DeviceSettingsTestBase {
 
   void LogInAsAffiliatedUser() {
     StartSessionOfType(TestSessionType::kAffiliatedUserSession);
+  }
+
+  void LogInAsManagedGuestSessionUser() {
+    StartSessionOfType(TestSessionType::kManagedGuestSession);
   }
 
   void SetDeviceIdleTime(int idle_time_in_sec) {
@@ -654,6 +655,15 @@ TEST_F(DeviceCommandStartCrdSessionJobTest, ShouldPassRequestOriginToDelegate) {
             delegate().session_parameters().request_origin);
 }
 
+TEST_F(DeviceCommandStartCrdSessionJobTest, ShouldPassAudioPlaybackToDelegate) {
+  LogInAsAffiliatedUser();
+  Result result = RunJobAndWaitForResult();
+
+  EXPECT_SUCCESS(result);
+  EXPECT_EQ(StartCrdSessionJobDelegate::AudioPlayback::kLocalOnly,
+            delegate().session_parameters().audio_playback);
+}
+
 TEST_F(DeviceCommandStartCrdSessionJobTest, ShouldCheckNetworkManagedStatus) {
   LogInAsKioskUser();
 
@@ -886,6 +896,35 @@ TEST_F(DeviceCommandStartCrdSessionJobTest,
 }
 
 TEST_F(DeviceCommandStartCrdSessionJobTest,
+       ShouldSetAutoAcceptTimeOutIfMgsIsIdleSinceBoot) {
+  AddActiveManagedNetwork();
+  base::TimeTicks never;
+  ASSERT_TRUE(never.is_null());
+  SetLastDeviceActivityTime(never);
+
+  LogInAsManagedGuestSessionUser();
+  Result result = RunJobAndWaitForResult();
+
+  EXPECT_SUCCESS(result);
+  EXPECT_EQ(delegate().session_parameters().connection_auto_accept_timeout,
+            kAutoApproveConnectionTimeout);
+}
+
+TEST_F(DeviceCommandStartCrdSessionJobTest,
+       ShouldNotSetAutoAcceptTimeOutIfMgsIsConnectedToUnmanagedNetwork) {
+  base::TimeTicks never;
+  ASSERT_TRUE(never.is_null());
+  SetLastDeviceActivityTime(never);
+
+  LogInAsManagedGuestSessionUser();
+  Result result = RunJobAndWaitForResult();
+
+  EXPECT_SUCCESS(result);
+  EXPECT_EQ(delegate().session_parameters().connection_auto_accept_timeout,
+            std::nullopt);
+}
+
+TEST_F(DeviceCommandStartCrdSessionJobTest,
        ShouldNotSetConnectionAutoApproveTimeoutIfDisabledByFeatureFlag) {
   DisableFeature(kAutoApproveEnterpriseSharedSessions);
   AddActiveManagedNetwork();
@@ -934,27 +973,6 @@ TEST_F(
   EXPECT_SUCCESS(result);
   EXPECT_EQ(delegate().session_parameters().connection_auto_accept_timeout,
             std::nullopt);
-}
-
-TEST_P(DeviceCommandStartCrdSessionJobTestParameterized,
-       ShouldSendSessionDurationLogForRemoteSupport) {
-  TestSessionType user_session_type = GetParam();
-  SCOPED_TRACE(base::StringPrintf("Testing session type %s",
-                                  SessionTypeToString(user_session_type)));
-  base::TimeDelta duration = base::Seconds(1);
-
-  if (!SupportsRemoteSupport(user_session_type)) {
-    return;
-  }
-  base::HistogramTester histogram_tester;
-  StartSessionOfType(user_session_type);
-  RunJobAndWaitForResult();
-  delegate().TerminateCrdSession(duration);
-
-  histogram_tester.ExpectUniqueTimeSample(
-      base::StringPrintf(kHistogramDurationTemplate, "RemoteSupport",
-                         SessionTypeToUmaString(user_session_type)),
-      duration, /*expected_bucket_count=*/1);
 }
 
 TEST_P(DeviceCommandStartCrdSessionJobTestParameterized,
@@ -1557,29 +1575,6 @@ TEST_F(DeviceCommandStartCrdSessionJobRemoteAccessTest,
                          SessionTypeToUmaString(TestSessionType::kNoSession)),
       ExtendedStartCrdSessionResultCode::kFailureUnmanagedEnvironment,
       /*expected_bucket_count=*/1);
-}
-
-TEST_P(DeviceCommandStartCrdSessionJobRemoteAccessTestParameterized,
-       ShouldSendSessionDurationUmaLogWhenCrdSessionFinish) {
-  base::HistogramTester histogram_tester;
-  TestSessionType user_session_type = GetParam();
-  SCOPED_TRACE(base::StringPrintf("Testing session type %s",
-                                  SessionTypeToString(user_session_type)));
-  base::TimeDelta duration = base::Seconds(1);
-
-  if (!SupportsRemoteAccess(user_session_type)) {
-    // This test is only about the cases where remote access is supported.
-    return;
-  }
-  AddActiveManagedNetwork();
-  StartSessionOfType(user_session_type);
-  Result result = RunJobAndWaitForResult(RemoteAccessPayload());
-  delegate().TerminateCrdSession(duration);
-
-  histogram_tester.ExpectUniqueTimeSample(
-      base::StringPrintf(kHistogramDurationTemplate, "RemoteAccess",
-                         SessionTypeToUmaString(user_session_type)),
-      duration, /*expected_bucket_count=*/1);
 }
 
 INSTANTIATE_TEST_SUITE_P(

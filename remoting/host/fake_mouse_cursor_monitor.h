@@ -10,7 +10,7 @@
 
 namespace remoting {
 
-class FakeMouseCursorMonitor : public MouseCursorMonitor {
+class FakeMouseCursorMonitor : public protocol::MouseCursorMonitor {
  public:
   FakeMouseCursorMonitor();
 
@@ -19,8 +19,8 @@ class FakeMouseCursorMonitor : public MouseCursorMonitor {
 
   ~FakeMouseCursorMonitor() override;
 
-  void Init(Callback* callback, Mode mode) override;
-  void Capture() override;
+  void Init(Callback* callback) override;
+  void SetPreferredCaptureInterval(base::TimeDelta interval) override;
 
  private:
   raw_ptr<Callback> callback_;

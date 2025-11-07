@@ -12,21 +12,34 @@
 #carousel {
   box-sizing: border-box;
   margin-bottom: 12px;
-  margin-top: 13px;
+  margin-top: 4px;
   padding-inline-end: var(--context-carousel-inline-end-spacing, 50px);
   padding-inline-start: var(--context-carousel-inline-start-spacing, 50px);
 }
 
-#contextMenuContainer {
+#carousel.top {
+  margin: 0;
+  position: absolute;
+  top: 14px;
+  width: auto;
+}
+
+.context-menu-container {
   align-items: center;
   display: flex;
   gap: 4px;
-  padding-inline-start: 8px;
+  padding-inline-start: var(--contextual-entrypoint-and-carousel-context-menu-container-padding-inline-start, 4px);
+  margin-bottom: var(--contextual-entrypoint-and-carousel-context-menu-container-margin-bottom);
 }
 
 #contextEntrypoint {
   color: var(--color-searchbox-results-foreground);
-  padding-inline-end: 8px;
+  padding-inline: var(--contextual-entrypoint-and-carousel-context-menu-container-inline-start, 8px);
+}
+
+#toolChipsContainer {
+  padding-top: 10px;
+  padding-inline-start: 16px;
 }
 
 #uploadContainer {
@@ -41,11 +54,11 @@
   --cr-icon-button-hover-background-color:
       var(--color-searchbox-results-background-hovered);
   --cr-icon-button-size: 48px;
-  color: var(--color-new-tab-page-composebox-upload-button);
+  color: var(--color-composebox-upload-button);
 }
 
 :host([inputs-disabled_]) .upload-icon {
-  color: var(--color-new-tab-page-composebox-upload-button-disabled);
+  color: var(--color-composebox-upload-button-disabled);
 }
 
 #imageUploadButton {
@@ -55,19 +68,19 @@
 .carousel-divider {
   border-radius: 100px;
   border-top: 1px solid
-    var(--color-new-tab-page-composebox-file-carousel-divider);
+    var(--color-composebox-file-carousel-divider);
   margin-inline-end: 16px;
   margin-inline-start: var(--text-input-inline-start-spacing);
-  margin-top: 20px;
-  margin-bottom: 10px;
+  margin-top: var(--contextual-entrypoint-and-carousel-carousel-divider-margin-top, 20px);
+  margin-bottom: var(--contextual-entrypoint-and-carousel-carousel-divider-margin-bottom, 10px);
 }
 
 #deepSearchButton {
   align-items: center;
   background-color:
-    var(--color-new-tab-page-composebox-context-entrypoint-hover-background);
+    var(--color-composebox-context-entrypoint-hover-background);
   border: none;
-  color: var(--color-new-tab-page-composebox-upload-button);
+  color: var(--color-composebox-upload-button);
   display: flex;
   font-size: 13px;
   gap: 2px;

@@ -34,6 +34,7 @@ void PopulateTerminationInfo(
   info->has_spare_renderer = content_info.has_spare_renderer;
   info->last_spare_renderer_creation_info =
       content_info.last_spare_renderer_creation_info;
+  info->memory_pressure_metrics = content_info.memory_pressure_metrics;
 }
 
 }  // namespace
@@ -70,7 +71,7 @@ void ChildExitObserver::ChildReceivedCrashSignal(base::ProcessId pid,
   DCHECK(result);
 }
 
-void ChildExitObserver::OnRenderProcessHostCreated(
+void ChildExitObserver::OnRenderProcessLaunched(
     content::RenderProcessHost* host) {
   // The child process pid isn't available when process is gone, keep a mapping
   // between process_host_id and pid, so we can find it later.

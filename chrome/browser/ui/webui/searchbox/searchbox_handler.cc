@@ -7,6 +7,7 @@
 #include "base/base64.h"
 #include "base/base64url.h"
 #include "base/containers/contains.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,18 +26,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
-#include "content/public/browser/render_widget_host_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/metrics_reporter/metrics_reporter.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/lens/tab_contextualization_controller.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/omnibox_client.h"
@@ -60,6 +57,7 @@
 #include "ui/base/window_open_disposition_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/vector_icon_types.h"
+#include "ui/webui/resources/cr_components/composebox/composebox.mojom.h"
 #include "url/gurl.h"
 
 namespace searchbox_internal {
@@ -109,6 +107,8 @@ constexpr char kDriveSlidesIconResourceName[] =
     "//resources/cr_components/searchbox/icons/drive_slides.svg";
 constexpr char kDriveVideoIconResourceName[] =
     "//resources/cr_components/searchbox/icons/drive_video.svg";
+constexpr char kEnterpriseIconResourceName[] =
+    "//resources/cr_components/searchbox/icons/enterprise.svg";
 constexpr char kExtensionAppIconResourceName[] =
     "//resources/cr_components/searchbox/icons/extension_app.svg";
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -291,9 +291,6 @@ std::string GetBase64UrlVariations(Profile* profile) {
   return variations_base64url;
 }
 
-constexpr int kThumbnailWidth = 125;
-constexpr int kThumbnailHeight = 200;
-
 }  // namespace
 
 // static
@@ -301,26 +298,24 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
                                             Profile* profile,
                                             bool enable_voice_search,
                                             bool enable_lens_search) {
-  // Embedders which are served from chrome-untrusted:// URLs should override
-  // this to false. The chrome.timeTicks capability that the metrics reporter
-  // depends on is not defined in chrome-untrusted environments and attempting
-  // to use it will lead to a renderer process crash. See
-  // http://g/chrome-webui/haW6I9yt-uA/38ckX-aGAgAJ for details.
-  source->AddBoolean("reportMetrics", true);
-
   // The WebUI Omnibox code will override this to `true` to adjust various
   // color and layout options.
   source->AddBoolean("isTopChromeSearchbox", false);
-
   // The lens searchboxes overrides this to true to adjust various color and
   // layout options.
   source->AddBoolean("isLensSearchbox", false);
+
+  source->AddBoolean("reportMetrics", false);
+  source->AddString("charTypedToPaintMetricName", "");
+  source->AddString("resultChangedToPaintMetricName", "");
+
   source->AddBoolean("forceHideEllipsis", false);
   source->AddBoolean("enableThumbnailSizingTweaks", false);
   source->AddBoolean("enableCsbMotionTweaks", false);
 
   static constexpr webui::LocalizedString kStrings[] = {
-      {"lensSearchButtonLabel", IDS_TOOLTIP_LENS_SEARCH},
+      {"lensSearchButtonLabel",
+       IDS_TOOLTIP_LENS_REINVOKE_VISUAL_SELECTION_A11Y_LABEL},
       {"searchboxSeparator", IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR},
       {"removeSuggestion", IDS_OMNIBOX_REMOVE_SUGGESTION},
       {"searchBoxHint", IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MD},
@@ -344,6 +339,8 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"composeboxPdfUploadButtonTitle",
        IDS_NTP_COMPOSE_PDF_UPLOAD_BUTTON_A11Y_LABEL},
       {"composeboxPlaceholderText", IDS_NTP_COMPOSE_PLACEHOLDER_TEXT},
+      {"composeboxSmartComposeTabTitle", IDS_NTP_COMPOSE_SMART_COMPOSE_TAB},
+      {"composeboxSmartComposeTitle", IDS_NTP_COMPOSE_SMART_COMPOSE_A11Y_LABEL},
       {"composeboxSubmitButtonTitle", IDS_NTP_COMPOSE_SUBMIT_BUTTON_A11Y_LABEL},
       {"composeboxDeleteFileTitle", IDS_NTP_COMPOSE_DELETE_FILE_A11Y_LABEL},
       {"composeboxFileUploadStartedText",
@@ -364,6 +361,15 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"uploadFile", IDS_NTP_COMPOSE_ADD_FILE},
       {"deepSearch", IDS_NTP_COMPOSE_DEEP_SEARCH},
       {"createImages", IDS_NTP_COMPOSE_CREATE_IMAGES},
+      {"composeDeepSearchPlaceholder", IDS_COMPOSE_DEEP_SEARCH_PLACEHOLDER},
+      {"composeCreateImagePlaceholder", IDS_COMPOSE_CREATE_IMAGE_PLACEHOLDER},
+      {"askAboutThisTab", IDS_NTP_COMPOSE_ASK_ABOUT_THIS_TAB},
+      {"askAboutThisTabAriaLabel",
+       IDS_NTP_COMPOSE_ASK_ABOUT_THIS_TAB_ARIA_LABEL},
+      {"removeToolChipAriaLabel", IDS_COMPOSE_REMOVE_TOOL_CHIP_A11Y_LABEL},
+      {"composeFileTypesAllowedError",
+       IDS_NTP_COMPOSE_FILE_TYPE_NOT_ALLOWED_ERROR},
+      {"composeboxDragAndDropHint", IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT},
   };
   source->AddLocalizedStrings(kStrings);
   source->AddString("searchboxComposePlaceholder",
@@ -401,20 +407,17 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
   source->AddBoolean("searchboxCr23SteadyStateShadow",
                      ntp_features::kNtpRealboxCr23SteadyStateShadow.Get());
 
-  source->AddBoolean("searchboxShowComposeAnimation",
-                     profile->GetPrefs()->GetInteger(
-                         prefs::kNtpComposeButtonShownCountPrefName) <
-                         ntp_composebox::FeatureConfig::Get()
-                             .config.entry_point()
-                             .num_page_load_animations());
-  source->AddString("realboxLayoutMode",
-                    ntp_realbox::IsNtpRealboxNextEnabled(profile)
-                        ? ntp_realbox::RealboxLayoutModeToString(
-                              ntp_realbox::kRealboxLayoutMode.Get())
-                        : "");
-  source->AddBoolean("searchboxCyclingPlaceholders",
-                     ntp_realbox::IsNtpRealboxNextEnabled(profile) &&
-                         ntp_realbox::kCyclingPlaceholders.Get());
+  auto composebox_config = ntp_composebox::FeatureConfig::Get().config;
+  source->AddString("maxFilesReachedError",
+                    l10n_util::GetStringFUTF16(
+                        IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
+                        base::NumberToString16(
+                            composebox_config.composebox().max_num_files())));
+  source->AddBoolean(
+      "searchboxShowComposeAnimation",
+      profile->GetPrefs()->GetInteger(
+          prefs::kNtpComposeButtonShownCountPrefName) <
+          composebox_config.entry_point().num_page_load_animations());
 }
 
 std::string SearchboxHandler::AutocompleteIconToResourceName(
@@ -465,9 +468,7 @@ std::string SearchboxHandler::AutocompleteIconToResourceName(
   } else if (icon.name == omnibox::kDriveVideoIcon.name) {
     return kDriveVideoIconResourceName;
   } else if (icon.name == omnibox::kEnterpriseIcon.name) {
-    // TODO(crbug.com/446953332): Add icon. Not necessary ATM because IPH
-    //   matches aren't shown in webUI.
-    NOTREACHED();
+    return kEnterpriseIconResourceName;
   } else if (icon.name == omnibox::kExtensionAppIcon.name) {
     return kExtensionAppIconResourceName;
   } else if (icon.name == omnibox::kIncognitoCr2023Icon.name) {
@@ -505,9 +506,10 @@ std::string SearchboxHandler::AutocompleteIconToResourceName(
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   if (icon.name == vector_icons::kGoogleAgentspaceMonochromeLogoIcon.name) {
-    return base::FeatureList::IsEnabled(omnibox::kUseAgentspace25Logo)
-               ? kGoogleAgentspaceMonochromeLogo25Icon
-               : kGoogleAgentspaceMonochromeLogoIcon;
+    return kGoogleAgentspaceMonochromeLogoIcon;
+  } else if (icon.name ==
+             vector_icons::kGoogleAgentspaceMonochromeLogo25Icon.name) {
+    return kGoogleAgentspaceMonochromeLogo25Icon;
   } else if (icon.name == vector_icons::kGoogleCalendarIcon.name) {
     return kGoogleCalendarIconResourceName;
   } else if (icon.name == vector_icons::kGoogleGLogoMonochromeIcon.name) {
@@ -649,6 +651,7 @@ SearchboxHandler::CreateAutocompleteMatch(
 
   searchbox::mojom::AutocompleteMatchPtr mojom_match =
       searchbox::mojom::AutocompleteMatch::New();
+  mojom_match->is_hidden = match.ShouldHideBasedOnStarterPack(turl_service);
   mojom_match->allowed_to_be_default_match = match.allowed_to_be_default_match;
   mojom_match->contents = match.contents;
   for (const auto& contents_class : match.contents_class) {
@@ -669,12 +672,12 @@ SearchboxHandler::CreateAutocompleteMatch(
       bookmark_model->IsBookmarked(match.destination_url);
   // For starter pack suggestions, use template url to generate proper vector
   // icon.
-  const TemplateURL* turl =
+  const TemplateURL* associated_keyword_turl =
       match.associated_keyword.empty()
           ? nullptr
           : turl_service->GetTemplateURLForKeyword(match.associated_keyword);
-  mojom_match->icon_path =
-      AutocompleteIconToResourceName(match.GetVectorIcon(is_bookmarked, turl));
+  mojom_match->icon_path = AutocompleteIconToResourceName(
+      match.GetVectorIcon(is_bookmarked, associated_keyword_turl));
   // For enterprise search aggregator people suggestions, use branded icon if
   // branded build.
   if (match.enterprise_search_aggregator_type ==
@@ -688,6 +691,19 @@ SearchboxHandler::CreateAutocompleteMatch(
 #endif
   }
   mojom_match->icon_url = match.icon_url;
+  // For featured enterprise search suggestions, use template url to generate
+  // the proper icon url.
+  const TemplateURL* keyword_turl =
+      match.keyword.empty()
+          ? nullptr
+          : turl_service->GetTemplateURLForKeyword(match.keyword);
+  if (AutocompleteMatch::IsFeaturedEnterpriseSearchType(match.type) &&
+      keyword_turl) {
+    GURL favicon_url = keyword_turl->favicon_url();
+    if (favicon_url.is_valid()) {
+      mojom_match->icon_url = favicon_url;
+    }
+  }
   mojom_match->image_dominant_color = match.image_dominant_color;
   mojom_match->image_url = match.image_url.spec();
   mojom_match->fill_into_edit = match.fill_into_edit;
@@ -768,13 +784,10 @@ SearchboxHandler::SearchboxHandler(
     mojo::PendingReceiver<searchbox::mojom::PageHandler> pending_page_handler,
     Profile* profile,
     content::WebContents* web_contents,
-    MetricsReporter* metrics_reporter,
     std::unique_ptr<OmniboxController> controller)
     : profile_(profile),
       web_contents_(web_contents),
-      metrics_reporter_(metrics_reporter),
       owned_controller_(std::move(controller)),
-      page_set_(false),
       page_handler_(this, std::move(pending_page_handler)) {
   controller_ = owned_controller_.get();
 }
@@ -785,13 +798,32 @@ SearchboxHandler::~SearchboxHandler() {
 }
 
 bool SearchboxHandler::IsRemoteBound() const {
-  return page_set_;
+  return page_.is_bound();
+}
+
+void SearchboxHandler::AddFileContextFromBrowser(
+    base::UnguessableToken token,
+    searchbox::mojom::SelectedFileInfoPtr file_info) {
+  if (page_ && IsRemoteBound()) {
+    page_->AddFileContext(token, std::move(file_info));
+  }
+}
+
+void SearchboxHandler::OnContextualInputStatusChanged(
+    base::UnguessableToken token,
+    composebox_query::mojom::FileUploadStatus status,
+    std::optional<composebox_query::mojom::FileUploadErrorType> error_type) {
+  if (page_ && IsRemoteBound()) {
+    page_->OnContextualInputStatusChanged(token, status, error_type);
+  }
 }
 
 void SearchboxHandler::SetPage(
     mojo::PendingRemote<searchbox::mojom::Page> pending_page) {
   page_.Bind(std::move(pending_page));
-  page_set_ = page_.is_bound();
+  if (page_is_bound_callback_for_testing_) {
+    std::move(page_is_bound_callback_for_testing_).Run();
+  }
 }
 
 void SearchboxHandler::OnFocusChanged(bool focused) {
@@ -836,8 +868,15 @@ void SearchboxHandler::QueryAutocomplete(const std::u16string& input,
   // Set the lens overlay suggest inputs, if available.
   if (std::optional<lens::proto::LensOverlaySuggestInputs> suggest_inputs =
           controller_->client()->GetLensOverlaySuggestInputs()) {
-    autocomplete_input.set_lens_overlay_suggest_inputs(*suggest_inputs);
+    // Don't set lens params if in "Create Image" mode. This prevents the
+    // contextual client from being used in this tool mode.
+    if (GetAimToolMode() !=
+        omnibox::ChromeAimToolsAndModels::TOOL_MODE_IMAGE_GEN_UPLOAD) {
+      autocomplete_input.set_lens_overlay_suggest_inputs(*suggest_inputs);
+    }
   }
+
+  autocomplete_input.set_aim_tool_mode(GetAimToolMode());
 
   edit_model()->SetAutocompleteInput(autocomplete_input);
   omnibox_controller()->StartAutocomplete(autocomplete_input);
@@ -902,6 +941,20 @@ void SearchboxHandler::DeleteAutocompleteMatch(uint8_t line, const GURL& url) {
   }
   omnibox_controller()->StopAutocomplete(/*clear_result=*/false);
   autocomplete_controller()->DeleteMatch(*match);
+}
+
+void SearchboxHandler::ActivateKeyword(
+    uint8_t line,
+    const GURL& url,
+    base::TimeTicks match_selection_timestamp,
+    bool is_mouse_event) {
+  // Generic searchbox should not show keywords.
+  NOTREACHED();
+}
+
+void SearchboxHandler::ShowContextMenu(const gfx::Point& point) {
+  // Generic searchbox should not have a context menu.
+  NOTREACHED();
 }
 
 void SearchboxHandler::ExecuteAction(uint8_t line,
@@ -980,124 +1033,11 @@ void SearchboxHandler::GetPlaceholderConfig(
 }
 
 void SearchboxHandler::GetRecentTabs(GetRecentTabsCallback callback) {
-  std::vector<searchbox::mojom::TabInfoPtr> tabs;
-
-  auto* browser_window_interface =
-      webui::GetBrowserWindowInterface(web_contents_);
-  if (!browser_window_interface) {
-    std::move(callback).Run(std::move(tabs));
-    return;
-  }
-
-  // Iterate through the tab strip model, getting the data for each tab
-  auto* tab_strip_model = browser_window_interface->GetTabStripModel();
-  UMA_HISTOGRAM_COUNTS_1000(
-      "NewTabPage.Composebox.ActiveTabsCountOnContextMenuOpen",
-      tab_strip_model->count());
-
-  for (int i = 0; i < tab_strip_model->count(); i++) {
-    content::WebContents* web_contents = tab_strip_model->GetWebContentsAt(i);
-    tabs::TabInterface* const tab = tab_strip_model->GetTabAtIndex(i);
-    TabRendererData tab_renderer_data =
-        TabRendererData::FromTabInModel(tab_strip_model, i);
-    const auto& last_committed_url = tab_renderer_data.last_committed_url;
-    // Skip tabs that are still loading, and skip webui.
-    if (!last_committed_url.is_valid() || last_committed_url.is_empty() ||
-        last_committed_url.SchemeIs(content::kChromeUIScheme) ||
-        last_committed_url.SchemeIs(content::kChromeUIUntrustedScheme)) {
-      continue;
-    }
-    auto tab_data = searchbox::mojom::TabInfo::New();
-    tab_data->tab_id = tab->GetHandle().raw_value();
-    tab_data->title = base::UTF16ToUTF8(tab_renderer_data.title);
-    tab_data->url = last_committed_url;
-    tab_data->last_active =
-        std::max(web_contents->GetLastActiveTimeTicks(),
-                 web_contents->GetLastInteractionTimeTicks());
-    tabs.push_back(std::move(tab_data));
-  }
-
-  // Count duplicate tab titles to record in an UMA histogram.
-  // For example, If 2 tabs with title "Wikipedia" and 3 tabs with title
-  // "Weather" are open, this histogram will record 2.
-  std::map<std::string, int> title_counts;
-  for (const auto& tab : tabs) {
-    title_counts[tab->title]++;
-  }
-  int duplicate_count =
-      std::count_if(title_counts.begin(), title_counts.end(),
-                    [](const std::pair<const std::string, int>& pair) {
-                      return pair.second > 1;
-                    });
-  UMA_HISTOGRAM_COUNTS_100000(
-      "NewTabPage.Composebox.DuplicateTabTitlesShownCount", duplicate_count);
-
-  // Sort the tabs by last active time, and truncate to the maximum number of
-  // tabs to return.
-  int max_tab_suggestions =
-      std::min(static_cast<int>(tabs.size()),
-               ntp_composebox::kContextMenuMaxTabSuggestions.Get());
-  std::partial_sort(tabs.begin(), tabs.begin() + max_tab_suggestions,
-                    tabs.end(),
-                    [](const searchbox::mojom::TabInfoPtr& a,
-                       const searchbox::mojom::TabInfoPtr& b) {
-                      return a->last_active > b->last_active;
-                    });
-  tabs.resize(max_tab_suggestions);
-
-  // Invoke the callback with the results.
-  std::move(callback).Run(std::move(tabs));
+  std::move(callback).Run({});
 }
 
-std::optional<lens::ImageEncodingOptions>
-SearchboxHandler::CreateTabPreviewEncodingOptions(
-    content::WebContents* web_contents) {
-  float scale_factor = 1.0f;
-  if (content::RenderWidgetHostView* view =
-          web_contents->GetRenderWidgetHostView()) {
-    scale_factor = view->GetDeviceScaleFactor();
-  }
-  const int max_height_pixels =
-      static_cast<int>(kThumbnailHeight * scale_factor);
-  const int max_width_pixels = static_cast<int>(kThumbnailWidth * scale_factor);
-  return lens::ImageEncodingOptions{.max_height = max_height_pixels,
-                                    .max_width = max_width_pixels};
-}
-
-// TODO(crbug.com/447629531): Move the implementation to the
-// ContextualSearchboxHandler and put an empty implementation in the header for
-// this class.
-void SearchboxHandler::GetTabPreview(int32_t tab_id,
-                                     GetTabPreviewCallback callback) {
-  const tabs::TabHandle handle = tabs::TabHandle(tab_id);
-  tabs::TabInterface* const tab = handle.Get();
-  if (!tab) {
-    std::move(callback).Run(std::nullopt);
-    return;
-  }
-
-  lens::TabContextualizationController* tab_context_controller =
-      tab->GetTabFeatures()->tab_contextualization_controller();
-
-  content::WebContents* web_contents = tab->GetContents();
-  tab_context_controller->CaptureScreenshot(
-      CreateTabPreviewEncodingOptions(web_contents),
-      base::BindOnce(&SearchboxHandler::OnPreviewReceived,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
-}
-
-void SearchboxHandler::OnPreviewReceived(GetTabPreviewCallback callback,
-                                         const SkBitmap& preview_bitmap) {
-  std::move(callback).Run(
-      preview_bitmap.isNull()
-          ? std::nullopt
-          : std::make_optional(webui::GetBitmapDataUrl(preview_bitmap)));
-}
 void SearchboxHandler::OnResultChanged(AutocompleteController* controller,
                                        bool default_match_changed) {
-  if (metrics_reporter_ && !metrics_reporter_->HasLocalMark("ResultChanged")) {
-    metrics_reporter_->Mark("ResultChanged");
-  }
   page_->AutocompleteResultChanged(CreateAutocompleteResult(
       autocomplete_controller()->input().text(),
       autocomplete_controller()->result(), edit_model(),
@@ -1152,12 +1092,25 @@ const AutocompleteMatch* SearchboxHandler::GetMatchWithUrl(size_t index,
   return &match;
 }
 
+omnibox::ChromeAimToolsAndModels SearchboxHandler::GetAimToolMode() {
+  return omnibox::ChromeAimToolsAndModels::TOOL_MODE_UNSPECIFIED;
+}
+
 OmniboxController* SearchboxHandler::omnibox_controller() {
   return controller_;
 }
 
 AutocompleteController* SearchboxHandler::autocomplete_controller() {
   return omnibox_controller()->autocomplete_controller();
+}
+
+void SearchboxHandler::set_page_is_bound_callback_for_testing(
+    base::OnceClosure callback) {
+  if (page_.is_bound() && callback) {
+    std::move(callback).Run();
+    return;
+  }
+  page_is_bound_callback_for_testing_ = std::move(callback);
 }
 
 OmniboxEditModel* SearchboxHandler::edit_model() {

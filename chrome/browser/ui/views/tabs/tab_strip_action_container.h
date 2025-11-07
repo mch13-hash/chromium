@@ -141,20 +141,20 @@ class TabStripActionContainer : public views::View,
 
   // GlicButtonControllerDelegate:
   void SetGlicShowState(bool show) override;
-  void SetGlicIcon(const gfx::VectorIcon& icon) override;
+  void SetGlicDetached(bool detached) override;
+  void SetGlicPanelIsOpen(bool open) override;
 
   // UI Controls for the GlicActorTaskIcon:
-  void TriggerGlicActorTaskIconCheckTasksNudge();
-  void TriggerGlicActorTaskIconCompleteTasksNudge();
   void ShowGlicActorTaskIcon();
   void HideGlicActorTaskIcon();
   bool GetIsShowingGlicActorTaskIconNudge();
+#if BUILDFLAG(ENABLE_GLIC)
+  void TriggerGlicActorNudge(const std::u16string nudge_text);
+#endif
 
   // UI controls for updating buttons based on the floaty view state:
   void HighlightGlicActorTaskIcon();
   void UnhighlightGlicActorTaskIcon();
-  void HighlightGlicButton();
-  void UnhighlightGlicButton();
 
   void UpdateButtonBorders(gfx::Insets button_insets);
 
@@ -179,6 +179,7 @@ class TabStripActionContainer : public views::View,
   void OnGlicButtonDismissed();
   void OnGlicButtonHovered();
   void OnGlicButtonMouseDown();
+  void OnGlicButtonAnimationEnded();
 
   std::unique_ptr<glic::GlicActorTaskIcon> CreateGlicActorTaskIcon(
       TabStripController* tab_strip_controller);
@@ -224,6 +225,8 @@ class TabStripActionContainer : public views::View,
   void ExecuteHideTabStripNudge(TabStripNudgeButton* button);
 
   void OnAnimationSessionEnded();
+
+  bool ButtonOwnsAnimation(const TabStripNudgeButton* button) const;
 
   std::unique_ptr<TabStripNudgeButton> CreateAutoTabGroupButton(
       TabStripController* tab_strip_controller);

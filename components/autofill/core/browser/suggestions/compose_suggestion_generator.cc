@@ -40,12 +40,12 @@ void ComposeSuggestionGenerator::GenerateSuggestions(
     const FormFieldData& trigger_field,
     const FormStructure* form_structure,
     const AutofillField* trigger_autofill_field,
-    const std::vector<
-        std::pair<SuggestionDataSource, std::vector<SuggestionData>>>&
+    const AutofillClient& client,
+    const base::flat_map<SuggestionDataSource, std::vector<SuggestionData>>&
         all_suggestion_data,
     base::OnceCallback<void(ReturnedSuggestions)> callback) {
   GenerateSuggestions(
-      form, trigger_field, form_structure, trigger_autofill_field,
+      form, trigger_field, form_structure, trigger_autofill_field, client,
       all_suggestion_data,
       [&callback](ReturnedSuggestions returned_suggestions) {
         std::move(callback).Run(std::move(returned_suggestions));
@@ -71,8 +71,8 @@ void ComposeSuggestionGenerator::GenerateSuggestions(
     const FormFieldData& trigger_field,
     const FormStructure* form_structure,
     const AutofillField* trigger_autofill_field,
-    const std::vector<
-        std::pair<SuggestionDataSource, std::vector<SuggestionData>>>&
+    const AutofillClient& client,
+    const base::flat_map<SuggestionDataSource, std::vector<SuggestionData>>&
         all_suggestion_data,
     base::FunctionRef<void(ReturnedSuggestions)> callback) {
   if (!compose_delegate_ ||
@@ -87,8 +87,7 @@ void ComposeSuggestionGenerator::GenerateSuggestions(
       all_suggestion_data,
       [](const std::pair<SuggestionDataSource, std::vector<SuggestionData>>&
              data) { return !data.second.empty(); });
-  if (other_products_have_suggestion_data ||
-      IsAutofillManuallyTriggered(trigger_source_)) {
+  if (other_products_have_suggestion_data) {
     callback({FillingProduct::kCompose, {}});
     return;
   }

@@ -39,8 +39,8 @@ import zlib
 # These fields are written by //tools/clang/scripts/upload_revision.py, and
 # should not be changed manually.
 # They are also read by build/config/compiler/BUILD.gn.
-CLANG_REVISION = 'llvmorg-22-init-8940-g4d4cb757'
-CLANG_SUB_REVISION = 1
+CLANG_REVISION = 'llvmorg-22-init-12326-g8a5f1533'
+CLANG_SUB_REVISION = 2
 
 PACKAGE_VERSION = '%s-%s' % (CLANG_REVISION, CLANG_SUB_REVISION)
 RELEASE_VERSION = '22'
@@ -191,11 +191,21 @@ def DownloadAndUnpack(url, output_dir, path_prefixes=None, is_known_zip=False):
       zipfile.ZipFile(f).extractall(path=output_dir)
     else:
       t = tarfile.open(mode='r:*', fileobj=f)
-      members = None
+      members = t.getmembers()
       if path_prefixes is not None:
         members = [m for m in t.getmembers()
                    if any(m.name.startswith(p) for p in path_prefixes)]
       t.extractall(path=output_dir, members=members)
+
+      # Don't set mtime based on the archive metadata; see crbug.com/450551220
+      # The nicest way to do this would be by passing a filter to extractall,
+      # but that functionality is not available in macOS system Python (3.9.6).
+      for m in members:
+        # Confusingly, this checks if you're allowed to _not_ follow symlinks.
+        if os.utime in os.supports_follow_symlinks:
+          os.utime(os.path.join(output_dir, m.name), follow_symlinks=False)
+        else:
+          os.utime(os.path.join(output_dir, m.name))
 
 
 def GetPlatformUrlPrefix(host_os):

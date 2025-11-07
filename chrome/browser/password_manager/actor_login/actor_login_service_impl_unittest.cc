@@ -10,8 +10,10 @@
 #include "base/test/gmock_callback_support.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/test_future.h"
+#include "base/types/expected.h"
 #include "chrome/browser/password_manager/actor_login/actor_login_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "components/password_manager/core/browser/actor_login/internal/actor_login_metrics.h"
 #include "components/password_manager/core/browser/actor_login/test/mock_actor_login_delegate.h"
 #include "components/tabs/public/mock_tab_interface.h"
@@ -125,6 +127,27 @@ TEST_F(ActorLoginServiceImplTest, GetCredentials_ServiceBusy) {
 
   base::test::TestFuture<CredentialsOrError> future;
   EXPECT_CALL(mock_delegate_, GetCredentials)
+      .WillOnce(RunOnceCallback<0>(
+          base::unexpected(ActorLoginError::kFillingNotAllowed)));
+  service_->GetCredentials(&mock_tab, future.GetCallback());
+
+  ASSERT_FALSE(future.Get().has_value());
+  EXPECT_EQ(future.Get().error(), ActorLoginError::kFillingNotAllowed);
+
+  histogram_tester.ExpectUniqueSample(
+      "PasswordManager.ActorLogin.GetCredentials.Result",
+      GetCredentialsResult::kErrorFillingNotAllowed, 1);
+}
+
+TEST_F(ActorLoginServiceImplTest, GetCredentials_FillingNotAllowed) {
+  base::HistogramTester histogram_tester;
+  content::WebContents* web_contents =
+      test_web_contents_factory_.CreateWebContents(&profile_);
+  tabs::MockTabInterface mock_tab;
+  EXPECT_CALL(mock_tab, GetContents()).WillRepeatedly(Return(web_contents));
+
+  base::test::TestFuture<CredentialsOrError> future;
+  EXPECT_CALL(mock_delegate_, GetCredentials)
       .WillOnce(
           RunOnceCallback<0>(base::unexpected(ActorLoginError::kServiceBusy)));
   service_->GetCredentials(&mock_tab, future.GetCallback());
@@ -145,7 +168,7 @@ TEST_F(ActorLoginServiceImplTest, AttemptLoginInvalidTabInterface) {
   Credential credential = CreateTestCredential();
   base::test::TestFuture<LoginStatusResultOrError> future;
   EXPECT_CALL(mock_delegate_, AttemptLogin).Times(0);
-  service_->AttemptLogin(&mock_tab, credential, future.GetCallback());
+  service_->AttemptLogin(&mock_tab, credential, false, future.GetCallback());
 
   ASSERT_FALSE(future.Get().has_value());
   EXPECT_EQ(future.Get().error(), ActorLoginError::kInvalidTabInterface);
@@ -162,8 +185,8 @@ TEST_F(ActorLoginServiceImplTest, AttemptLoginDelegatesToActorLoginDelegate) {
   EXPECT_CALL(mock_tab, GetContents()).WillRepeatedly(Return(web_contents));
   Credential credential = CreateTestCredential();
 
-  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _));
-  service_->AttemptLogin(&mock_tab, credential, base::DoNothing());
+  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _, _));
+  service_->AttemptLogin(&mock_tab, credential, false, base::DoNothing());
 }
 
 TEST_F(ActorLoginServiceImplTest, AttemptLogin_ServiceBusy) {
@@ -175,10 +198,10 @@ TEST_F(ActorLoginServiceImplTest, AttemptLogin_ServiceBusy) {
   Credential credential = CreateTestCredential();
 
   base::test::TestFuture<LoginStatusResultOrError> future;
-  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _))
+  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _, _))
       .WillOnce(
-          RunOnceCallback<1>(base::unexpected(ActorLoginError::kServiceBusy)));
-  service_->AttemptLogin(&mock_tab, credential, future.GetCallback());
+          RunOnceCallback<2>(base::unexpected(ActorLoginError::kServiceBusy)));
+  service_->AttemptLogin(&mock_tab, credential, false, future.GetCallback());
 
   ASSERT_FALSE(future.Get().has_value());
   EXPECT_EQ(future.Get().error(), ActorLoginError::kServiceBusy);
@@ -186,6 +209,28 @@ TEST_F(ActorLoginServiceImplTest, AttemptLogin_ServiceBusy) {
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.ActorLogin.AttemptLogin.Result",
       AttemptLoginResult::kErrorServiceBusy, 1);
+}
+
+TEST_F(ActorLoginServiceImplTest, AttemptLogin_FillingNotAllowed) {
+  base::HistogramTester histogram_tester;
+  content::WebContents* web_contents =
+      test_web_contents_factory_.CreateWebContents(&profile_);
+  tabs::MockTabInterface mock_tab;
+  EXPECT_CALL(mock_tab, GetContents()).WillRepeatedly(Return(web_contents));
+  Credential credential = CreateTestCredential();
+
+  base::test::TestFuture<LoginStatusResultOrError> future;
+  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _, _))
+      .WillOnce(RunOnceCallback<2>(
+          base::unexpected(ActorLoginError::kFillingNotAllowed)));
+  service_->AttemptLogin(&mock_tab, credential, false, future.GetCallback());
+
+  ASSERT_FALSE(future.Get().has_value());
+  EXPECT_EQ(future.Get().error(), ActorLoginError::kFillingNotAllowed);
+
+  histogram_tester.ExpectUniqueSample(
+      "PasswordManager.ActorLogin.AttemptLogin.Result",
+      AttemptLoginResult::kErrorFillingNotAllowed, 1);
 }
 
 class ActorLoginServiceImplAttemptLoginTest
@@ -202,9 +247,9 @@ TEST_P(ActorLoginServiceImplAttemptLoginTest, AttemptLoginResults) {
   Credential credential = CreateTestCredential();
 
   base::test::TestFuture<LoginStatusResultOrError> future;
-  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _))
-      .WillOnce(RunOnceCallback<1>(test_case.result));
-  service_->AttemptLogin(&mock_tab, credential, future.GetCallback());
+  EXPECT_CALL(mock_delegate_, AttemptLogin(Eq(credential), _, _))
+      .WillOnce(RunOnceCallback<2>(test_case.result));
+  service_->AttemptLogin(&mock_tab, credential, false, future.GetCallback());
 
   ASSERT_TRUE(future.Get().has_value());
   EXPECT_EQ(future.Get().value(), test_case.result);
@@ -236,9 +281,13 @@ INSTANTIATE_TEST_SUITE_P(
         AttemptLoginTestCase{LoginStatusResult::kErrorNoFillableFields,
                              AttemptLoginResult::kErrorNoFillableFields,
                              "ErrorNoFillableFields"},
-        AttemptLoginTestCase{LoginStatusResult::kErrorFillingNotAllowed,
-                             AttemptLoginResult::kErrorFillingNotAllowed,
-                             "ErrorFillingNotAllowed"}),
+        AttemptLoginTestCase{LoginStatusResult::kErrorDeviceReauthRequired,
+                             AttemptLoginResult::kErrorDeviceReauthRequired,
+                             "ErrorDeviceReauthRequired"},
+        AttemptLoginTestCase{LoginStatusResult::kErrorDeviceReauthFailed,
+                             AttemptLoginResult::kErrorDeviceReauthFailed,
+                             "ErrorDeviceReauthFailed"}),
+
     [](const testing::TestParamInfo<AttemptLoginTestCase>& info) {
       return info.param.test_case_name;
     });

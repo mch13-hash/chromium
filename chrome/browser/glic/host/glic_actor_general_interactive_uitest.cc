@@ -5,6 +5,8 @@
 #include "base/base64.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/protobuf_matchers.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/actor/actor_tab_data.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/browser_action_util.h"
@@ -13,6 +15,8 @@
 #include "chrome/common/webui_url_constants.h"
 #include "components/optimization_guide/proto/features/actions_data.pb.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace glic::test {
 
@@ -30,8 +34,15 @@ class GlicActorGeneralUiTest : public GlicActorUiTest {
   MultiStep CheckActorTabDataHasAnnotatedPageContentCache();
   MultiStep OpenDevToolsWindow(ui::ElementIdentifier contents_to_inspect);
   MultiStep WaitAction(actor::TaskId& task_id,
+                       std::optional<base::TimeDelta> duration,
+                       tabs::TabHandle& observe_tab_handle,
                        ExpectedErrorResult expected_result = {});
   MultiStep WaitAction(ExpectedErrorResult expected_result = {});
+
+ protected:
+  static constexpr base::TimeDelta kWaitTime = base::Milliseconds(1);
+
+  tabs::TabHandle null_tab_handle_;
 };
 
 MultiStep
@@ -60,27 +71,27 @@ MultiStep GlicActorGeneralUiTest::OpenDevToolsWindow(
 
 MultiStep GlicActorGeneralUiTest::WaitAction(
     actor::TaskId& task_id,
+    std::optional<base::TimeDelta> duration,
+    tabs::TabHandle& observe_tab_handle,
     ExpectedErrorResult expected_result) {
-  auto wait_provider = base::BindLambdaForTesting([&task_id]() {
-    apc::Actions action = actor::MakeWait();
-    action.set_task_id(task_id.value());
-    return EncodeActionProto(action);
-  });
+  auto wait_provider =
+      base::BindLambdaForTesting([&task_id, &observe_tab_handle, duration]() {
+        apc::Actions action = actor::MakeWait(duration, observe_tab_handle);
+        action.set_task_id(task_id.value());
+        if (duration.has_value()) {
+        }
+        return EncodeActionProto(action);
+      });
   return ExecuteAction(std::move(wait_provider), std::move(expected_result));
 }
 
 MultiStep GlicActorGeneralUiTest::WaitAction(
     ExpectedErrorResult expected_result) {
-  return WaitAction(task_id_, std::move(expected_result));
+  return WaitAction(task_id_, kWaitTime, null_tab_handle_,
+                    std::move(expected_result));
 }
 
-// TODO(crbug.com/448882109): Disable failing test on Mac.
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_CreateTaskAndNavigate DISABLED_CreateTaskAndNavigate
-#else
-#define MAYBE_CreateTaskAndNavigate CreateTaskAndNavigate
-#endif
-IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, MAYBE_CreateTaskAndNavigate) {
+IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, CreateTaskAndNavigate) {
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewActorTabId);
 
   base::HistogramTester histogram_tester;
@@ -92,12 +103,8 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, MAYBE_CreateTaskAndNavigate) {
                   WaitForWebContentsReady(kNewActorTabId, task_url));
 
   // Two samples of 1 tab for CreateTab, Navigate actions.
-  // The durations should not be zero.
   histogram_tester.ExpectUniqueSample("Actor.PageContext.TabCount", 1, 2);
-  histogram_tester.ExpectBucketCount("Actor.PageContext.APC.Duration", 0, 0);
   histogram_tester.ExpectTotalCount("Actor.PageContext.APC.Duration", 2);
-  histogram_tester.ExpectBucketCount("Actor.PageContext.Screenshot.Duration", 0,
-                                     0);
   histogram_tester.ExpectTotalCount("Actor.PageContext.Screenshot.Duration", 2);
 }
 
@@ -110,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest,
 
   RunTestSequence(InitializeWithOpenGlicWindow(),
                   StartActorTaskInNewTab(task_url, kNewActorTabId),
-                  GetPageContextFromFocusedTab(),
+                  GetPageContextForActorTab(),
                   CheckActorTabDataHasAnnotatedPageContentCache());
 }
 
@@ -224,7 +231,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest,
       // clang-format off
       InitializeWithOpenGlicWindow(),
       StartActorTaskInNewTab(task_url, kNewActorTabId),
-      GetPageContextFromFocusedTab(),
+      GetPageContextForActorTab(),
       SetOnIncompatibleAction(OnIncompatibleAction::kSkipTest,
                               kActivateSurfaceIncompatibilityNotice),
       AddInstrumentedTab(kOtherTabId, GURL(chrome::kChromeUISettingsURL)),
@@ -260,7 +267,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest,
       InitializeWithOpenGlicWindow(),
       StartActorTaskInNewTab(task_url, kNewActorTabId),
 
-      GetPageContextFromFocusedTab(),
+      GetPageContextForActorTab(),
       ClickAction(kClickableButtonLabel,
                   ClickAction::LEFT, ClickAction::SINGLE),
 
@@ -297,9 +304,142 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest,
         EXPECT_TRUE(tab.has_screenshot());
         EXPECT_GT(tab.screenshot().size(), 0u);
         EXPECT_TRUE(tab.has_screenshot_mime_type());
-        EXPECT_EQ(tab.screenshot_mime_type(), actor::kMimeTypeJpeg);
+        EXPECT_EQ(tab.screenshot_mime_type(), "image/jpeg");
       })
   );
+  // clang-format on
+}
+
+// Ensure Wait's observe_tab field causes a tab to be observed, even if there is
+// no tab in the acting set.
+IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, WaitObserveTabFirstAction) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kTab1Id);
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kTab2Id);
+
+  const GURL url1 = embedded_test_server()->GetURL("/actor/simple.html?tab1");
+  const GURL url2 = embedded_test_server()->GetURL("/actor/simple.html?tab2");
+
+  tabs::TabHandle tab1;
+  tabs::TabHandle tab2;
+
+  // clang-format off
+  RunTestSequence(
+      // Add two tabs to ensure the correct tab is being added to the
+      // observation result.
+      AddInstrumentedTab(kTab1Id, url1),
+      InAnyContext(WithElement(
+          kTab1Id,
+          [&tab1](ui::TrackedElement* el) {
+            content::WebContents* contents =
+                AsInstrumentedWebContents(el)->web_contents();
+            tab1 = tabs::TabInterface::GetFromContents(contents)->GetHandle();
+          })),
+      AddInstrumentedTab(kTab2Id, url2),
+      InAnyContext(WithElement(
+          kTab2Id,
+          [&tab2](ui::TrackedElement* el) {
+            content::WebContents* contents =
+                AsInstrumentedWebContents(el)->web_contents();
+            tab2 = tabs::TabInterface::GetFromContents(contents)->GetHandle();
+          })),
+
+      // Create a task without taking any actions so as not to add a tab to the
+      // task's acting set.
+      OpenGlicWindow(GlicWindowMode::kAttached),
+      CreateTask(task_id_, ""),
+
+      // Wait observing tab1. Ensure tab1 has a TabObservation in the result.
+      WaitAction(task_id_, kWaitTime, tab1),
+      CheckResult([this]() { return last_execution_result()->tabs().size(); },
+                  1),
+      Check([&, this]() {
+        return last_execution_result()->tabs().at(0).id() == tab1.raw_value();
+      }),
+
+      // Wait observing tab2. Ensure tab2 has a TabObservation in the result but
+      // tab1 does not.
+      WaitAction(task_id_, kWaitTime, tab2),
+      CheckResult([this]() { return last_execution_result()->tabs().size(); },
+                  1),
+      Check([&, this]() {
+        return last_execution_result()->tabs().at(0).id() == tab2.raw_value();
+      }),
+
+      // Click on tab1 to add it to the acting set. Then wait observing tab2.
+      // Ensure both tabs are now in the result observation.
+      ClickAction(
+          {15, 15}, ClickAction::LEFT, ClickAction::SINGLE, task_id_, tab1),
+      WaitAction(task_id_, kWaitTime, tab2),
+      CheckResult([this]() { return last_execution_result()->tabs().size(); },
+                  2),
+      Check([&, this]() {
+        std::set<int> tab_ids{
+          last_execution_result()->tabs().at(0).id(),
+          last_execution_result()->tabs().at(1).id()
+        };
+        return tab_ids.size() == 2ul &&
+            tab_ids.contains(tab1.raw_value()) &&
+            tab_ids.contains(tab2.raw_value());
+      }),
+
+      // A non-observing wait should now return an observation for tab1; since
+      // it was previously acted on by the click, it is now part of the acting
+      // set.
+      WaitAction(),
+      CheckResult([this]() { return last_execution_result()->tabs().size(); },
+                  1),
+      Check([&, this]() {
+        return last_execution_result()->tabs().at(0).id() == tab1.raw_value();
+      })
+  );
+  // clang-format on
+}
+
+class GlicActorGeneralUiTestHighDPI : public GlicActorGeneralUiTest {
+ public:
+  static constexpr double kDeviceScaleFactor = 2.0;
+  GlicActorGeneralUiTestHighDPI() {
+    display::Display::SetForceDeviceScaleFactor(kDeviceScaleFactor);
+  }
+  ~GlicActorGeneralUiTestHighDPI() override = default;
+};
+
+IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTestHighDPI,
+                       CoordinatesApplyDeviceScaleFactor) {
+  DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewActorTabId);
+
+  constexpr std::string_view kOffscreenButton = "offscreen";
+
+  const GURL task_url =
+      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+
+  gfx::Rect button_bounds;
+
+  auto click_provider = base::BindLambdaForTesting([&button_bounds, this]() {
+    // Coordinates are provided in DIPs
+    gfx::Point coordinate = button_bounds.CenterPoint();
+    apc::Actions action =
+        actor::MakeClick(tab_handle_, coordinate, apc::ClickAction::LEFT,
+                         apc::ClickAction::SINGLE);
+
+    action.set_task_id(task_id_.value());
+    return EncodeActionProto(action);
+  });
+
+  RunTestSequence(
+      // clang-format off
+      InitializeWithOpenGlicWindow(),
+      StartActorTaskInNewTab(task_url, kNewActorTabId),
+      SetOnIncompatibleAction(OnIncompatibleAction::kSkipTest,
+                              kActivateSurfaceIncompatibilityNotice),
+      ExecuteJs(kNewActorTabId,
+        content::JsReplace("() => document.getElementById($1).scrollIntoView()",
+          kOffscreenButton)),
+      GetPageContextForActorTab(),
+      GetClientRect(kNewActorTabId, kOffscreenButton, button_bounds),
+      CheckJsResult(kNewActorTabId, "() => offscreen_button_clicked", false),
+      ExecuteAction(std::move(click_provider)),
+      CheckJsResult(kNewActorTabId, "() => offscreen_button_clicked"));
   // clang-format on
 }
 

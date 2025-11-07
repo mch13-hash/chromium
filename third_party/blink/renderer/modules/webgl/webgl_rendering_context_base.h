@@ -616,8 +616,9 @@ class MODULES_EXPORT WebGLRenderingContextBase
 
   void Trace(Visitor*) const override;
 
-  // Returns approximate gpu memory allocated per pixel.
-  int AllocatedBufferCountPerPixel() const override;
+  // Returns approximate gpu memory allocated.
+  base::ByteCount AllocatedBufferSize() const override;
+  int AllocatedBufferCountPerPixel() const override { NOTREACHED(); }
 
   // Returns the drawing buffer size after it is, probably, has scaled down
   // to the maximum supported canvas size.
@@ -719,7 +720,6 @@ class MODULES_EXPORT WebGLRenderingContextBase
 
   // CanvasRenderingContext implementation.
   bool IsComposited() const override { return true; }
-  bool CanUseDrawingBufferSIWithoutCopyForLowLatency();
   void PageVisibilityChanged() override;
   void SizeChanged() override;
   scoped_refptr<StaticBitmapImage> PaintRenderingResultsToSnapshot(
@@ -1977,7 +1977,7 @@ class MODULES_EXPORT WebGLRenderingContextBase
   scoped_refptr<ExternalCanvasResource> ExportLowLatencyCanvasResource(
       SourceDrawingBuffer source_buffer);
 
-  CanvasResourceProviderSharedImage* GetOrCreateCanvasResourceProvider();
+  CanvasResourceProviderSharedImage* GetSharedImageResourceProvider();
 
   // Attempts to paint the most recent rendering results into a
   // CanvasResourceProvider. Returns the CanvasResourceProvider if the paint

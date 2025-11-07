@@ -61,19 +61,22 @@ class SessionStorageAreaImplTest : public testing::Test {
       : test_namespace_id1_(base::Uuid::GenerateRandomV4().AsLowercaseString()),
         test_namespace_id2_(
             base::Uuid::GenerateRandomV4().AsLowercaseString()) {
-    leveldb_database_ = AsyncDomStorageDatabase::OpenInMemory(
-        std::nullopt, "SessionStorageAreaImplTestDatabase",
+    // Create an in-memory LevelDB.
+    leveldb_database_ = AsyncDomStorageDatabase::Open(
+        StorageType::kSessionStorage,
+        /*directory=*/base::FilePath(), "SessionStorageAreaImplTestDatabase",
+        /*memory_dump_id=*/std::nullopt,
         base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}),
         base::DoNothing());
     leveldb_database_->RunDatabaseTask(
-        base::BindOnce([](DomStorageDatabase& db) {
+        base::BindOnce([](DomStorageDatabaseLevelDB& db) {
           return db.Put(StdStringToUint8Vector("map-0-key1"),
                         StdStringToUint8Vector("data1"));
         }),
         base::DoNothing());
 
     std::vector<AsyncDomStorageDatabase::BatchDatabaseTask> save_tasks =
-        metadata_.SetupNewDatabase();
+        metadata_.SetupNewDatabaseForTesting();
     auto map_id = metadata_.RegisterNewMap(
         metadata_.GetOrCreateNamespaceEntry(test_namespace_id1_),
         test_storage_key1_, &save_tasks);

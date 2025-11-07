@@ -141,7 +141,7 @@ class TestCascade {
     EnsureAtLeast(options.origin);
     cascade_.MutableMatchResult().AddMatchedProperties(
         set,
-        /*env_bindings=*/nullptr,
+        /*mixin_parameter_bindings=*/nullptr,
         {
             .link_match_type = static_cast<uint8_t>(options.link_match_type),
             .is_inline_style = options.is_inline_style,
@@ -171,8 +171,9 @@ class TestCascade {
                           CascadeOrigin& origin) {
     TestCascadeResolver resolver;
     return cascade_.Resolve(property, value, /*tree_scope=*/&GetDocument(),
-                            /*env_bindings=*/nullptr, CascadePriority(origin),
-                            origin, resolver.InnerResolver());
+                            /*mixin_parameter_bindings=*/nullptr,
+                            CascadePriority(origin), origin,
+                            resolver.InnerResolver());
   }
 
   static const CSSValue* StaticResolve(StyleResolverState& state,
@@ -185,7 +186,7 @@ class TestCascade {
     const CSSPropertyValue& reference = set->PropertyAt(0);
     return StyleCascade::Resolve(state, reference.Name(), reference.Value(),
                                  /*tree_scope=*/&state.GetDocument(),
-                                 /*env_bindings=*/nullptr);
+                                 /*mixin_parameter_bindings=*/nullptr);
   }
 
   std::unique_ptr<CSSBitset> GetImportantSet() {
@@ -270,7 +271,7 @@ class TestCascade {
       state.CreateNewStyle(*InitialStyle(state.GetDocument()), *parent_style);
       state.SetParentStyle(parent_style);
     } else {
-      state.SetStyle(*InitialStyle(state.GetDocument()));
+      state.CreateNewClonedStyle(*InitialStyle(state.GetDocument()));
       state.SetParentStyle(InitialStyle(state.GetDocument()));
     }
     state.SetOldStyle(state.GetElement().GetComputedStyle());
@@ -3226,6 +3227,43 @@ TEST_F(StyleCascadeTest, NonInitialWritingMode) {
 
   EXPECT_EQ("20px", cascade.ComputedValue("width"));
   EXPECT_EQ("10px", cascade.ComputedValue("height"));
+}
+
+// crbug.com/40527196
+TEST_F(StyleCascadeTest, ApplyAfterWritingModeAdjustment) {
+  TestCascade cascade(GetDocument());
+
+  // Set ComputedStyle fields for 'padding' to 5px. This makes it possible
+  // to test that we explicitly set the initial value (0px) later.
+  cascade.Add("padding:5px");
+  // Simulate an inherited vertical writing-mode.
+  cascade.Add("writing-mode:vertical-rl");
+  cascade.Apply();
+  cascade.Reset();
+
+  // This should set padding-top/bottom only.
+  cascade.Add("--p:13px");
+  cascade.Add("padding-inline:var(--p)");
+  cascade.Apply();
+  EXPECT_EQ("13px", cascade.ComputedValue("padding-top"));
+  EXPECT_EQ("13px", cascade.ComputedValue("padding-bottom"));
+  EXPECT_EQ("5px", cascade.ComputedValue("padding-left"));
+  EXPECT_EQ("5px", cascade.ComputedValue("padding-right"));
+
+  // Simulate "style adjustment" (crbug.com/40527196).
+  cascade.State().StyleBuilder().SetWritingMode(WritingMode::kHorizontalTb);
+  // Simulate the second Apply() call during StyleResolver::
+  // ApplyAnimatedStyle().
+  cascade.Apply();
+  // padding-inline now means padding-left/right, but the pending substitution
+  // value is still held by the padding-top/bottom properties in the cascade
+  // map. This scenario is really unsupported, but until crbug.com/40527196
+  // can be fixed properly, the expected value is to behave like "unset"
+  // for properties with "broken" pending substitution values.
+  EXPECT_EQ("0px", cascade.ComputedValue("padding-top"));
+  EXPECT_EQ("0px", cascade.ComputedValue("padding-bottom"));
+  EXPECT_EQ("5px", cascade.ComputedValue("padding-left"));
+  EXPECT_EQ("5px", cascade.ComputedValue("padding-right"));
 }
 
 TEST_F(StyleCascadeTest, InitialTextSizeAdjust) {

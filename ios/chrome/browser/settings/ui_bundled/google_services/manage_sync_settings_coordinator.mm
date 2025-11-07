@@ -5,6 +5,7 @@
 #import "ios/chrome/browser/settings/ui_bundled/google_services/manage_sync_settings_coordinator.h"
 
 #import "base/check_op.h"
+#import "base/feature_list.h"
 #import "base/ios/block_types.h"
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
@@ -14,6 +15,7 @@
 #import "components/regional_capabilities/regional_capabilities_service.h"
 #import "components/signin/public/base/signin_metrics.h"
 #import "components/strings/grit/components_strings.h"
+#import "components/sync/base/features.h"
 #import "components/sync/service/sync_service.h"
 #import "components/sync/service/sync_service_utils.h"
 #import "components/sync/service/sync_user_settings.h"
@@ -22,12 +24,12 @@
 #import "ios/chrome/browser/authentication/account_menu/coordinator/account_menu_coordinator.h"
 #import "ios/chrome/browser/authentication/account_menu/coordinator/account_menu_coordinator_delegate.h"
 #import "ios/chrome/browser/authentication/account_menu/public/account_menu_constants.h"
+#import "ios/chrome/browser/authentication/trusted_vault_reauthentication/coordinator/trusted_vault_reauthentication_coordinator.h"
+#import "ios/chrome/browser/authentication/trusted_vault_reauthentication/coordinator/trusted_vault_reauthentication_coordinator_delegate.h"
 #import "ios/chrome/browser/authentication/ui_bundled/continuation.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signout_action_sheet/signout_action_sheet_coordinator.h"
-#import "ios/chrome/browser/authentication/ui_bundled/trusted_vault_reauthentication/trusted_vault_reauthentication_coordinator.h"
-#import "ios/chrome/browser/authentication/ui_bundled/trusted_vault_reauthentication/trusted_vault_reauthentication_coordinator_delegate.h"
 #import "ios/chrome/browser/regional_capabilities/model/regional_capabilities_service_factory.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/bulk_upload/bulk_upload_coordinator.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/bulk_upload/bulk_upload_coordinator_delegate.h"
@@ -411,7 +413,9 @@ using DismissViewCallback = SystemIdentityManager::DismissViewCallback;
         manageSyncSettingsCoordinatorNeedToOpenChromeSyncWebPage:self];
   }
   GURL url = google_util::AppendGoogleLocaleParam(
-      GURL(kSyncGoogleDashboardURL),
+      GURL(base::FeatureList::IsEnabled(syncer::kSyncEnableNewSyncDashboardUrl)
+               ? kNewSyncGoogleDashboardURL
+               : kLegacySyncGoogleDashboardURL),
       GetApplicationContext()->GetApplicationLocaleStorage()->Get());
   OpenNewTabCommand* command = [OpenNewTabCommand commandWithURLFromChrome:url];
   id<ApplicationCommands> handler = HandlerForProtocol(

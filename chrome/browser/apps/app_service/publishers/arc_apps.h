@@ -52,7 +52,6 @@ class Profile;
 namespace apps {
 
 class PublisherTest;
-class WebApkManager;
 struct AppLaunchParams;
 
 // An app publisher (in the App Service sense) of ARC++ apps,
@@ -68,15 +67,15 @@ class ArcApps : public KeyedService,
                 public apps::InstanceRegistry::Observer,
                 public arc::ArcPrivacyItemsBridge::Observer {
  public:
-  static ArcApps* Get(Profile* profile);
-
   explicit ArcApps(AppServiceProxy* proxy);
   ArcApps(const ArcApps&) = delete;
   ArcApps& operator=(const ArcApps&) = delete;
-
   ~ArcApps() override;
 
-  WebApkManager* GetWebApkManagerForTesting() { return web_apk_manager_.get(); }
+  // TODO(crbug.com/450429333, crbug.com/451841683): Remove this once we've
+  // completed the refactoring of ArcNotificationManager, and moved out
+  // `web_apk_manager_`.
+  static ArcApps* GetForTesting(Profile* profile);
 
   static void SetArcVersionForTesting(int version);
 
@@ -88,8 +87,6 @@ class ArcApps : public KeyedService,
 
   using AppIdToTaskIds = std::map<std::string, std::set<int>>;
   using TaskIdToAppId = std::map<int, std::string>;
-
-  void Initialize();
 
   // apps::AppPublisher overrides.
   void GetCompressedIconData(const std::string& app_id,
@@ -179,10 +176,8 @@ class ArcApps : public KeyedService,
       arc::mojom::SupportedLinkChangeSource source) override;
 
   // ash::ArcNotificationsHostInitializer::Observer overrides.
-  void OnSetArcNotificationsInstance(
+  void OnArcNotificationManagerInitialized(
       ash::ArcNotificationManagerBase* arc_notification_manager) override;
-  void OnArcNotificationInitializerDestroyed(
-      ash::ArcNotificationsHostInitializer* initializer) override;
 
   // ArcNotificationManagerBase::Observer overrides.
   void OnNotificationUpdated(const std::string& notification_id,
@@ -255,8 +250,6 @@ class ArcApps : public KeyedService,
 
   // Handles requesting app shortcuts from Android.
   std::unique_ptr<arc::ArcAppShortcutsRequest> arc_app_shortcuts_request_;
-
-  std::unique_ptr<apps::WebApkManager> web_apk_manager_;
 
   base::ScopedObservation<arc::ArcSessionManager,
                           arc::ArcSessionManagerObserver>

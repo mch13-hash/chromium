@@ -38,7 +38,6 @@
 #include "gpu/ipc/common/gpu_client_ids.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_surface.h"
@@ -167,8 +166,6 @@ void GLManager::InitializeWithWorkaroundsImpl(
 
   translator_cache_ =
       std::make_unique<gles2::ShaderTranslatorCache>(gpu_preferences_);
-  discardable_manager_ =
-      std::make_unique<ServiceDiscardableManager>(gpu_preferences_);
 
   if (!context_group) {
     GpuFeatureInfo gpu_feature_info;
@@ -180,7 +177,7 @@ void GLManager::InitializeWithWorkaroundsImpl(
         gpu_preferences_, /*memory_tracker=*/nullptr, translator_cache_.get(),
         &completeness_cache_, feature_info,
         /*progress_reporter=*/nullptr, gpu_feature_info,
-        discardable_manager_.get(), &shared_image_manager_);
+        &shared_image_manager_);
   }
 
   command_buffer_.reset(

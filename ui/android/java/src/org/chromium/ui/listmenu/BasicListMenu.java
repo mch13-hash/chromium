@@ -29,7 +29,8 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.ui.R;
 import org.chromium.ui.UiUtils;
-import org.chromium.ui.listmenu.ListMenuUtils.AccessibilityListObserver;
+import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController;
+import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController.AccessibilityListObserver;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.ModelListAdapter;
@@ -87,8 +88,8 @@ public class BasicListMenu implements ListMenu {
             boolean isIconTintable,
             boolean groupContainsIcon,
             boolean enabled,
-            View.@Nullable OnClickListener clickListener,
-            @Nullable Intent intent) {
+            @Nullable Intent intent,
+            int order) {
         PropertyModel.Builder modelBuilder =
                 new PropertyModel.Builder(ListMenuItemProperties.ALL_KEYS)
                         .with(ListMenuItemProperties.TITLE, title)
@@ -97,7 +98,6 @@ public class BasicListMenu implements ListMenu {
                         .with(ListMenuItemProperties.MENU_ITEM_ID, id)
                         .with(ListMenuItemProperties.START_ICON_DRAWABLE, startIcon)
                         .with(ListMenuItemProperties.ENABLED, enabled)
-                        .with(ListMenuItemProperties.CLICK_LISTENER, clickListener)
                         .with(ListMenuItemProperties.INTENT, intent)
                         .with(
                                 ListMenuItemProperties.KEEP_START_ICON_SPACING_WHEN_HIDDEN,
@@ -107,7 +107,8 @@ public class BasicListMenu implements ListMenu {
                                 R.style.TextAppearance_DensityAdaptive_ListMenuItem)
                         .with(
                                 ListMenuItemProperties.ICON_TINT_COLOR_STATE_LIST_ID,
-                                isIconTintable ? R.color.list_menu_item_icon_color_list : 0);
+                                isIconTintable ? R.color.list_menu_item_icon_color_list : 0)
+                        .with(ListMenuItemProperties.ORDER, order);
         return new ListItem(ListItemType.MENU_ITEM, modelBuilder.build());
     }
 
@@ -148,14 +149,18 @@ public class BasicListMenu implements ListMenu {
         View hairline = mListMenuLayout.findViewById(R.id.menu_header_bottom_hairline);
 
         mContentModelList = data;
-        mContentAdapter = createAdapter(data, Set.of(), (model) -> callDelegate(delegate, model));
+        mContentAdapter =
+                createAdapter(data, Set.of(), (model, view) -> callDelegate(delegate, model, view));
         mContentListView = mListMenuLayout.findViewById(R.id.menu_list);
         mContentListView.setAdapter(mContentAdapter);
         mContentListView.setDivider(null);
 
         mHeaderModelList = new ModelList();
         mHeaderAdapter =
-                createAdapter(mHeaderModelList, Set.of(), (model) -> callDelegate(delegate, model));
+                createAdapter(
+                        mHeaderModelList,
+                        Set.of(),
+                        (model, view) -> callDelegate(delegate, model, view));
         mHeaderListView = mListMenuLayout.findViewById(R.id.menu_header);
         mHeaderListView.setAdapter(mHeaderAdapter);
 
@@ -174,16 +179,6 @@ public class BasicListMenu implements ListMenu {
         if (bottomHairlineColor != null) {
             hairline.setBackgroundColor(bottomHairlineColor);
         }
-
-        AccessibilityListObserver observer =
-                new AccessibilityListObserver(
-                        mListMenuLayout,
-                        mHeaderListView,
-                        mContentListView,
-                        mHeaderModelList,
-                        mContentModelList);
-        mHeaderModelList.addObserver(observer);
-        mContentModelList.addObserver(observer);
 
         mScrollChangeListener =
                 new ContentListOnScrollChangeListener(hairline, () -> !mHeaderModelList.isEmpty());
@@ -245,22 +240,27 @@ public class BasicListMenu implements ListMenu {
      * If an item doesn't already have a click callback in its model, no click callback is added.
      *
      * @param dismissDialog The {@link Runnable} to run.
-     * @param ListMenuFlyoutController The {@link ListMenuFlyoutController} to use for flyout menus.
+     * @param hierarchicalMenuController The {@link HierarchicalMenuController} to use.
      */
     public void setupCallbacksRecursively(
-            Runnable dismissDialog,
-            @Nullable Boolean drillDownOverrideValue,
-            @Nullable ListMenuFlyoutController flyoutController) {
-        ListMenuUtils.setupCallbacksRecursively(
-                mHeaderModelList,
-                mContentModelList,
-                dismissDialog,
-                flyoutController,
-                drillDownOverrideValue);
+            Runnable dismissDialog, HierarchicalMenuController hierarchicalMenuController) {
+        AccessibilityListObserver observer =
+                hierarchicalMenuController
+                .new AccessibilityListObserver(
+                        mListMenuLayout,
+                        mHeaderListView,
+                        mContentListView,
+                        mHeaderModelList,
+                        mContentModelList);
+        mHeaderModelList.addObserver(observer);
+        mContentModelList.addObserver(observer);
+
+        hierarchicalMenuController.setupCallbacksRecursively(
+                mHeaderModelList, mContentModelList, dismissDialog);
     }
 
-    private void callDelegate(@Nullable Delegate delegate, PropertyModel model) {
-        if (delegate != null) delegate.onItemSelected(model);
+    private void callDelegate(@Nullable Delegate delegate, PropertyModel model, View view) {
+        if (delegate != null) delegate.onItemSelected(model, view);
         // We will run the runnables that are registered by the time this lambda
         // is called.
         for (Runnable r : mClickRunnables) {

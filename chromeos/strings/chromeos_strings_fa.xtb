@@ -563,7 +563,7 @@
 <translation id="3487866404496702283">‏بازخورد درباره ویژگی mahi</translation>
 <translation id="3488065109653206955">به‌طور نسبی فعال شده است</translation>
 <translation id="3492882532495507361">دفتر کار <ph name="OFFICE_STYLE" /> با رنگ‌های <ph name="OFFICE_COLOR" /></translation>
-<translation id="3493187369049186498">‏دستگاه Chromebook شما میزان مصرف داده را اندازه‌گیری می‌کند. مقدار آن ممکن است با اندازه‌گیری رساننده خدمات متفاوت باشد.</translation>
+<translation id="3493187369049186498">‏دستگاه Chromebook شما میزان مصرف داده را اندازه‌گیری می‌کند. مقدار آن ممکن است با اندازه‌گیری فراهم‌ساز خدمات متفاوت باشد.</translation>
 <translation id="3502426834823382181">مشاهده همه برنامه‌ها</translation>
 <translation id="3510890413042482857">ارسال <ph name="BEGIN_LINK1" />داده‌های ردیابی عملکرد<ph name="END_LINK1" /></translation>
 <translation id="3517001332549868749">‏به‌روزرسانی ChromeOS</translation>
@@ -756,6 +756,7 @@
 <translation id="4300073214558989"><ph name="IMAGE_COUNT" /> تصویر</translation>
 <translation id="4300272766492248925">باز کردن برنامه</translation>
 <translation id="430786093962686457">تور نازک</translation>
+<translation id="4309762678330556039">به‌طور خودکار ترانویسی بسازید و در صدا جستجو کنید. حتی زمانی‌که به اینترنت متصل نیستید می‌توانید صدا ضبط کنید.</translation>
 <translation id="4310735698903592804">‏کاغذدیواری‌های اخیر با بهره‌گیری از هوش مصنوعی Google ایجاد شده است</translation>
 <translation id="4320904097188876154">صورتی نئونی</translation>
 <translation id="432961742358282111">برای دریافت کردن تعریف، ترجمه، یا تبدیل واحد، کلیک راست کنید یا فشار دهید و نگه دارید. برای مدیریت این ویژگی، از کلیدهای «راست‌بَر» یا «چپ‌بَر» استفاده کنید.</translation>
@@ -1352,7 +1353,7 @@
 <translation id="6961170852793647506">برای شروع‌، سند را روی اسکنر قرار دهید</translation>
 <translation id="6965382102122355670">تأیید</translation>
 <translation id="6965978654500191972">دستگاه</translation>
-<translation id="6972754398087986839">شروع به کار</translation>
+<translation id="6972754398087986839">شروع کنید</translation>
 <translation id="6975620886940770104">یک <ph name="GLOWSCAPES_LANDSCAPE" /> با <ph name="GLOWSCAPES_FEATURE" /> درخشان</translation>
 <translation id="6975981640379148271">کوالا</translation>
 <translation id="6977381486153291903">بازبینی سفت‌افزار</translation>
@@ -1416,7 +1417,7 @@
 <translation id="7210635925306941239">فیروزه‌ای</translation>
 <translation id="7212547870105584639">‏مدیریت تنظیمات APN شبکه. APN اتصالی میان شبکه تلفن همراه و اینترنت برقرار می‌کند. <ph name="BEGIN_LINK_LEARN_MORE" />بیشتر بدانید<ph name="END_LINK_LEARN_MORE" /></translation>
 <translation id="7212734716605298123">به‌روزرسانی‌های سفت‌افزار برای دستگاه‌های خارجی</translation>
-<translation id="7216409898977639127">ارائه‌دهنده شبکه تلفن همراه</translation>
+<translation id="7216409898977639127">ارائه‌کننده شبکه تلفن همراه</translation>
 <translation id="7221869452894271364">بار کردن مجدد این صفحه</translation>
 <translation id="7223952304612664117">با این کار، خدمات سیستم می‌تواند برای تعیین مکان شما از «دقت مکان» استفاده کند. «دقت مکان» می‌تواند برای برآورد کردن مکان دستگاه از اطلاعات مربوط به حسگرها و سیگنال‌های بی‌سیم استفاده کند.</translation>
 <translation id="7233782086689993269">میان‌بر بازیابی شد</translation>
@@ -1472,6 +1473,7 @@
 <translation id="7425832472614771259">مدل ترانویسی <ph name="LANGUAGE_NAME" /> تا <ph name="PROGRESS_PERCENTAGE" />٪ بارگیری شده است</translation>
 <translation id="7427315641433634153">MSCHAP</translation>
 <translation id="7438298994385592770">‏این APN را نمی‌توان غیرفعال یا حذف کرد. مطمئن شوید نقطه‌های APN ‏<ph name="ATTACH" /> فعال را غیرفعال یا حذف کرده‌اید.</translation>
+<translation id="7458359366992324037">نمایشگر راه دور</translation>
 <translation id="7458970041932198923">لطفاً برای مشاهده و تنظیم چهره‌نماها، به شبکه متصل شوید و صفحه را مجدداً بار کنید.</translation>
 <translation id="7469648432129124067">درگاهی شناسایی شد</translation>
 <translation id="7481312909269577407">ارسال کردن</translation>

@@ -82,6 +82,9 @@ PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE_WITH_ATTRS(
     perfetto::Category("blink.console"),
     perfetto::Category("blink.net"),
     perfetto::Category("blink.resource"),
+    perfetto::Category("blink.task_attribution").SetDescription(
+      "Traces for Task Attribution, blink's internal mechanism for propagating "
+      "task state information across tasks and microtasks"),
     perfetto::Category("blink.user_timing"),
     perfetto::Category("blink.worker"),
     perfetto::Category("blink_style"),
@@ -197,6 +200,7 @@ PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE_WITH_ATTRS(
     perfetto::Category("optimization_guide").SetDescription(
         "Includes events related to processing hints and machine learning "
         "models by the Optimization Guide component."),
+    perfetto::Category("optimization_guide.debug").SetTags("debug"),
     perfetto::Category("ozone"),
     perfetto::Category("partition_alloc"),
     perfetto::Category("passwords"),

@@ -19,7 +19,6 @@
 #include "base/functional/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/services/storage/indexed_db/locks/partitioned_lock_manager.h"
@@ -41,6 +40,7 @@ struct IndexedDBDatabaseMetadata;
 
 namespace content::indexed_db {
 class BucketContext;
+struct IndexedDBDataLossInfo;
 class Connection;
 class DatabaseCallbacks;
 class Transaction;
@@ -227,6 +227,7 @@ class CONTENT_EXPORT Database {
   class DeleteRequest;
 
   Status OpenInternal();
+  const IndexedDBDataLossInfo& GetDataLossInfo() const;
 
   // This class informs its result sink of an error if a `GetAllOperation` is
   // deleted without being run. This functionality mimics that of

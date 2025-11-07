@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "components/viz/common/resources/shared_image_format_utils.h"
-#include "ui/gfx/buffer_format_util.h"
+#include "ui/gfx/buffer_types.h"
 #include "ui/gfx/buffer_usage_util.h"
 #include "ui/gfx/client_native_pixmap_factory.h"
 #include "ui/gfx/native_pixmap.h"
@@ -42,12 +42,9 @@ LegacyGpuMemoryBufferForVideo::CreateFromHandleForVideoFrame(
     viz::SharedImageFormat format,
     gfx::BufferUsage usage) {
   CHECK(viz::HasEquivalentBufferFormat(format));
-  gfx::BufferFormat buffer_format =
-      viz::SharedImageFormatToBufferFormatRestrictedUtils::ToBufferFormat(
-          format);
   std::unique_ptr<gfx::ClientNativePixmap> native_pixmap =
       client_native_pixmap_factory->ImportFromHandle(
-          std::move(handle).native_pixmap_handle(), size, buffer_format, usage);
+          std::move(handle).native_pixmap_handle(), size, format, usage);
   if (!native_pixmap) {
     return nullptr;
   }

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/tabs/tab_list_bridge.h"
 
+#include "base/notimplemented.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
@@ -67,7 +68,10 @@ tabs::TabInterface* TabListBridge::GetActiveTab() {
   return tab_strip_->GetActiveTab();
 }
 
-void TabListBridge::OpenTab(const GURL& url, int index) {}
+tabs::TabInterface* TabListBridge::OpenTab(const GURL& url, int index) {
+  NOTIMPLEMENTED();
+  return nullptr;
+}
 
 void TabListBridge::DiscardTab(tabs::TabHandle tab) {}
 
@@ -122,8 +126,8 @@ std::vector<tabs::TabInterface*> TabListBridge::GetAllTabs() {
   std::vector<tabs::TabInterface*> all_tabs;
   size_t tab_count = tab_strip_->count();
   all_tabs.reserve(tab_count);
-  for (size_t i = 0; i < tab_count; ++i) {
-    all_tabs.push_back(tab_strip_->GetTabAtIndex(i));
+  for (tabs::TabInterface* tab : *tab_strip_) {
+    all_tabs.push_back(tab);
   }
   return all_tabs;
 }
@@ -207,6 +211,15 @@ void TabListBridge::OnTabStripModelChanged(
     case TabStripModelChange::kReplaced:
     case TabStripModelChange::kSelectionOnly:
       break;
+  }
+
+  if (selection.active_tab_changed()) {
+    tabs::TabInterface* tab = tab_strip_->GetActiveTab();
+    if (tab) {
+      for (auto& observer : observers_) {
+        observer.OnActiveTabChanged(tab);
+      }
+    }
   }
 }
 

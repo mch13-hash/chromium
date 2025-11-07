@@ -199,6 +199,8 @@ target(link_target_type, "gles2_sources") {
     "isolation_key_provider.h",
     "logger.cc",
     "logger.h",
+    "memory_cache.cc",
+    "memory_cache.h",
     "memory_program_cache.cc",
     "memory_program_cache.h",
     "multi_draw_manager.cc",
@@ -223,8 +225,6 @@ target(link_target_type, "gles2_sources") {
     "sampler_manager.h",
     "scheduler_sequence.cc",
     "scheduler_sequence.h",
-    "service_discardable_manager.cc",
-    "service_discardable_manager.h",
     "service_font_manager.cc",
     "service_font_manager.h",
     "service_transfer_cache.cc",
@@ -657,8 +657,6 @@ target(link_target_type, "gles2_sources") {
       "shared_image/dxgi_swap_chain_image_backing.h",
       "shared_image/dxgi_swap_chain_image_representation.cc",
       "shared_image/dxgi_swap_chain_image_representation.h",
-      "shared_image/gpu_memory_buffer_factory_dxgi.cc",
-      "shared_image/gpu_memory_buffer_factory_dxgi.h",
     ]
     libs = [
       "d3d11.lib",

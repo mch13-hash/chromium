@@ -48,6 +48,10 @@ OmniboxView* TestBrowserWindow::TestLocationBar::GetOmniboxView() {
   return nullptr;
 }
 
+OmniboxController* TestBrowserWindow::TestLocationBar::GetOmniboxController() {
+  return nullptr;
+}
+
 LocationBarTesting*
     TestBrowserWindow::TestLocationBar::GetLocationBarForTesting() {
   return nullptr;
@@ -261,10 +265,6 @@ bool TestBrowserWindow::IsBorderlessModeEnabled() const {
   return false;
 }
 
-views::WebView* TestBrowserWindow::GetContentsWebView() {
-  return nullptr;
-}
-
 BrowserView* TestBrowserWindow::AsBrowserView() {
   return nullptr;
 }
@@ -280,7 +280,7 @@ ShowTranslateBubbleResult TestBrowserWindow::ShowTranslateBubble(
     const std::string& target_language,
     translate::TranslateErrors error_type,
     bool is_user_gesture) {
-  return ShowTranslateBubbleResult::SUCCESS;
+  return ShowTranslateBubbleResult::kSuccess;
 }
 
 void TestBrowserWindow::StartPartialTranslate(
@@ -322,9 +322,6 @@ TestBrowserWindow::ShowSendTabToSelfPromoBubble(content::WebContents* contents,
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
-views::Button* TestBrowserWindow::GetSharingHubIconButton() {
-  return nullptr;
-}
 void TestBrowserWindow::ToggleMultitaskMenu() {
   return;
 }
@@ -334,14 +331,6 @@ sharing_hub::SharingHubBubbleView* TestBrowserWindow::ShowSharingHubBubble(
   return nullptr;
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
-
-views::View* TestBrowserWindow::GetTopContainer() {
-  return nullptr;
-}
-
-views::View* TestBrowserWindow::GetLensOverlayView() {
-  return nullptr;
-}
 
 DownloadBubbleUIController* TestBrowserWindow::GetDownloadBubbleUIController() {
   return nullptr;

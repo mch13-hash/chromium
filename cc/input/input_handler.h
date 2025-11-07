@@ -565,7 +565,8 @@ class CC_EXPORT InputHandler : public InputDelegateForCompositor {
                            AbortAnimatedScrollBeforeStartingAutoscroll);
   FRIEND_TEST_ALL_PREFIXES(LayerTreeHostImplTest, AnimatedScrollYielding);
   FRIEND_TEST_ALL_PREFIXES(LayerTreeHostImplTest, AutoscrollOnDeletedScrollbar);
-  FRIEND_TEST_ALL_PREFIXES(LayerTreeHostImplTest, ThumbDragAfterJumpClick);
+  FRIEND_TEST_ALL_PREFIXES(LayerTreeHostImplTest,
+                           ThumbDragAfterJumpClickOrThumbClick);
   FRIEND_TEST_ALL_PREFIXES(LayerTreeHostImplTest, ScrollOnLargeThumb);
   FRIEND_TEST_ALL_PREFIXES(LayerTreeHostImplTest, AutoscrollTaskAbort);
 
@@ -734,7 +735,7 @@ class CC_EXPORT InputHandler : public InputDelegateForCompositor {
       TargetSnapAreaElementIds target_ids = TargetSnapAreaElementIds());
   void ClearAnimatingSnapTargetsForElement(ElementId element_id);
 
-  void EnsureSnapAnimationData(ElementId element_id);
+  inline void EnsureSnapAnimationData(ElementId element_id);
 
   // Add |element_id| to the set of scroll containers for which an impl scroll
   // has ended between the last commit and the next one. The main thread will

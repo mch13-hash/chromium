@@ -10,12 +10,14 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/sequenced_task_runner.h"
+#include "components/services/storage/dom_storage/leveldb/dom_storage_batch_operation_leveldb.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
 namespace storage {
 
 // static
-std::unique_ptr<AsyncDomStorageDatabase> AsyncDomStorageDatabase::OpenDirectory(
+std::unique_ptr<AsyncDomStorageDatabase> AsyncDomStorageDatabase::Open(
+    StorageType storage_type,
     const base::FilePath& directory,
     const std::string& dbname,
     const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
@@ -23,23 +25,9 @@ std::unique_ptr<AsyncDomStorageDatabase> AsyncDomStorageDatabase::OpenDirectory(
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
     StatusCallback callback) {
   std::unique_ptr<AsyncDomStorageDatabase> db(new AsyncDomStorageDatabase);
-  DomStorageDatabaseFactory::OpenDirectory(
-      directory, dbname, memory_dump_id, std::move(blocking_task_runner),
-      base::BindOnce(&AsyncDomStorageDatabase::OnDatabaseOpened,
-                     db->weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
-  return db;
-}
-
-// static
-std::unique_ptr<AsyncDomStorageDatabase> AsyncDomStorageDatabase::OpenInMemory(
-    const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
-        memory_dump_id,
-    const std::string& tracking_name,
-    scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
-    StatusCallback callback) {
-  std::unique_ptr<AsyncDomStorageDatabase> db(new AsyncDomStorageDatabase);
-  DomStorageDatabaseFactory::OpenInMemory(
-      tracking_name, memory_dump_id, std::move(blocking_task_runner),
+  DomStorageDatabaseFactory::Open(
+      storage_type, directory, dbname, memory_dump_id,
+      std::move(blocking_task_runner),
       base::BindOnce(&AsyncDomStorageDatabase::OnDatabaseOpened,
                      db->weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
   return db;
@@ -51,16 +39,18 @@ AsyncDomStorageDatabase::~AsyncDomStorageDatabase() {
   DCHECK(committers_.empty());
 }
 
+void AsyncDomStorageDatabase::ReadAllMetadata(
+    ReadAllMetadataCallback callback) {
+  RunDatabaseTask(base::BindOnce([](DomStorageDatabase& db) {
+                    return db.ReadAllMetadata();
+                  }),
+                  std::move(callback));
+}
+
 void AsyncDomStorageDatabase::RewriteDB(StatusCallback callback) {
-  DCHECK(database_);
-  database_.PostTaskWithThisObject(base::BindOnce(
-      [](StatusCallback callback,
-         scoped_refptr<base::SequencedTaskRunner> callback_task_runner,
-         DomStorageDatabase* db) {
-        callback_task_runner->PostTask(
-            FROM_HERE, base::BindOnce(std::move(callback), db->RewriteDB()));
-      },
-      std::move(callback), base::SequencedTaskRunner::GetCurrentDefault()));
+  RunDatabaseTask(
+      base::BindOnce([](DomStorageDatabase& db) { return db.RewriteDB(); }),
+      std::move(callback));
 }
 
 void AsyncDomStorageDatabase::RunBatchDatabaseTasks(
@@ -70,8 +60,8 @@ void AsyncDomStorageDatabase::RunBatchDatabaseTasks(
   RunDatabaseTask(base::BindOnce(
                       [](RunBatchTasksContext context,
                          std::vector<BatchDatabaseTask> tasks,
-                         DomStorageDatabase& db) -> DbStatus {
-                        std::unique_ptr<DomStorageBatchOperation> batch =
+                         DomStorageDatabaseLevelDB& db) -> DbStatus {
+                        std::unique_ptr<DomStorageBatchOperationLevelDB> batch =
                             db.CreateBatchOperation();
                         // TODO(crbug.com/40245293): Remove this after debugging
                         // is complete.
@@ -125,22 +115,17 @@ void AsyncDomStorageDatabase::RemoveCommitter(Committer* source) {
   DCHECK(erased);
 }
 
-void AsyncDomStorageDatabase::InitiateCommit(Committer* source) {
+void AsyncDomStorageDatabase::InitiateCommit() {
   std::vector<Commit> commits;
   std::vector<base::OnceCallback<void(DbStatus)>> commit_dones;
-  if (base::FeatureList::IsEnabled(kCoalesceStorageAreaCommits)) {
-    commits.reserve(committers_.size());
-    commit_dones.reserve(committers_.size());
-    for (Committer* committer : committers_) {
-      std::optional<Commit> commit = committer->CollectCommit();
-      if (commit) {
-        commits.emplace_back(std::move(*commit));
-        commit_dones.emplace_back(committer->GetCommitCompleteCallback());
-      }
+  commits.reserve(committers_.size());
+  commit_dones.reserve(committers_.size());
+  for (Committer* committer : committers_) {
+    std::optional<Commit> commit = committer->CollectCommit();
+    if (commit) {
+      commits.emplace_back(std::move(*commit));
+      commit_dones.emplace_back(committer->GetCommitCompleteCallback());
     }
-  } else {
-    commits.emplace_back(*source->CollectCommit());
-    commit_dones.emplace_back(source->GetCommitCompleteCallback());
   }
 
   auto run_all = base::BindOnce(
@@ -154,8 +139,8 @@ void AsyncDomStorageDatabase::InitiateCommit(Committer* source) {
 
   RunDatabaseTask(
       base::BindOnce(
-          [](std::vector<Commit> commits, DomStorageDatabase& db) {
-            std::unique_ptr<DomStorageBatchOperation> batch =
+          [](std::vector<Commit> commits, DomStorageDatabaseLevelDB& db) {
+            std::unique_ptr<DomStorageBatchOperationLevelDB> batch =
                 db.CreateBatchOperation();
             for (const Commit& commit : commits) {
               const auto now = base::TimeTicks::Now();
@@ -186,16 +171,21 @@ void AsyncDomStorageDatabase::InitiateCommit(Committer* source) {
 
 void AsyncDomStorageDatabase::OnDatabaseOpened(
     StatusCallback callback,
-    base::SequenceBound<DomStorageDatabase> database,
-    DbStatus status) {
-  database_ = std::move(database);
+    StatusOr<base::SequenceBound<DomStorageDatabase>> database) {
+  if (!database.has_value()) {
+    std::move(callback).Run(std::move(database.error()));
+    return;
+  }
+
+  database_ = *std::move(database);
+
   std::vector<BoundDatabaseTask> tasks;
   std::swap(tasks, tasks_to_run_on_open_);
-  if (status.ok()) {
-    for (auto& task : tasks)
-      database_.PostTaskWithThisObject(std::move(task));
+
+  for (auto& task : tasks) {
+    database_.PostTaskWithThisObject(std::move(task));
   }
-  std::move(callback).Run(status);
+  std::move(callback).Run(DbStatus::OK());
 }
 
 AsyncDomStorageDatabase::Commit::Commit() = default;

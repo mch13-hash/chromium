@@ -10,6 +10,7 @@
 
 #include "ash/capture_mode/capture_mode_controller.h"
 #include "ash/capture_mode/test_capture_mode_delegate.h"
+#include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/public/cpp/capture_mode/capture_mode_api.h"
@@ -29,7 +30,6 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
-#include "chromeos/ash/services/assistant/public/cpp/features.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest-param-test.h"
@@ -57,7 +57,10 @@ class HomeButtonTapOverlayTest
       public testing::WithParamInterface<TestVariant> {
  public:
   HomeButtonTapOverlayTest()
-      : AshTestBase(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
+      : AshTestBase(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
+    // Explicitly enable Sunfish so the Home Button has a long-press action.
+    scoped_feature_list_.InitAndEnableFeature(features::kSunfishFeature);
+  }
 
   void SetUp() override {
     // In Tablet mode, home button is shown if a board has kAshEnableTabletMode
@@ -67,27 +70,29 @@ class HomeButtonTapOverlayTest
 
     AshTestBase::SetUp();
 
-    if (ash::assistant::features::IsNewEntryPointEnabled()) {
-      GTEST_SKIP()
-          << "Assistant is not available if new entry point is enabled. "
-             "crbug.com/388361414";
-    }
-
     PrefService* prefs =
         Shell::Get()->session_controller()->GetActivePrefService();
     // Disable Sunfish and Scanner via enterprise policies.
     auto* capture_mode_controller = CaptureModeController::Get();
     auto* test_capture_mode_delegate = static_cast<TestCaptureModeDelegate*>(
         capture_mode_controller->delegate_for_testing());
-    test_capture_mode_delegate->set_is_search_allowed_by_policy(false);
+
+    // Allow Sunfish via enterprise policy.
+    // Previously this was set to 'false', disabling the only remaining
+    // long-press action.
+    test_capture_mode_delegate->set_is_search_allowed_by_policy(true);
+
+    // Scanner can remain disabled if Sunfish is enough to trigger the
+    // animation.
     prefs->SetInteger(prefs::kScannerEnterprisePolicyAllowed,
                       static_cast<int>(ScannerEnterprisePolicy::kDisallowed));
-    ASSERT_FALSE(CanShowSunfishOrScannerUi());
+
+    ASSERT_TRUE(CanShowSunfishOrScannerUi());
 
     const TestVariant test_variant = GetParam();
     switch (test_variant) {
       case kClamshell:
-        ASSERT_FALSE(Shell::Get()->IsInTabletMode());
+        ASSERT_FALSE(display::Screen::Get()->InTabletMode());
         break;
       case kTablet:
         Shell::Get()->session_controller()->GetActivePrefService()->SetBoolean(
@@ -154,6 +159,7 @@ class HomeButtonTapOverlayTest
   }
 
   std::unique_ptr<aura::Window> window_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 INSTANTIATE_TEST_SUITE_P(All,

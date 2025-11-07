@@ -18,6 +18,7 @@
 #include "base/types/cxx23_to_underlying.h"
 #include "build/build_config.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
+#include "chrome/browser/actor/actor_tab_data.h"
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/browser_action_util.h"
@@ -82,7 +83,11 @@ GlicActorUiTest::GlicActorUiTest() {
        {optimization_guide::features::
             kAnnotatedPageContentWithActionableElements,
         {}}},
-      /*disabled_features=*/{});
+      /*disabled_features=*/{
+          // TODO(b/454665367): Most GlicActorUiTest tests are broken for
+          // multi-instance. Temporarily disable glic multi-instance.
+          features::kGlicMultiInstance,
+      });
 }
 GlicActorUiTest::~GlicActorUiTest() = default;
 
@@ -282,6 +287,20 @@ MultiStep GlicActorUiTest::ClickAction(const gfx::Point& coordinate,
                      std::move(expected_result));
 }
 
+MultiStep GlicActorUiTest::ClickAction(const gfx::Point* coordinate,
+                                       ClickType click_type,
+                                       ClickCount click_count,
+                                       ExpectedErrorResult expected_result) {
+  auto click_provider =
+      base::BindLambdaForTesting([this, coordinate, click_type, click_count]() {
+        Actions action =
+            actor::MakeClick(tab_handle_, *coordinate, click_type, click_count);
+        action.set_task_id(task_id_.value());
+        return EncodeActionProto(action);
+      });
+  return ExecuteAction(std::move(click_provider), std::move(expected_result));
+}
+
 MultiStep GlicActorUiTest::NavigateAction(GURL url,
                                           actor::TaskId& task_id,
                                           tabs::TabHandle& tab_handle,
@@ -360,18 +379,37 @@ MultiStep GlicActorUiTest::StopActorTask() {
 MultiStep GlicActorUiTest::PauseActorTask() {
   return Steps(InAnyContext(WithElement(
                    kGlicContentsElementId,
-                   [&task_id = task_id_](ui::TrackedElement* el) {
+                   [&task_id = task_id_,
+                    &tab_handle = tab_handle_](ui::TrackedElement* el) {
                      content::WebContents* glic_contents =
                          AsInstrumentedWebContents(el)->web_contents();
                      std::string script = content::JsReplace(
-                         "client.browser.pauseActorTask($1);", task_id.value());
+                         "client.browser.pauseActorTask($1, /* pauseReason= "
+                         "*/0, /* tabId= */'$2');",
+                         task_id.value(), tab_handle.raw_value());
                      ASSERT_TRUE(content::ExecJs(glic_contents, script));
                    })),
                RoundTrip());
 }
 
-MultiStep GlicActorUiTest::ResumeActorTask(base::Value::Dict context_options,
-                                           bool expected) {
+MultiStep GlicActorUiTest::ResumeActorTask(
+    base::Value::Dict context_options,
+    ExpectedResumeResult expected_result) {
+  static constexpr std::string_view kFailureString = "<Failure>";
+
+  const std::string expected_result_string = std::visit(
+      absl::Overload{
+          [](std::monostate) {
+            return base::ToString(actor::mojom::ActionResultCode::kOk);
+          },
+          [](actor::mojom::ActionResultCode r) { return base::ToString(r); },
+          [](bool r) {
+            return r ? base::ToString(actor::mojom::ActionResultCode::kOk)
+                     : std::string(kFailureString);
+          },
+      },
+      expected_result);
+
   return InAnyContext(CheckElement(
       kGlicContentsElementId,
       [&task_id = task_id_, context_options = std::move(context_options)](
@@ -380,19 +418,29 @@ MultiStep GlicActorUiTest::ResumeActorTask(base::Value::Dict context_options,
             AsInstrumentedWebContents(el)->web_contents();
         std::string script = content::JsReplace(
             R"js(
-                              (async () => {
-                                try {
-                                  await client.browser.resumeActorTask($1, $2);
-                                  return true;
-                                } catch (err) {
-                                  return false;
-                                }
-                              })();
-                            )js",
+                  (async () => {
+                    try {
+                      const res = await client.browser.resumeActorTask($1, $2);
+                      return res.actionResult;
+                    } catch (err) {
+                      return false;
+                    }
+                  })();
+          )js",
             task_id.value(), std::move(context_options));
-        return content::EvalJs(glic_contents, script).ExtractBool();
+
+        auto res = content::EvalJs(glic_contents, script);
+        if (res.is_bool()) {
+          return res.ExtractBool()
+                     ? base::ToString(actor::mojom::ActionResultCode::kOk)
+                     : std::string(kFailureString);
+        }
+        auto result_enum =
+            static_cast<actor::mojom::ActionResultCode>(res.ExtractInt());
+        EXPECT_TRUE(actor::mojom::IsKnownEnumValue(result_enum));
+        return base::ToString(result_enum);
       },
-      expected));
+      expected_result_string));
 }
 
 MultiStep GlicActorUiTest::WaitForActorTaskState(
@@ -445,6 +493,37 @@ MultiStep GlicActorUiTest::WaitForActorTaskStateChangeToStopped() {
       }));
 }
 
+MultiStep GlicActorUiTest::ActivateTaskTab() {
+  return Steps(InAnyContext(WithElement(
+                   kGlicContentsElementId,
+                   [&tab_handle = tab_handle_](ui::TrackedElement* el) {
+                     content::WebContents* glic_contents =
+                         AsInstrumentedWebContents(el)->web_contents();
+                     std::string script =
+                         content::JsReplace("client.browser.activateTab('$1');",
+                                            tab_handle.raw_value());
+                     ASSERT_TRUE(content::ExecJs(glic_contents, script));
+                   })),
+               RoundTrip());
+}
+
+MultiStep GlicActorUiTest::WaitForTaskTabForground(bool expected_foreground) {
+  return InAnyContext(WithElement(
+      kGlicContentsElementId,
+      [&tab_handle = tab_handle_, expected_foreground](ui::TrackedElement* el) {
+        content::WebContents* glic_contents =
+            AsInstrumentedWebContents(el)->web_contents();
+        std::string script = content::JsReplace(
+            R"js(
+            client.browser.getTabById('$1').waitUntil((tabData) => {
+              return tabData.isActiveInWindow == $2;
+            });
+            )js",
+            tab_handle.raw_value(), expected_foreground);
+        ASSERT_TRUE(content::ExecJs(glic_contents, script));
+      }));
+}
+
 GlicActorUiTest::ActionProtoProvider GlicActorUiTest::ArbitraryStringProvider(
     std::string_view str) {
   return base::BindLambdaForTesting([str]() { return std::string(str); });
@@ -475,7 +554,7 @@ MultiStep GlicActorUiTest::InitializeWithOpenGlicWindow() {
                OpenGlicWindow(GlicWindowMode::kAttached));
 }
 
-MultiStep GlicActorUiTest::GetPageContextFromFocusedTab() {
+MultiStep GlicActorUiTest::GetPageContextForActorTab() {
   return Steps(Do([&]() {
     GlicKeyedService* glic_service =
         GlicKeyedServiceFactory::GetGlicKeyedService(browser()->GetProfile());
@@ -485,27 +564,31 @@ MultiStep GlicActorUiTest::GetPageContextFromFocusedTab() {
 
     auto options = mojom::GetTabContextOptions::New();
     options->include_annotated_page_content = true;
-    FocusedTabData data = glic_service->sharing_manager().GetFocusedTabData();
-    if (data.focus()) {
-      FetchPageContext(
-          data.focus(), *options,
-          base::BindLambdaForTesting(
-              [&](base::expected<
-                  glic::mojom::GetContextResultPtr,
-                  page_content_annotations::FetchPageContextErrorDetails>
-                      result) {
-                mojo_base::ProtoWrapper& serialized_apc =
-                    *result.value()
-                         ->get_tab_context()
-                         ->annotated_page_data->annotated_page_content;
-                annotated_page_content_ =
-                    std::make_unique<AnnotatedPageContent>(
-                        serialized_apc.As<AnnotatedPageContent>().value());
-                run_loop.Quit();
-              }));
+    // TODO (crbug.com/458415347): Look into replacing GetContextFromActorForTab
+    // with an AKS::RequestTabObservation
+    EXPECT_NE(tab_handle_, TabHandle::Null())
+        << "GetPageContextForActorTab must be called after starting a task in "
+           "a tab, e.g. using StartActorTaskInNewTab";
+    glic_service->sharing_manager().GetContextForActorFromTab(
+        tab_handle_, *options.get(),
+        base::BindLambdaForTesting([&](GlicGetContextResult result) {
+          if (result.has_value()) {
+            mojo_base::ProtoWrapper& serialized_apc =
+                *result.value()
+                     ->get_tab_context()
+                     ->annotated_page_data->annotated_page_content;
+            annotated_page_content_ = std::make_unique<AnnotatedPageContent>(
+                serialized_apc.As<AnnotatedPageContent>().value());
+            actor::ActorTabData* tab_data =
+                actor::ActorTabData::From(tab_handle_.Get());
+            if (tab_data) {
+              tab_data->DidObserveContent(*annotated_page_content_);
+            }
+          }
+          run_loop.Quit();
+        }));
 
-      run_loop.Run();
-    }
+    run_loop.Run();
   }));
 }
 
@@ -559,7 +642,7 @@ const std::optional<ActionsResult>& GlicActorUiTest::last_execution_result()
 }
 int32_t GlicActorUiTest::SearchAnnotatedPageContent(std::string_view label) {
   CHECK(annotated_page_content_)
-      << "An observation must be made with GetPageContextFromFocusedTab "
+      << "An observation must be made with GetPageContextForActorTab "
          "before searching annotated page content.";
 
   // Traverse the APC in depth-first preorder, returning the first node that

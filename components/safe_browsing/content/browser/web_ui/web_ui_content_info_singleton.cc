@@ -9,6 +9,7 @@
 #include "components/safe_browsing/content/browser/web_ui/safe_browsing_ui_handler.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
 #include "content/public/browser/browser_context.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace safe_browsing {
 WebUIContentInfoSingleton::WebUIContentInfoSingleton() = default;
@@ -26,10 +27,8 @@ WebUIContentInfoSingleton* WebUIContentInfoSingleton::GetInstance() {
   return instance.get();
 }
 
-// static
 bool WebUIContentInfoSingleton::HasListener() {
-  return GetInstance()->has_test_listener_ ||
-         !GetInstance()->webui_instances_.empty();
+  return has_test_listener_ || !webui_instances_.empty();
 }
 
 void WebUIContentInfoSingleton::AddToDownloadUrlsChecked(

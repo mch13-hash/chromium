@@ -43,8 +43,11 @@ class DistilledPageJsTest : public content::ContentBrowserTest {
   void LoadAndExecuteTestScript(const std::string& file) {
     distilled_page_->AppendScriptFile(file);
     distilled_page_->Load(embedded_test_server(), shell()->web_contents());
-    EXPECT_TRUE(content::ExecJs(shell()->web_contents(),
-                                "mocha.run(); window.completePromise"));
+    // First, run the test.
+    EXPECT_TRUE(content::ExecJs(shell()->web_contents(), "mocha.run()"));
+    // Then, wait for the test to complete.
+    EXPECT_TRUE(
+        content::ExecJs(shell()->web_contents(), "window.completePromise"));
   }
 
   std::unique_ptr<FakeDistilledPage> distilled_page_;
@@ -79,8 +82,26 @@ IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, AddClassesToYTIFramesTest) {
   LoadAndExecuteTestScript("add_classes_to_yt_iframes.js");
 }
 
-IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, ImageClassifierTest) {
+// Fails on Fuchsia ASAN.
+#if BUILDFLAG(IS_FUCHSIA) && defined(ADDRESS_SANITIZER)
+#define MAYBE_ImageClassifierTest DISABLED_ImageClassifierTest
+#else
+#define MAYBE_ImageClassifierTest ImageClassifierTest
+#endif
+IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, MAYBE_ImageClassifierTest) {
   LoadAndExecuteTestScript("image_classifier_tester.js");
+}
+
+IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, ListClassifierTest) {
+  LoadAndExecuteTestScript("list_classifier_tester.js");
+}
+
+IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, IdentifyEmptySVGsTest) {
+  LoadAndExecuteTestScript("identify_empty_svgs_tester.js");
+}
+
+IN_PROC_BROWSER_TEST_F(DistilledPageJsTest, WrapTablesTest) {
+  LoadAndExecuteTestScript("wrap_tables_tester.js");
 }
 
 }  // namespace

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {NodeStore} from '../node_store.js';
+import {NodeStore} from '../content/node_store.js';
 
 import {ReadAloudNodeStore} from './read_aloud_node_store.js';
 
@@ -108,7 +108,7 @@ export class DomReadAloudNode extends ReadAloudNode {
     if (!(other instanceof DomReadAloudNode)) {
       return false;
     }
-    return this.node.isEqualNode(other.node);
+    return this.node.isSameNode(other.node);
   }
 
   getText(): string {

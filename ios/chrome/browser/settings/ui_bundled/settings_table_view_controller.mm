@@ -67,6 +67,7 @@
 #import "ios/chrome/browser/photos/model/photos_service_factory.h"
 #import "ios/chrome/browser/push_notification/model/push_notification_client_id.h"
 #import "ios/chrome/browser/push_notification/model/push_notification_settings_util.h"
+#import "ios/chrome/browser/safari_data_import/model/features.h"
 #import "ios/chrome/browser/safari_data_import/public/safari_data_import_entry_point.h"
 #import "ios/chrome/browser/safari_data_import/public/safari_data_import_ui_handler.h"
 #import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
@@ -128,7 +129,6 @@
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_detail_icon_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_image_item.h"
-#import "ios/chrome/browser/shared/ui/table_view/cells/table_view_info_button_cell.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_info_button_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_switch_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_text_item.h"
@@ -137,6 +137,7 @@
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
 #import "ios/chrome/browser/signin/model/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/model/avatar_provider.h"
 #import "ios/chrome/browser/signin/model/chrome_account_manager_service.h"
 #import "ios/chrome/browser/signin/model/chrome_account_manager_service_factory.h"
 #import "ios/chrome/browser/signin/model/identity_manager_factory.h"
@@ -310,6 +311,9 @@ struct EnhancedSafeBrowsingActivePromoData
   // Whether Settings have been dismissed.
   BOOL _settingsAreDismissed;
 
+  // Whether Gemini user consented.
+  BOOL _geminiUserConsented;
+
   // Tabs settings coordinator.
   TabsSettingsCoordinator* _tabsCoordinator;
 
@@ -386,6 +390,8 @@ struct EnhancedSafeBrowsingActivePromoData
         feature_engagement::TrackerFactory::GetForProfile(_profile);
 
     PrefService* prefService = _profile->GetPrefs();
+
+    _geminiUserConsented = prefService->GetBoolean(prefs::kIOSBwgConsent);
 
     _passwordCheckManager =
         IOSChromePasswordCheckManagerFactory::GetForProfile(_profile);
@@ -469,7 +475,7 @@ struct EnhancedSafeBrowsingActivePromoData
 
   // Update the BWG new IPH badge here as it depends on the number of times it's
   // shown.
-  if (IsPageActionMenuEnabled()) {
+  if (IsPageActionMenuEnabled() && _geminiUserConsented) {
     [self updateBWGNewIPHBadge];
   }
 }
@@ -518,7 +524,8 @@ struct EnhancedSafeBrowsingActivePromoData
 
   // Advanced Section
   [model addSectionWithIdentifier:SettingsSectionIdentifierAdvanced];
-  if (IsPageActionMenuEnabled()) {
+
+  if (IsPageActionMenuEnabled() && _geminiUserConsented) {
     [model addItem:[self BWGSettingsDetailItem]
         toSectionWithIdentifier:SettingsSectionIdentifierAdvanced];
   }
@@ -567,7 +574,7 @@ struct EnhancedSafeBrowsingActivePromoData
     [model addItem:[self downloadsSettingsDetailItem]
         toSectionWithIdentifier:SettingsSectionIdentifierInfo];
   }
-  if (ShouldShowSafariDataImportEntryPoint(_profile)) {
+  if (ShouldShowSafariDataImportEntryPoint(_profile->GetPrefs())) {
     [model addItem:[self safariDataImportSettingsDetailItem]
         toSectionWithIdentifier:SettingsSectionIdentifierInfo];
   }
@@ -724,7 +731,8 @@ struct EnhancedSafeBrowsingActivePromoData
                 accessibilityHint:
                     l10n_util::GetNSString(
                         IDS_IOS_TOGGLE_SETTING_MANAGED_ACCESSIBILITY_HINT)
-          accessibilityIdentifier:kSettingsSignInDisabledCellId];
+          accessibilityIdentifier:kSettingsSignInDisabledCellId
+                         selector:@selector(didTapSigninDisabledInfoButton:)];
   signinDisabledItem.textColor = [UIColor colorNamed:kTextSecondaryColor];
   return signinDisabledItem;
 }
@@ -752,8 +760,6 @@ struct EnhancedSafeBrowsingActivePromoData
   _defaultBrowserCellItem.iconBackgroundColor =
       [UIColor colorNamed:kPurple500Color];
   _defaultBrowserCellItem.iconTintColor = UIColor.whiteColor;
-  _defaultBrowserCellItem.iconCornerRadius =
-      kColorfulBackgroundSymbolCornerRadius;
 
   [self updateDefaultBrowserSettingsBlueDot];
 
@@ -814,7 +820,8 @@ struct EnhancedSafeBrowsingActivePromoData
                 accessibilityHint:
                     l10n_util::GetNSString(
                         IDS_IOS_TOGGLE_SETTING_MANAGED_ACCESSIBILITY_HINT)
-          accessibilityIdentifier:kSettingsManagedSearchEngineCellId];
+          accessibilityIdentifier:kSettingsManagedSearchEngineCellId
+                         selector:@selector(didTapManagedUIInfoButton:)];
 
   return _managedSearchEngineItem;
 }
@@ -975,7 +982,8 @@ struct EnhancedSafeBrowsingActivePromoData
                   accessibilityHint:
                       l10n_util::GetNSString(
                           IDS_IOS_TOGGLE_SETTING_MANAGED_ACCESSIBILITY_HINT)
-            accessibilityIdentifier:kSettingsArticleSuggestionsCellId];
+            accessibilityIdentifier:kSettingsArticleSuggestionsCellId
+                           selector:@selector(didTapManagedUIInfoButton:)];
   }
 
   return _managedFeedSettingsItem;
@@ -1024,9 +1032,12 @@ struct EnhancedSafeBrowsingActivePromoData
 }
 
 - (TableViewItem*)tabsSettingsDetailItem {
+  NSString* title = l10n_util::GetNSString(
+      IsAutoOpenRemoteTabGroupsSettingsFeatureEnabled()
+          ? IDS_IOS_TABS_AND_TAB_GROUPS_MANAGEMENT_SETTINGS
+          : IDS_IOS_TABS_MANAGEMENT_SETTINGS);
   return [self detailItemWithType:SettingsItemTypeTabs
-                             text:l10n_util::GetNSString(
-                                      IDS_IOS_TABS_MANAGEMENT_SETTINGS)
+                             text:title
                        detailText:nil
                            symbol:DefaultSettingsRootSymbol(kTabsSymbol)
             symbolBackgroundColor:[UIColor colorNamed:kOrange500Color]
@@ -1146,7 +1157,6 @@ struct EnhancedSafeBrowsingActivePromoData
     detailItem.iconBackgroundColor = backgroundColor;
     detailItem.iconTintColor = UIColor.whiteColor;
   }
-  detailItem.iconCornerRadius = kColorfulBackgroundSymbolCornerRadius;
   return detailItem;
 }
 
@@ -1174,7 +1184,8 @@ struct EnhancedSafeBrowsingActivePromoData
                                imageBackground:(UIColor*)imageBackground
                              accessibilityHint:(NSString*)accessibilityHint
                        accessibilityIdentifier:
-                           (NSString*)accessibilityIdentifier {
+                           (NSString*)accessibilityIdentifier
+                                      selector:(SEL)selector {
   TableViewInfoButtonItem* infoButton =
       [[TableViewInfoButtonItem alloc] initWithType:type];
   infoButton.text = text;
@@ -1188,55 +1199,9 @@ struct EnhancedSafeBrowsingActivePromoData
   }
   infoButton.accessibilityHint = accessibilityHint;
   infoButton.accessibilityIdentifier = accessibilityIdentifier;
+  infoButton.target = self;
+  infoButton.selector = selector;
   return infoButton;
-}
-
-#pragma mark - UITableViewDataSource
-
-- (UITableViewCell*)tableView:(UITableView*)tableView
-        cellForRowAtIndexPath:(NSIndexPath*)indexPath {
-  UITableViewCell* cell = [super tableView:tableView
-                     cellForRowAtIndexPath:indexPath];
-  if (_settingsAreDismissed) {
-    return cell;
-  }
-  NSInteger itemType = [self.tableViewModel itemTypeForIndexPath:indexPath];
-
-  switch (itemType) {
-    case SettingsItemTypeManagedDefaultSearchEngine: {
-      TableViewInfoButtonCell* managedCell =
-          base::apple::ObjCCastStrict<TableViewInfoButtonCell>(cell);
-      [managedCell.trailingButton
-                 addTarget:self
-                    action:@selector(didTapManagedUIInfoButton:)
-          forControlEvents:UIControlEventTouchUpInside];
-      break;
-    }
-    case SettingsItemTypeSigninDisabled: {
-      // Adds a trailing button with more information when the sign-in policy
-      // has been enabled by the organization.
-      TableViewInfoButtonCell* managedCell =
-          base::apple::ObjCCastStrict<TableViewInfoButtonCell>(cell);
-      [managedCell.trailingButton
-                 addTarget:self
-                    action:@selector(didTapSigninDisabledInfoButton:)
-          forControlEvents:UIControlEventTouchUpInside];
-      break;
-    }
-    case SettingsItemTypeManagedArticlesForYou: {
-      TableViewInfoButtonCell* managedCell =
-          base::apple::ObjCCastStrict<TableViewInfoButtonCell>(cell);
-      [managedCell.trailingButton
-                 addTarget:self
-                    action:@selector(didTapManagedUIInfoButton:)
-          forControlEvents:UIControlEventTouchUpInside];
-      break;
-    }
-    default:
-      break;
-  }
-
-  return cell;
 }
 
 #pragma mark - UITableViewDelegate
@@ -1371,7 +1336,7 @@ struct EnhancedSafeBrowsingActivePromoData
       [self showTabsSettings];
       break;
     case SettingsItemTypeSafariDataImport: {
-      CHECK(ShouldShowSafariDataImportEntryPoint(_profile));
+      CHECK(ShouldShowSafariDataImportEntryPoint(_profile->GetPrefs()));
       base::RecordAction(base::UserMetricsAction("Settings.SafariImport"));
       id<ApplicationCommands> handler = HandlerForProtocol(
           _browser->GetCommandDispatcher(), ApplicationCommands);
@@ -1399,7 +1364,8 @@ struct EnhancedSafeBrowsingActivePromoData
       break;
     case SettingsItemTypeTableCellCatalog:
       [self.navigationController
-          pushViewController:[[TableCellCatalogViewController alloc] init]
+          pushViewController:[[TableCellCatalogViewController alloc]
+                                 initWithBrowser:_browser]
                     animated:YES];
       break;
     case SettingsItemTypeButtonCatalog:
@@ -1768,7 +1734,7 @@ struct EnhancedSafeBrowsingActivePromoData
     return;
   }
   identityAccountItem.image =
-      self.accountManagerService->GetIdentityAvatarWithIdentity(
+      GetApplicationContext()->GetIdentityAvatarProvider()->GetIdentityAvatar(
           _identity, IdentityAvatarSize::TableViewIcon);
   identityAccountItem.text = _identity.userFullName;
   identityAccountItem.detailText = _identity.userEmail;
@@ -1891,13 +1857,7 @@ struct EnhancedSafeBrowsingActivePromoData
 
 // Returns the appropriate text to update the title for the feed item.
 - (NSString*)feedItemTitle {
-  AuthenticationService* authService =
-      AuthenticationServiceFactory::GetForProfile(_browser->GetProfile());
-  BOOL isSignedIn =
-      authService->HasPrimaryIdentity(signin::ConsentLevel::kSignin);
-  return (isSignedIn && IsWebChannelsEnabled())
-             ? l10n_util::GetNSString(IDS_IOS_DISCOVER_AND_FOLLOWING_FEED_TITLE)
-             : l10n_util::GetNSString(IDS_IOS_DISCOVER_FEED_TITLE);
+  return l10n_util::GetNSString(IDS_IOS_DISCOVER_FEED_TITLE);
 }
 
 // Decides whether the default browser blue dot promo should be active, and adds

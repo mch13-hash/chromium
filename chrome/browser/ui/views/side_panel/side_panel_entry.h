@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 
+#include "base/containers/enum_set.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_forward.h"
 #include "base/observer_list.h"
@@ -32,11 +33,16 @@ enum class SidePanelEntryHideReason;
 class SidePanelEntry final : public ui::PropertyHandler {
  public:
   enum class PanelType {
+    kMinValue,
     // Panel aligned with the web contents.
-    kContent,
+    kContent = kMinValue,
     // Panel aligned with the toolbar.
     kToolbar,
+    kMaxValue = kToolbar,
   };
+
+  using PanelTypes =
+      base::EnumSet<PanelType, PanelType::kMinValue, PanelType::kMaxValue>;
 
   // The default and minimum acceptable side panel content width.
   static constexpr int kSidePanelDefaultContentWidth = 360;
@@ -86,6 +92,7 @@ class SidePanelEntry final : public ui::PropertyHandler {
   // Called when the entry has been shown/hidden in the side panel.
   void OnEntryShown();
   void OnEntryWillHide(SidePanelEntryHideReason reason);
+  void OnEntryHideCancelled();
   void OnEntryHidden();
 
   PanelType type() const { return type_; }
@@ -116,6 +123,12 @@ class SidePanelEntry final : public ui::PropertyHandler {
     should_show_header_ = should_show_header;
   }
   bool should_show_header() const { return should_show_header_; }
+
+  // Whether the outline should be visible when the entry is shown.
+  void set_should_show_outline(bool should_show_outline) {
+    should_show_outline_ = should_show_outline;
+  }
+  bool should_show_outline() const { return should_show_outline_; }
 
   void AddObserver(SidePanelEntryObserver* observer);
   void RemoveObserver(SidePanelEntryObserver* observer);
@@ -166,6 +179,9 @@ class SidePanelEntry final : public ui::PropertyHandler {
 
   // Whether the side panel header will be visible when this entry is showing.
   bool should_show_header_ = true;
+
+  // Whether the side panel outline will be visible when this entry is showing.
+  bool should_show_outline_ = true;
 
   // Scope of this entry, will outlive the entry and its content.
   raw_ptr<SidePanelEntryScope> scope_ = nullptr;

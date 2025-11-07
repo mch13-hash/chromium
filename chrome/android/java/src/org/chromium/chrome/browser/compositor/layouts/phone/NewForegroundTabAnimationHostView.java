@@ -23,7 +23,6 @@ import androidx.core.content.ContextCompat;
 import org.chromium.base.Log;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.hub.RoundedCornerAnimatorUtil;
 import org.chromium.chrome.browser.hub.ShrinkExpandAnimator;
 import org.chromium.chrome.browser.hub.ShrinkExpandImageView;
@@ -46,12 +45,21 @@ import org.chromium.ui.interpolators.Interpolators;
 public class NewForegroundTabAnimationHostView extends FrameLayout implements RunOnNextLayout {
     /** Interface for listening to events during the new foreground tab animation. */
     public interface Listener {
-        /** Called when the expand animation is finished and the new tab is ready to be selected. */
+        /**
+         * Called only on the successful completion of {@link #mExpandAnimatorSet}. This is
+         * responsible for performing the tab selection (updating the tab ID and model in {@link
+         * NewTabAnimationLayout}) and signaling the compositor to show the new tab.
+         *
+         * <p>Note: This method is intentionally not called if {@link #mExpandAnimatorSet} is
+         * cancelled. This prevents race conditions in tab selection that can be observed when
+         * multiple foreground tab creations are interrupted before the animation finishes.
+         */
         void onExpandAnimationFinished();
 
         /**
-         * Called when the fade animation is finished or when the expand animation got cancelled,
-         * which indicates the animation is finished and the view can be removed.
+         * Called when {@link #mFadeAnimator} is finished to indicate that the animation is done and
+         * the view can be removed. If the animation is cancelled, then {@link
+         * NewTabAnimationLayout#forceAnimationToFinish} removes the view instead.
          */
         void onForegroundAnimationFinished();
     }
@@ -70,7 +78,7 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
     // Retains a strong reference to the {@link ShrinkExpandAnimator} on the class to prevent it
     // from being prematurely GC'd when using {@link ObjectAnimator}.
     private @Nullable ShrinkExpandAnimator mExpandAnimator;
-    private @Nullable ObjectAnimator mRectAnimator;
+    private @Nullable ValueAnimator mRectAnimator;
     private @Nullable ValueAnimator mCornerAnimator;
     private @Nullable AnimatorSet mExpandAnimatorSet;
 
@@ -105,7 +113,7 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
 
         mRunOnNextLayoutDelegate = new RunOnNextLayoutDelegate(this);
         mStartRadii = startRadii;
-        mInitialRect = initialRect;
+        mInitialRect = new Rect(initialRect);
         mListener = listener;
         mLogsEnabled = logsEnabled;
 
@@ -115,7 +123,7 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
         mRectView.setLayoutDirection(isRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
         addView(mRectView);
         mRectView.setRoundedFillColor(backgroundColor);
-        mRectView.reset(initialRect);
+        mRectView.reset(mInitialRect);
         mRectView.setRoundedCorners(startRadii[0], startRadii[1], startRadii[2], startRadii[3]);
     }
 
@@ -136,63 +144,83 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
         mExpandAnimator =
                 new ShrinkExpandAnimator(
                         mRectView, mInitialRect, finalRect, /* searchBoxHeight= */ 0);
+        mExpandAnimator.setRect(mInitialRect);
+        // Make copies just in case the rects get mutated.
         mRectAnimator =
-                ObjectAnimator.ofObject(
-                        mExpandAnimator,
-                        ShrinkExpandAnimator.RECT,
-                        new RectEvaluator(),
-                        mInitialRect,
-                        finalRect);
+                ValueAnimator.ofObject(
+                        new RectEvaluator(), new Rect(mInitialRect), new Rect(finalRect));
+        mRectAnimator.addUpdateListener(
+                animation -> {
+                    if (mExpandAnimator == null) return;
+                    mExpandAnimator.setRect((Rect) animation.getAnimatedValue());
+                });
 
         mCornerAnimator =
                 RoundedCornerAnimatorUtil.createRoundedCornerAnimator(
                         mRectView, mStartRadii, endRadii);
 
-        if (ChromeFeatureList.sShowNewTabAnimationsListeners.getValue()) {
-            mRectAnimator.addListener(
-                    new CancelAwareAnimatorListener() {
-                        @Override
-                        public void onStart(Animator animation) {
-                            if (mLogsEnabled) Log.i(TAG, "mRectAnimator#onStart");
-                        }
+        AnimationFreezeChecker rectChecker =
+                new AnimationFreezeChecker(AnimationFreezeChecker.FOREGROUND_RECT_TAG);
+        mRectAnimator.addListener(
+                new CancelAwareAnimatorListener() {
+                    @Override
+                    public void onStart(Animator animation) {
+                        rectChecker.onAnimationStart();
+                        if (mLogsEnabled) Log.i(TAG, "mRectAnimator#onStart");
+                    }
 
-                        @Override
-                        public void onEnd(Animator animation) {
-                            Log.i(TAG, "mRectAnimator#onEnd");
-                        }
+                    @Override
+                    public void onEnd(Animator animation) {
+                        rectChecker.onAnimationEnd();
+                        if (mLogsEnabled) Log.i(TAG, "mRectAnimator#onEnd");
+                    }
 
-                        @Override
-                        public void onCancel(Animator animation) {
-                            Log.i(TAG, "mRectAnimator#onCancel");
-                        }
-                    });
+                    @Override
+                    public void onCancel(Animator animation) {
+                        rectChecker.onAnimationCancel();
+                        if (mLogsEnabled) Log.i(TAG, "mRectAnimator#onCancel");
+                    }
+                });
 
-            mCornerAnimator.addListener(
-                    new CancelAwareAnimatorListener() {
-                        @Override
-                        public void onStart(Animator animation) {
-                            Log.i(TAG, "mCornerAnimator#onStart");
-                        }
+        AnimationFreezeChecker cornerChecker =
+                new AnimationFreezeChecker(AnimationFreezeChecker.FOREGROUND_CORNER_TAG);
+        mCornerAnimator.addListener(
+                new CancelAwareAnimatorListener() {
+                    @Override
+                    public void onStart(Animator animation) {
+                        cornerChecker.onAnimationStart();
+                        if (mLogsEnabled) Log.i(TAG, "mCornerAnimator#onStart");
+                    }
 
-                        @Override
-                        public void onEnd(Animator animation) {
-                            Log.i(TAG, "mCornerAnimator#onEnd");
-                        }
+                    @Override
+                    public void onEnd(Animator animation) {
+                        cornerChecker.onAnimationEnd();
+                        if (mLogsEnabled) Log.i(TAG, "mCornerAnimator#onEnd");
+                    }
 
-                        @Override
-                        public void onCancel(Animator animation) {
-                            Log.i(TAG, "mCornerAnimator#onCancel");
-                        }
-                    });
-        }
+                    @Override
+                    public void onCancel(Animator animation) {
+                        cornerChecker.onAnimationCancel();
+                        if (mLogsEnabled) Log.i(TAG, "mCornerAnimator#onCancel");
+                    }
+                });
 
         mFadeAnimator = ObjectAnimator.ofFloat(mRectView, ShrinkExpandImageView.ALPHA, 1f, 0f);
         mFadeAnimator.setInterpolator(Interpolators.FAST_OUT_LINEAR_IN_INTERPOLATOR);
         mFadeAnimator.setDuration(FADE_DURATION_MS);
+        AnimationFreezeChecker fadeChecker =
+                new AnimationFreezeChecker(AnimationFreezeChecker.FOREGROUND_FADE_TAG);
         mFadeAnimator.addListener(
                 new CancelAwareAnimatorListener() {
                     @Override
+                    public void onStart(Animator animation) {
+                        fadeChecker.onAnimationStart();
+                        if (mLogsEnabled) Log.i(TAG, "mFadeAnimator#onStart");
+                    }
+
+                    @Override
                     public void onEnd(Animator animation) {
+                        fadeChecker.onAnimationEnd();
                         if (mLogsEnabled) Log.i(TAG, "mFadeAnimator#onEnd");
                         mListener.onForegroundAnimationFinished();
                         mFadeAnimator = null;
@@ -200,6 +228,7 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
 
                     @Override
                     public void onCancel(Animator animation) {
+                        fadeChecker.onAnimationCancel();
                         if (mLogsEnabled) Log.i(TAG, "mFadeAnimator#onCancel");
                         mFadeAnimator = null;
                     }
@@ -209,6 +238,8 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
         mExpandAnimatorSet.playTogether(mRectAnimator, mCornerAnimator);
         mExpandAnimatorSet.setDuration(EXPAND_DURATION_MS);
         mExpandAnimatorSet.setInterpolator(Interpolators.STANDARD_INTERPOLATOR);
+        AnimationFreezeChecker expandChecker =
+                new AnimationFreezeChecker(AnimationFreezeChecker.FOREGROUND_EXPAND_TAG);
         mExpandAnimatorSet.addListener(
                 new CancelAwareAnimatorListener() {
                     private void clearAnimators() {
@@ -219,7 +250,14 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
                     }
 
                     @Override
+                    public void onStart(Animator animation) {
+                        expandChecker.onAnimationStart();
+                        if (mLogsEnabled) Log.i(TAG, "mExpandAnimatorSet#onStart");
+                    }
+
+                    @Override
                     public void onEnd(Animator animation) {
+                        expandChecker.onAnimationEnd();
                         if (mLogsEnabled) Log.i(TAG, "mExpandAnimatorSet#onEnd");
                         mListener.onExpandAnimationFinished();
                         clearAnimators();
@@ -229,6 +267,9 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
 
                     @Override
                     public void onCancel(Animator animation) {
+                        // Intentionally skip {@link mListener.onExpandAnimationFinished()} to
+                        // prevent race conditions during tab selection (see Javadoc).
+                        expandChecker.onAnimationCancel();
                         if (mLogsEnabled) Log.i(TAG, "mExpandAnimatorSet#onCancel");
                         clearAnimators();
                         mFadeAnimator = null;
@@ -269,7 +310,7 @@ public class NewForegroundTabAnimationHostView extends FrameLayout implements Ru
             if (mLogsEnabled) Log.i(TAG, "forceAnimationToFinish: mExpandAnimatorSet#cancel");
             mExpandAnimatorSet.cancel();
         } else if (mFadeAnimator != null) {
-            if (mLogsEnabled) Log.i(TAG, "forceAnimationToFinish: mFadeAnimator#end");
+            if (mLogsEnabled) Log.i(TAG, "forceAnimationToFinish: mFadeAnimator#cancel");
             mFadeAnimator.cancel();
         }
     }

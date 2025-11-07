@@ -65,6 +65,7 @@ class FilledCardInformationBubbleControllerImpl
   bool EducationalBodyHasLearnMoreLink() const override;
 
   // BubbleControllerBase:
+  void OnBubbleDiscarded() override;
   BubbleType GetBubbleType() const override;
   base::WeakPtr<BubbleControllerBase> GetBubbleControllerBaseWeakPtr() override;
 
@@ -75,8 +76,11 @@ class FilledCardInformationBubbleControllerImpl
   // AutofillBubbleControllerBase:
   void PrimaryPageChanged(content::Page& page) override;
   void OnVisibilityChanged(content::Visibility visibility) override;
-  std::optional<PageActionIconType> GetPageActionIconType() override;
   void DoShowBubble() override;
+#if !BUILDFLAG(IS_ANDROID)
+  bool ShouldShowPageAction() override;
+  std::optional<actions::ActionId> GetActionIdForPageAction() override;
+#endif  // !BUILDFLAG(IS_ANDROID)
 
  private:
   friend class content::WebContentsUserData<
@@ -95,6 +99,9 @@ class FilledCardInformationBubbleControllerImpl
   // fallback bubble.
   void LogFilledCardInformationBubbleFieldClicked(
       FilledCardInformationBubbleField field) const;
+
+  // Logs metrics when the bubble is closed.
+  void LogBubbleCloseMetrics(PaymentsUiClosedReason closed_reason);
 
   // Returns whether the webcontents related to the controller is active.
   bool IsWebContentsActive();

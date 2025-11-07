@@ -7,13 +7,16 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
+#include "base/functional/bind.h"
 #include "base/functional/callback_forward.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_audio_stream_consumer.h"
 #include "chromeos/ash/components/boca/spotlight/spotlight_constants.h"
 #include "chromeos/ash/components/boca/spotlight/spotlight_frame_consumer.h"
 #include "remoting/client/common/client_status_observer.h"
@@ -22,7 +25,13 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace remoting {
+class AudioPacket;
+struct OAuthTokenInfo;
 class RemotingClient;
+namespace protocol {
+class AudioStub;
+class FrameConsumer;
+}  // namespace protocol
 }  // namespace remoting
 
 namespace webrtc {
@@ -30,6 +39,8 @@ class DesktopFrame;
 }  // namespace webrtc
 
 namespace ash::boca {
+
+class SpotlightAudioStreamConsumer;
 
 class RemotingClientIOProxy {
  public:
@@ -56,11 +67,41 @@ class RemotingClientIOProxy {
 class RemotingClientIOProxyImpl : public RemotingClientIOProxy,
                                   public remoting::ClientStatusObserver {
  public:
+  class RemotingClientWrapper {
+   public:
+    RemotingClientWrapper(const RemotingClientWrapper&) = delete;
+    RemotingClientWrapper& operator=(const RemotingClientWrapper&) = delete;
+
+    virtual ~RemotingClientWrapper() = default;
+
+    virtual void StartSession(std::string_view support_access_code,
+                              remoting::OAuthTokenInfo oauth_token_info) = 0;
+
+    virtual void StopSession() = 0;
+
+    virtual void AddObserver(remoting::ClientStatusObserver* observer) = 0;
+    virtual void RemoveObserver(remoting::ClientStatusObserver* observer) = 0;
+
+   protected:
+    RemotingClientWrapper() = default;
+  };
+  using CreateRemotingClientWrapperCb =
+      base::RepeatingCallback<std::unique_ptr<RemotingClientWrapper>(
+          base::OnceClosure,
+          remoting::protocol::FrameConsumer*,
+          base::WeakPtr<remoting::protocol::AudioStub>,
+          scoped_refptr<network::SharedURLLoaderFactory>)>;
+
   RemotingClientIOProxyImpl(
       std::unique_ptr<network::PendingSharedURLLoaderFactory>
           pending_url_loader_factory,
       SpotlightFrameConsumer::FrameReceivedCallback frame_received_callback,
-      SpotlightCrdStateUpdatedCallback status_updated_callback);
+      SpotlightAudioStreamConsumer::AudioPacketReceivedCallback
+          audio_packet_received_callback,
+      SpotlightCrdStateUpdatedCallback status_updated_callback,
+      CreateRemotingClientWrapperCb create_remoting_client_wrapper_cb =
+          base::BindRepeating(
+              &RemotingClientIOProxyImpl::CreateRemotingClientWrapper));
   RemotingClientIOProxyImpl(const RemotingClientIOProxyImpl&) = delete;
   RemotingClientIOProxyImpl& operator=(const RemotingClientIOProxyImpl&) =
       delete;
@@ -80,6 +121,12 @@ class RemotingClientIOProxyImpl : public RemotingClientIOProxy,
   void StopCrdClient(base::OnceClosure on_stopped_callback) override;
 
  private:
+  static std::unique_ptr<RemotingClientWrapper> CreateRemotingClientWrapper(
+      base::OnceClosure quit_closure,
+      remoting::protocol::FrameConsumer* frame_consumer,
+      base::WeakPtr<remoting::protocol::AudioStub> audio_stream_consumer,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+
   // Accepts the CRD ended event on the current sequence and forwards it to the
   // `crd_session_ended_callback_`.
   void HandleCrdSessionEnded();
@@ -88,14 +135,16 @@ class RemotingClientIOProxyImpl : public RemotingClientIOProxy,
   void UpdateState(CrdConnectionState state);
 
   // Receives the frame on the current sequence and forwards it to the
-  // `frame_recieved_callback_`.
+  // `frame_received_callback_`.
   void OnFrameReceived(SkBitmap bitmap,
                        std::unique_ptr<webrtc::DesktopFrame> frame);
 
-  // Releases the `remoting::RemoteClient` and `SpotlightFrameConsumer` used
+  void OnAudioPacketReceived(std::unique_ptr<remoting::AudioPacket> packet);
+
+  // Releases the `RemoteClientWrapper` and `SpotlightFrameConsumer` used
   // for a previous session.
   void ResetRemotingClient(
-      std::unique_ptr<remoting::RemotingClient> remoting_client,
+      std::unique_ptr<RemotingClientWrapper> remoting_client_wrapper,
       std::unique_ptr<SpotlightFrameConsumer> frame_consumer,
       base::OnceClosure on_stopped_callback);
 
@@ -108,10 +157,14 @@ class RemotingClientIOProxyImpl : public RemotingClientIOProxy,
   base::OnceClosure crd_session_ended_callback_;
   // Callback for receiving a completed frame from `SpotlightFrameConsumer`.
   SpotlightFrameConsumer::FrameReceivedCallback frame_received_callback_;
+  SpotlightAudioStreamConsumer::AudioPacketReceivedCallback
+      audio_packet_received_callback_;
   // Callback for `CrdConnectionState` updates.
   SpotlightCrdStateUpdatedCallback status_updated_callback_;
   std::unique_ptr<SpotlightFrameConsumer> frame_consumer_;
-  std::unique_ptr<remoting::RemotingClient> remoting_client_;
+  std::unique_ptr<SpotlightAudioStreamConsumer> audio_stream_consumer_;
+  std::unique_ptr<RemotingClientWrapper> remoting_client_wrapper_;
+  CreateRemotingClientWrapperCb create_remoting_client_wrapper_cb_;
 
   base::WeakPtrFactory<RemotingClientIOProxyImpl> weak_factory_{this};
 };

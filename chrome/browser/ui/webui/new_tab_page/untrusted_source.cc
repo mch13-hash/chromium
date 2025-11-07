@@ -26,13 +26,14 @@
 #include "base/task/thread_pool.h"
 #include "chrome/browser/new_tab_page/one_google_bar/one_google_bar_data.h"
 #include "chrome/browser/new_tab_page/one_google_bar/one_google_bar_service_factory.h"
+#include "chrome/browser/policy/chrome_policy_blocklist_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/background/ntp_custom_background_service.h"
 #include "chrome/browser/search/background/ntp_custom_background_service_factory.h"
 #include "chrome/browser/ui/search/ntp_user_data_logger.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/new_tab_page_untrusted_resources.h"
-#include "components/policy/content/policy_blocklist_service.h"
+#include "components/policy/core/browser/url_list/policy_blocklist_service.h"
 #include "components/search/ntp_features.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/url_util.h"
@@ -393,7 +394,7 @@ bool UntrustedSource::IsURLAllowed(const GURL& url) {
 
 bool UntrustedSource::IsURLBlockedByPolicy(const GURL& url) {
   PolicyBlocklistService* service =
-      PolicyBlocklistFactory::GetForBrowserContext(profile_);
+      ChromePolicyBlocklistServiceFactory::GetForProfile(profile_);
   URLBlocklistState blocklist_state = service->GetURLBlocklistState(url);
   if (blocklist_state == URLBlocklistState::URL_IN_BLOCKLIST) {
     LOG(WARNING) << "URL is blocked by a policy.";

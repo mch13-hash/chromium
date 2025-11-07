@@ -32,9 +32,6 @@
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/apps/app_service/app_launch_params.h"
-#include "chrome/browser/apps/app_service/app_service_proxy.h"
-#include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
-#include "chrome/browser/apps/app_service/browser_app_launcher.h"
 #include "chrome/browser/banners/app_banner_manager_desktop.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/devtools/protocol/browser_handler.h"
@@ -190,53 +187,6 @@ std::vector<std::wstring> GetFileExtensionsForProgId(
 }
 
 #endif  // BUILDFLAG(IS_WIN)
-
-// Waits for a Browser to be set to last active.
-class BrowserActivationWaiter : public BrowserListObserver {
- public:
-  explicit BrowserActivationWaiter(const Browser* browser) : browser_(browser) {
-    BrowserList::AddObserver(this);
-    // When the active browser closes, the next "last active browser" in the
-    // BrowserList might not be immediately activated. So we need to wait for
-    // the "last active browser" to actually be active.
-    if (chrome::FindLastActive() == browser_ &&
-        browser_->window()->IsActive()) {
-      observed_ = true;
-    }
-  }
-
-  BrowserActivationWaiter(const BrowserActivationWaiter&) = delete;
-  BrowserActivationWaiter& operator=(const BrowserActivationWaiter&) = delete;
-
-  ~BrowserActivationWaiter() override { BrowserList::RemoveObserver(this); }
-
-  // Runs a message loop until the `browser_` supplied to the constructor is
-  // activated, or returns immediately if `browser_` has already become active.
-  // Should only be called once.
-  void WaitForActivation() {
-    if (observed_) {
-      return;
-    }
-    run_loop_.Run();
-  }
-
- private:
-  // BrowserListObserver:
-  void OnBrowserSetLastActive(Browser* browser) override {
-    if (browser != browser_) {
-      return;
-    }
-
-    observed_ = true;
-    if (run_loop_.running()) {
-      run_loop_.Quit();
-    }
-  }
-
-  const raw_ptr<const Browser> browser_;
-  bool observed_ = false;
-  base::RunLoop run_loop_;
-};
 
 // Returns whether `window` roughly matches expected `bounds`.
 bool CheckForBounds(ui::BaseWindow* window, const gfx::Rect& bounds) {
@@ -1034,7 +984,7 @@ IN_PROC_BROWSER_TEST_F(WebAppBrowserTest, DesktopPWAsOpenLinksInNewTab) {
 
   NavigateParams param(app_browser, GURL("http://www.google.com/"),
                        ui::PAGE_TRANSITION_LINK);
-  param.window_action = NavigateParams::SHOW_WINDOW;
+  param.window_action = NavigateParams::WindowAction::kShowWindow;
   param.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
 
   ui_test_utils::NavigateToURL(&param);
@@ -2045,7 +1995,7 @@ IN_PROC_BROWSER_TEST_F(WebAppBrowserTest, ReparentLastBrowserTab) {
 
   BrowserWindowInterface* const app_browser =
       ReparentWebAppForActiveTab(browser());
-  ASSERT_EQ(app_browser->GetAppBrowserController()->app_id(), app_id);
+  ASSERT_EQ(AppBrowserController::From(app_browser)->app_id(), app_id);
 
   ASSERT_TRUE(IsBrowserOpen(browser()));
   EXPECT_EQ(browser()->tab_strip_model()->count(), 1);
@@ -2119,11 +2069,8 @@ IN_PROC_BROWSER_TEST_F(WebAppBrowserTest, ReparentDisplayBrowserApp) {
 
   BrowserWindowInterface* const app_browser =
       GetLastActiveBrowserWindowInterfaceWithAnyProfile();
-  ASSERT_EQ(app_browser->GetFeatures().app_browser_controller()->app_id(),
-            app_id);
-  EXPECT_TRUE(app_browser->GetFeatures()
-                  .app_browser_controller()
-                  ->HasMinimalUiButtons());
+  ASSERT_EQ(AppBrowserController::From(app_browser)->app_id(), app_id);
+  EXPECT_TRUE(AppBrowserController::From(app_browser)->HasMinimalUiButtons());
 
   auto* provider = WebAppProvider::GetForTest(profile());
   EXPECT_EQ(provider->registrar_unsafe().GetAppUserDisplayMode(app_id),
@@ -2369,19 +2316,18 @@ IN_PROC_BROWSER_TEST_F(WebAppBrowserTest, PopupLocationBar) {
       /*user_gesture=*/true);
   Browser* popup_browser =
       web_app::CreateWebAppWindowMaybeWithHomeTab(app_id, params);
-  BrowserActivationWaiter activation_waiter(popup_browser);
   popup_browser->window()->Show();
-  activation_waiter.WaitForActivation();
+  ui_test_utils::WaitUntilBrowserBecomeActive(popup_browser);
 
-  EXPECT_TRUE(
-      popup_browser->CanSupportWindowFeature(Browser::FEATURE_LOCATIONBAR));
-  EXPECT_TRUE(
-      popup_browser->SupportsWindowFeature(Browser::FEATURE_LOCATIONBAR));
+  EXPECT_TRUE(popup_browser->CanSupportWindowFeature(
+      Browser::WindowFeature::kFeatureLocationBar));
+  EXPECT_TRUE(popup_browser->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureLocationBar));
 
   ui_test_utils::ToggleFullscreenModeAndWait(popup_browser);
 
-  EXPECT_TRUE(
-      popup_browser->CanSupportWindowFeature(Browser::FEATURE_LOCATIONBAR));
+  EXPECT_TRUE(popup_browser->CanSupportWindowFeature(
+      Browser::WindowFeature::kFeatureLocationBar));
 }
 
 // Make sure chrome://web-app-internals page loads fine.
@@ -2685,11 +2631,15 @@ IN_PROC_BROWSER_TEST_F(WebAppBrowserTest_NoDestroyProfile, Shutdown) {
   handler.Close();
   ui_test_utils::WaitForBrowserToClose();
 
-  content::WebContents* const web_contents =
-      apps::AppServiceProxyFactory::GetForProfile(profile)
-          ->BrowserAppLauncher()
-          ->LaunchAppWithParamsForTesting(std::move(params));
-  EXPECT_EQ(web_contents, nullptr);
+  web_app::WebAppProvider* provider =
+      web_app::WebAppProvider::GetForLocalAppsUnchecked(profile);
+  base::test::TestFuture<base::WeakPtr<Browser>,
+                         base::WeakPtr<content::WebContents>,
+                         apps::LaunchContainer>
+      future;
+  provider->scheduler().LaunchAppWithCustomParams(std::move(params),
+                                                  future.GetCallback());
+  EXPECT_FALSE(future.template Get<1>().get());
 }
 
 using WebAppBrowserTest_ManifestId = WebAppBrowserTest;

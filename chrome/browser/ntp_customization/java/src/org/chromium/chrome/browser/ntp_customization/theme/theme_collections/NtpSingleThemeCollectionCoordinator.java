@@ -9,7 +9,9 @@ import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoor
 import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.launchUriActivity;
 import static org.chromium.chrome.browser.ntp_customization.theme.theme_collections.NtpThemeCollectionsAdapter.ThemeCollectionsItemType.SINGLE_THEME_COLLECTION_ITEM;
 
+import android.content.ComponentCallbacks;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.ImageView;
@@ -25,6 +27,7 @@ import org.chromium.chrome.browser.ntp_customization.R;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridge;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridge.ThemeCollectionSelectionListener;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
+import org.chromium.components.browser_ui.widget.MaterialSwitchWithText;
 import org.chromium.components.image_fetcher.ImageFetcher;
 import org.chromium.url.GURL;
 
@@ -44,18 +47,23 @@ public class NtpSingleThemeCollectionCoordinator {
     private String mThemeCollectionId;
     private String mThemeCollectionTitle;
     private final List<CollectionImage> mThemeCollectionImageList = new ArrayList<>();
+    private final Context mContext;
     private final View mNtpSingleThemeCollectionBottomSheetView;
     private final View mBackButton;
     private final ImageView mLearnMoreButton;
     private final TextView mTitle;
+    private final MaterialSwitchWithText mDailyUpdateSwitchButton;
     private final RecyclerView mSingleThemeCollectionBottomSheetRecyclerView;
     private NtpThemeCollectionsAdapter mNtpThemeCollectionsAdapter;
     private final NtpThemeBridge mNtpThemeBridge;
     private final ImageFetcher mImageFetcher;
     private final BottomSheetDelegate mBottomSheetDelegate;
     private final ThemeCollectionSelectionListener mThemeCollectionSelectionListener;
-    private final Runnable mOnThemeImageSelectedCallback;
+    private final ComponentCallbacks mComponentCallbacks;
+    private final int mItemMaxWidth;
+    private final int mSpacing;
     private boolean mHasDisplayedBefore;
+    private int mScreenWidth;
 
     /**
      * Constructor for the single theme collection coordinator.
@@ -68,7 +76,6 @@ public class NtpSingleThemeCollectionCoordinator {
      * @param themeCollectionTitle The title of the current theme collection.
      * @param previousBottomSheetState The bottom sheet state in the previous theme collections
      *     bottom sheet.
-     * @param onThemeImageSelectedCallback The callback to run when a theme image is selected.
      */
     NtpSingleThemeCollectionCoordinator(
             Context context,
@@ -77,14 +84,24 @@ public class NtpSingleThemeCollectionCoordinator {
             ImageFetcher imageFetcher,
             String collectionId,
             String themeCollectionTitle,
-            @SheetState int previousBottomSheetState,
-            Runnable onThemeImageSelectedCallback) {
+            @SheetState int previousBottomSheetState) {
+        mContext = context;
         mBottomSheetDelegate = delegate;
         mNtpThemeBridge = ntpThemeBridge;
         mImageFetcher = imageFetcher;
         mThemeCollectionId = collectionId;
         mThemeCollectionTitle = themeCollectionTitle;
-        mOnThemeImageSelectedCallback = onThemeImageSelectedCallback;
+
+        mItemMaxWidth =
+                context.getResources()
+                        .getDimensionPixelSize(
+                                R.dimen.ntp_customization_theme_collections_list_item_max_width);
+        mSpacing =
+                context.getResources()
+                                .getDimensionPixelSize(
+                                        R.dimen
+                                                .ntp_customization_theme_collection_list_item_padding_horizontal)
+                        * 2;
 
         mNtpSingleThemeCollectionBottomSheetView =
                 LayoutInflater.from(context)
@@ -111,13 +128,20 @@ public class NtpSingleThemeCollectionCoordinator {
         mTitle = mNtpSingleThemeCollectionBottomSheetView.findViewById(R.id.bottom_sheet_title);
         mTitle.setText(mThemeCollectionTitle);
 
+        // Update the daily update switch of the bottom sheet.
+        mDailyUpdateSwitchButton =
+                mNtpSingleThemeCollectionBottomSheetView.findViewById(
+                        R.id.daily_update_switch_button);
+        mDailyUpdateSwitchButton.setChecked(isDailyRefreshEnabledForCurrentCollection());
+
         // Build the RecyclerView containing the images of this particular theme collection in the
         // bottom sheet.
         mSingleThemeCollectionBottomSheetRecyclerView =
                 mNtpSingleThemeCollectionBottomSheetView.findViewById(
                         R.id.single_theme_collection_recycler_view);
-        mSingleThemeCollectionBottomSheetRecyclerView.setLayoutManager(
-                new GridLayoutManager(context, RECYCLE_VIEW_SPAN_COUNT));
+        GridLayoutManager gridLayoutManager =
+                new GridLayoutManager(context, RECYCLE_VIEW_SPAN_COUNT);
+        mSingleThemeCollectionBottomSheetRecyclerView.setLayoutManager(gridLayoutManager);
         mNtpThemeCollectionsAdapter =
                 new NtpThemeCollectionsAdapter(
                         mThemeCollectionImageList,
@@ -125,6 +149,20 @@ public class NtpSingleThemeCollectionCoordinator {
                         this::handleThemeCollectionImageClick,
                         mImageFetcher);
         mSingleThemeCollectionBottomSheetRecyclerView.setAdapter(mNtpThemeCollectionsAdapter);
+
+        NtpThemeCollectionsUtils.updateSpanCountOnLayoutChange(
+                gridLayoutManager,
+                mSingleThemeCollectionBottomSheetRecyclerView,
+                mItemMaxWidth,
+                mSpacing);
+        mComponentCallbacks =
+                NtpThemeCollectionsUtils.registerOrientationListener(
+                        mContext,
+                        (newConfig) ->
+                                handleConfigurationChanged(
+                                        newConfig,
+                                        gridLayoutManager,
+                                        mSingleThemeCollectionBottomSheetRecyclerView));
 
         // Fetches the images for the current collection.
         fetchImagesForCollection(previousBottomSheetState);
@@ -145,6 +183,10 @@ public class NtpSingleThemeCollectionCoordinator {
     }
 
     void destroy() {
+        if (mComponentCallbacks != null) {
+            mContext.unregisterComponentCallbacks(mComponentCallbacks);
+        }
+
         mBackButton.setOnClickListener(null);
         mLearnMoreButton.setOnClickListener(null);
 
@@ -153,6 +195,26 @@ public class NtpSingleThemeCollectionCoordinator {
         }
 
         mNtpThemeBridge.removeListener(mThemeCollectionSelectionListener);
+    }
+
+    /**
+     * Handles configuration changes, particularly screen width changes, to update the span count of
+     * the grid layout.
+     *
+     * @param newConfig The new configuration.
+     * @param manager The {@link GridLayoutManager} for the RecyclerView.
+     * @param recyclerView The {@link RecyclerView} whose span count needs to be updated.
+     */
+    private void handleConfigurationChanged(
+            Configuration newConfig, GridLayoutManager manager, RecyclerView recyclerView) {
+        int currentScreenWidth = newConfig.screenWidthDp;
+        if (currentScreenWidth == mScreenWidth) {
+            return;
+        }
+
+        mScreenWidth = currentScreenWidth;
+        NtpThemeCollectionsUtils.updateSpanCountOnLayoutChange(
+                manager, recyclerView, mItemMaxWidth, mSpacing);
     }
 
     /**
@@ -170,6 +232,7 @@ public class NtpSingleThemeCollectionCoordinator {
         mThemeCollectionTitle = themeCollectionTitle;
 
         mTitle.setText(mThemeCollectionTitle);
+        mDailyUpdateSwitchButton.setChecked(isDailyRefreshEnabledForCurrentCollection());
         fetchImagesForCollection(previousBottomSheetState);
     }
 
@@ -178,11 +241,7 @@ public class NtpSingleThemeCollectionCoordinator {
         if (position == RecyclerView.NO_POSITION) return;
 
         CollectionImage image = mThemeCollectionImageList.get(position);
-
-        // TODO(crbug.com/423579377): This will trigger the notification to all listeners, updating
-        // both adapters. Should be updated to the service.
-        mNtpThemeBridge.setSelectedTheme(image.collectionId, image.imageUrl);
-        mOnThemeImageSelectedCallback.run();
+        mNtpThemeBridge.setCollectionTheme(image);
     }
 
     private void handleLearnMoreClick(View view) {
@@ -219,10 +278,16 @@ public class NtpSingleThemeCollectionCoordinator {
                         mNtpThemeCollectionsAdapter.setSelection(
                                 mNtpThemeBridge.getSelectedThemeCollectionId(),
                                 mNtpThemeBridge.getSelectedThemeCollectionImageUrl());
+                        mHasDisplayedBefore = true;
                     }
-
-                    mHasDisplayedBefore = true;
                 });
+    }
+
+    /** Returns whether daily refresh is enabled for the current theme collection. */
+    private boolean isDailyRefreshEnabledForCurrentCollection() {
+        return mNtpThemeBridge.getSelectedThemeCollectionId() != null
+                && mNtpThemeBridge.getSelectedThemeCollectionId().equals(mThemeCollectionId)
+                && mNtpThemeBridge.getIsDailyRefreshEnabled();
     }
 
     NtpThemeCollectionsAdapter getNtpThemeCollectionsAdapterForTesting() {
@@ -236,5 +301,9 @@ public class NtpSingleThemeCollectionCoordinator {
     void setNtpThemeCollectionsAdapterForTesting(NtpThemeCollectionsAdapter adapter) {
         mNtpThemeCollectionsAdapter = adapter;
         mSingleThemeCollectionBottomSheetRecyclerView.setAdapter(adapter);
+    }
+
+    int getScreenWidthForTesting() {
+        return mScreenWidth;
     }
 }

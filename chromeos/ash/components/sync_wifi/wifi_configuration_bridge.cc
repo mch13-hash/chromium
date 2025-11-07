@@ -153,9 +153,9 @@ void WifiConfigurationBridge::OnGetAllSyncableNetworksResult(
     const sync_pb::WifiConfigurationSpecifics& proto =
         change->data().specifics.wifi_configuration();
     NetworkIdentifier id = NetworkIdentifier::FromProto(proto);
-    if (sync_networks.contains(id) &&
-        sync_networks[id].last_connected_timestamp() >
-            proto.last_connected_timestamp()) {
+    if (auto it = sync_networks.find(id);
+        it != sync_networks.end() && it->second.last_connected_timestamp() >
+                                         proto.last_connected_timestamp()) {
       continue;
     }
     sync_networks[id] = proto;
@@ -164,9 +164,9 @@ void WifiConfigurationBridge::OnGetAllSyncableNetworksResult(
   // Iterate through local networks and add to sync where appropriate.
   for (sync_pb::WifiConfigurationSpecifics& proto : local_network_list) {
     NetworkIdentifier id = NetworkIdentifier::FromProto(proto);
-    if (sync_networks.contains(id) &&
-        sync_networks[id].last_connected_timestamp() >
-            proto.last_connected_timestamp()) {
+    if (auto it = sync_networks.find(id);
+        it != sync_networks.end() && it->second.last_connected_timestamp() >
+                                         proto.last_connected_timestamp()) {
       continue;
     }
 
@@ -186,9 +186,9 @@ void WifiConfigurationBridge::OnGetAllSyncableNetworksResult(
       store_->CreateWriteBatch();
   // Iterate through synced networks and update local stack where appropriate.
   for (const auto& [id, proto] : sync_networks) {
-    if (local_networks.contains(id) &&
-        local_networks[id].last_connected_timestamp() >
-            proto.last_connected_timestamp()) {
+    if (auto it = local_networks.find(id);
+        it != local_networks.end() && it->second.last_connected_timestamp() >
+                                          proto.last_connected_timestamp()) {
       continue;
     }
 
@@ -393,11 +393,12 @@ void WifiConfigurationBridge::FixAutoconnect() {
   // Temporary fix for networks which accidentally had autoconnect disabled.
   if (!pref_service_->GetBoolean(kHasFixedAutoconnect)) {
     std::vector<sync_pb::WifiConfigurationSpecifics> protos;
+    protos.reserve(entries_.size());
     for (const auto& [storage_key, specifics] : entries_) {
       protos.push_back(specifics);
     }
     local_network_collector_->FixAutoconnect(
-        protos,
+        std::move(protos),
         base::BindOnce(&WifiConfigurationBridge::OnFixAutoconnectComplete,
                        weak_ptr_factory_.GetWeakPtr()));
   }
@@ -455,8 +456,9 @@ std::vector<NetworkIdentifier> WifiConfigurationBridge::GetAllIdsForTesting() {
 
 void WifiConfigurationBridge::OnFirstConnectionToNetwork(
     const std::string& guid) {
-  if (network_guid_to_timer_map_.contains(guid)) {
-    network_guid_to_timer_map_.erase(guid);
+  if (auto it = network_guid_to_timer_map_.find(guid);
+      it != network_guid_to_timer_map_.end()) {
+    network_guid_to_timer_map_.erase(it);
   }
 
   if (network_metadata_store_->GetIsConfiguredBySync(guid)) {
@@ -539,8 +541,11 @@ void WifiConfigurationBridge::SaveNetworkToSync(
 }
 
 void WifiConfigurationBridge::OnNetworkCreated(const std::string& guid) {
-  network_guid_to_timer_map_[guid] = timer_factory_->CreateOneShotTimer();
-  network_guid_to_timer_map_[guid]->Start(
+  std::unique_ptr<base::OneShotTimer>& timer =
+      network_guid_to_timer_map_
+          .insert_or_assign(guid, timer_factory_->CreateOneShotTimer())
+          .first->second;
+  timer->Start(
       FROM_HERE, kSyncAfterCreatedTimeout,
       base::BindOnce(&WifiConfigurationBridge::OnNetworkConfiguredDelayComplete,
                      weak_ptr_factory_.GetWeakPtr(), guid));
@@ -548,8 +553,9 @@ void WifiConfigurationBridge::OnNetworkCreated(const std::string& guid) {
 
 void WifiConfigurationBridge::OnNetworkConfiguredDelayComplete(
     const std::string& network_guid) {
-  if (network_guid_to_timer_map_.contains(network_guid)) {
-    network_guid_to_timer_map_.erase(network_guid);
+  if (auto it = network_guid_to_timer_map_.find(network_guid);
+      it != network_guid_to_timer_map_.end()) {
+    network_guid_to_timer_map_.erase(it);
   }
 
   // This check to prevent uploading networks that were added by sync happens
@@ -583,13 +589,14 @@ void WifiConfigurationBridge::OnBeforeConfigurationRemoved(
 void WifiConfigurationBridge::OnConfigurationRemoved(
     const std::string& service_path,
     const std::string& network_guid) {
-  if (!pending_deletes_.contains(network_guid)) {
+  auto it = pending_deletes_.find(network_guid);
+  if (it == pending_deletes_.end()) {
     NET_LOG(EVENT) << "Configuration " << network_guid
                    << " removed with no matching saved metadata.";
     return;
   }
 
-  const std::string& storage_key = pending_deletes_[network_guid];
+  const std::string& storage_key = it->second;
   if (!store_ || !change_processor()->IsTrackingMetadata()) {
     networks_to_sync_when_ready_.insert_or_assign(storage_key, std::nullopt);
     return;
@@ -600,7 +607,8 @@ void WifiConfigurationBridge::OnConfigurationRemoved(
 
 void WifiConfigurationBridge::RemoveNetworkFromSync(
     const std::string& storage_key) {
-  if (!entries_.contains(storage_key)) {
+  auto entries_it = entries_.find(storage_key);
+  if (entries_it == entries_.end()) {
     return;  // Network is not synced.
   }
 
@@ -609,7 +617,7 @@ void WifiConfigurationBridge::RemoveNetworkFromSync(
   batch->DeleteData(storage_key);
   change_processor()->Delete(storage_key, syncer::DeletionOrigin::Unspecified(),
                              batch->GetMetadataChangeList());
-  entries_.erase(storage_key);
+  entries_.erase(entries_it);
   Commit(std::move(batch));
   NET_LOG(EVENT) << "Removed network from sync.";
 }

@@ -25,7 +25,6 @@
 #include "components/discardable_memory/public/mojom/discardable_shared_memory_manager.mojom.h"
 #include "components/persistent_cache/backend_params.h"
 #include "components/viz/common/buildflags.h"
-#include "components/viz/host/persistent_cache_sandboxed_file_factory.h"
 #include "components/viz/host/viz_host_export.h"
 #include "components/viz/service/debugger/mojom/viz_debugger.mojom.h"
 #include "gpu/command_buffer/common/shared_image_capabilities.h"
@@ -172,6 +171,7 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost,
 
   void SetProcessId(base::ProcessId pid);
   void OnProcessCrashed();
+  void NotifyWorkloadIncrease();
 
   // Adds a connection error handler for the GpuService.
   void AddConnectionErrorHandler(base::OnceClosure handler);
@@ -192,6 +192,7 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost,
   void EstablishGpuChannel(int client_id,
                            uint64_t client_tracing_id,
                            bool is_gpu_host,
+                           bool enable_extra_handles_validation,
                            bool sync,
                            EstablishChannelCallback callback);
   void SetChannelClientPid(int client_id, base::ProcessId client_pid);
@@ -288,6 +289,10 @@ class VIZ_HOST_EXPORT GpuHostImpl : public mojom::GpuHost,
                        const std::string& key,
                        const std::string& blob) override;
   void ClearGrShaderDiskCache() override;
+#if BUILDFLAG(IS_WIN)
+  void EnsureWebNNExecutionProvidersReady(
+      EnsureWebNNExecutionProvidersReadyCallback cb) override;
+#endif
 
   // mojom::GpuLogging:
   void RecordLogMessage(int32_t severity,

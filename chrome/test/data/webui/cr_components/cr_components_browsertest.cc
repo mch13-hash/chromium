@@ -100,6 +100,16 @@ IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, RealboxLensTest) {
   RunTest("cr_components/searchbox/searchbox_lens_test.js", "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxDropdownTest) {
+  set_test_loader_host(chrome::kChromeUINewTabPageHost);
+  RunTest("cr_components/searchbox/searchbox_dropdown_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxIconTest) {
+  set_test_loader_host(chrome::kChromeUINewTabPageHost);
+  RunTest("cr_components/searchbox/searchbox_icon_test.js", "mocha.run()");
+}
+
 class CrComponentsHistoryClustersTest : public WebUIMochaBrowserTest {
  protected:
   CrComponentsHistoryClustersTest() {
@@ -138,7 +148,13 @@ IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, General) {
   RunTest("cr_components/most_visited_test.js", "runMochaSuite('General');");
 }
 
-IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, Layouts) {
+// TODO(https://crbug.com/449760234): Times out on linux debug builds.
+#if BUILDFLAG(IS_LINUX) && !defined(NDEBUG)
+#define MAYBE_Layouts DISABLED_Layouts
+#else
+#define MAYBE_Layouts Layouts
+#endif
+IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, MAYBE_Layouts) {
   RunTest("cr_components/most_visited_test.js", "runMochaSuite('Layouts');");
 }
 
@@ -175,6 +191,16 @@ IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, EnterpriseShortcuts) {
 
 IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, Theming) {
   RunTest("cr_components/most_visited_test.js", "runMochaSuite('Theming');");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, ShowAddButton) {
+  RunTest("cr_components/most_visited_test.js",
+          "runMochaSuite('ShowAddButton');");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsMostVisitedTest, ExpandableTiles) {
+  RunTest("cr_components/most_visited_test.js",
+          "runMochaSuite('ExpandableTiles');");
 }
 
 typedef WebUIMochaBrowserTest CrComponentsThemeColorPickerTest;
@@ -233,4 +259,8 @@ class CrComponentsComposeboxTest : public WebUIMochaBrowserTest {
 IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ContextMenuEntrypoint) {
   RunTest("cr_components/composebox/context_menu_entrypoint_test.js",
           "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, RecentTabChip) {
+  RunTest("cr_components/composebox/recent_tab_chip_test.js", "mocha.run()");
 }

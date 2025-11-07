@@ -302,6 +302,7 @@ bool InitializeStaticGLBindings(GLImplementationParts);
 }
 }  // namespace gl
 namespace gpu {
+class MappableBufferAHB;
 class MappableBufferDXGI;
 }
 namespace history_report {
@@ -345,7 +346,7 @@ class V4L2DevicePoller;  // TODO(crbug.com/41486289): remove this.
 namespace memory_instrumentation {
 class OSMetrics;
 }
-namespace memory_pressure {
+namespace content {
 class UserLevelMemoryPressureSignalGenerator;
 }
 namespace metrics {
@@ -387,6 +388,7 @@ class PrintBackendServiceImpl;
 class PrintBackendServiceManager;
 class PrintPreviewUIUntrusted;
 class PrinterQuery;
+base::FilePath GetAbsoluteSystemDestinationLocation(const base::FilePath&);
 }  // namespace printing
 namespace proxy_resolver {
 class ScopedAllowThreadJoinForProxyResolverV8Tracing;
@@ -610,6 +612,7 @@ class BASE_EXPORT ScopedAllowBlocking {
   friend class content::
       ScopedAllowBlockingForViewAura;  // http://crbug.com/332579
   friend class content::ShellPathProvider;
+  friend class content::UserLevelMemoryPressureSignalGenerator;
   friend class content::WebContentsViewMac;
   friend class cronet::CronetContext;
   friend class cronet::CronetPrefsManager;
@@ -622,7 +625,6 @@ class BASE_EXPORT ScopedAllowBlocking {
   friend class io_thread::IOSIOThread;
   friend class media::FileVideoCaptureDeviceFactory;
   friend class memory_instrumentation::OSMetrics;
-  friend class memory_pressure::UserLevelMemoryPressureSignalGenerator;
   friend class metrics::CleanExitBeacon;
   friend class module_installer::ScopedAllowModulePakLoad;
   friend class net::GSSAPISharedLibrary;    // http://crbug.com/66702
@@ -679,6 +681,8 @@ class BASE_EXPORT ScopedAllowBlocking {
       base::FilePath* file_path);  // http://crbug.com/110709
   friend bool disk_cache::CleanupDirectorySync(const base::FilePath&);
   friend bool gl::init::InitializeStaticGLBindings(gl::GLImplementationParts);
+  friend base::FilePath printing::GetAbsoluteSystemDestinationLocation(
+      const base::FilePath&);
 
   ScopedAllowBlocking(const Location& from_here = Location::Current());
   ~ScopedAllowBlocking();
@@ -855,6 +859,7 @@ class BASE_EXPORT
   friend class content::SynchronousCompositor;
   friend class content::SynchronousCompositorHost;
   friend class content::SynchronousCompositorSyncCallBridge;
+  friend class gpu::MappableBufferAHB;
   friend class gpu::MappableBufferDXGI;
   friend class media::AudioInputDevice;
   friend class media::AudioOutputDevice;

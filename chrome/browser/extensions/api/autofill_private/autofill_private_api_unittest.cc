@@ -63,7 +63,6 @@ class MandatoryReauthSettingsPageMetricsTest
 
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
-    personal_data_manager().SetPrefService(autofill_client()->GetPrefs());
     personal_data_manager()
         .payments_data_manager()
         .SetPaymentMethodsMandatoryReauthEnabled(IsFeatureTurnedOn());
@@ -187,9 +186,17 @@ class AutofillPrivateApiUnitTest : public extensions::ExtensionApiTest {
  public:
   AutofillPrivateApiUnitTest() {
     feature_list_.InitWithFeatures(
-        /*enabled_features=*/{autofill::features::kAutofillAiWithDataSchema},
+        /*enabled_features=*/
+        {
+            autofill::features::kAutofillAiWithDataSchema,
+            autofill::features::kAutofillAiWalletFlightReservation,
+            autofill::features::kAutofillAiWalletVehicleRegistration,
+        },
         /*disabled_features=*/
-        {autofill::features::kAutofillAiIgnoreLocale});
+        {autofill::features::kAutofillAiIgnoreLocale,
+         autofill::features::kAutofillAiNationalIdCard,
+         autofill::features::kAutofillAiKnownTravelerNumber,
+         autofill::features::kAutofillAiRedressNumber});
   }
   AutofillPrivateApiUnitTest(const AutofillPrivateApiUnitTest&) = delete;
   AutofillPrivateApiUnitTest& operator=(const AutofillPrivateApiUnitTest&) =
@@ -198,7 +205,6 @@ class AutofillPrivateApiUnitTest : public extensions::ExtensionApiTest {
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     payments_data_manager().SetSyncingForTest(/*is_syncing_for_test=*/true);
-    payments_data_manager().SetPrefService(autofill_client()->GetPrefs());
   }
 
   void TearDownOnMainThread() override {
@@ -403,8 +409,12 @@ IN_PROC_BROWSER_TEST_F(AutofillPrivateApiUnitTest, MAYBE_EntityInstances) {
   ASSERT_TRUE(RunAutofillSubtest("loadEmptyEntityInstancesList"));
   ASSERT_TRUE(RunAutofillSubtest("testExpectedLabelsAreGenerated"));
   //  Test that retrieving general entity type information works.
-  ASSERT_TRUE(RunAutofillSubtest("getAllEntityTypes"));
+  ASSERT_TRUE(RunAutofillSubtest("getWritableEntityTypes"));
   ASSERT_TRUE(RunAutofillSubtest("getAllAttributeTypesForEntityTypeName"));
+}
+
+IN_PROC_BROWSER_TEST_F(AutofillPrivateApiUnitTest, TypedEntityInstances) {
+  ASSERT_TRUE(RunAutofillSubtest("testEntityTypeInEntityInstanceWithLabels"));
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillPrivateApiUnitTest,
@@ -462,6 +472,35 @@ IN_PROC_BROWSER_TEST_F(AutofillPrivateApiUnitTest,
   // Verify that we cannot opt into Autofill AI anymore.
   ASSERT_TRUE(RunAutofillSubtest("optIntoAutofillAi"));
   EXPECT_TRUE(RunAutofillSubtest("verifyUserOptedOutOfAutofillAi"));
+}
+
+IN_PROC_BROWSER_TEST_F(AutofillPrivateApiUnitTest,
+                       GetAllWritableEntityTypes_DoesNotIncludeReadOnlyTypes) {
+  ASSERT_TRUE(RunAutofillSubtest("getWritableEntityTypes"));
+}
+
+// Tests that entity types which are stored in Wallet are returned
+// when user is signed in and has opted in.
+IN_PROC_BROWSER_TEST_F(AutofillPrivateApiUnitTest,
+                       GetAllWritableEntityTypes_ReturnsWalletEntityTypes) {
+  autofill_client()->set_entity_data_manager(
+      autofill::AutofillEntityDataManagerFactory::GetForProfile(profile()));
+  autofill_client()->SetUpPrefsAndIdentityForAutofillAi();
+  syncer::TestSyncService test_sync_service;
+  autofill_client()->set_sync_service(&test_sync_service);
+  test_sync_service.GetUserSettings()->SetSelectedType(
+      syncer::UserSelectableType::kAutofill, true);
+  ASSERT_TRUE(autofill::MayPerformAutofillAiAction(
+      *autofill_client(),
+      autofill::AutofillAiAction::kAddServerEntityInstanceInSettings,
+      autofill::EntityType(autofill::EntityTypeName::kFlightReservation)));
+  ASSERT_TRUE(autofill::MayPerformAutofillAiAction(
+      *autofill_client(),
+      autofill::AutofillAiAction::kAddServerEntityInstanceInSettings,
+      autofill::EntityType(autofill::EntityTypeName::kVehicle)));
+
+  ASSERT_TRUE(RunAutofillSubtest(
+      "verifyWritableEntityTypesWithSyncOnReturnsWalletEntityTypes"));
 }
 
 }  // namespace

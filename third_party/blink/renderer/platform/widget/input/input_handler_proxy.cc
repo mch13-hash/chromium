@@ -281,8 +281,11 @@ InputHandlerProxy::InputHandlerProxy(cc::InputHandler& input_handler,
       tick_clock_(base::DefaultTickClock::GetInstance()),
       snap_fling_controller_(std::make_unique<cc::SnapFlingController>(this)),
       cursor_control_handler_(std::make_unique<CursorControlHandler>()),
-      update_scroll_predictor_(base::FeatureList::IsEnabled(
-          input::features::kUpdateScrollPredictorInputMapping)) {
+      update_scroll_predictor_(
+          base::FeatureList::IsEnabled(
+              input::features::kUpdateScrollPredictorInputMapping) &&
+          base::FeatureList::IsEnabled(
+              features::kRefactorCompositorThreadEventQueue)) {
   DCHECK(client);
   input_handler_->BindToClient(this);
 
@@ -649,9 +652,12 @@ bool InputHandlerProxy::HasQueuedEventsReadyForDispatch(
     return false;
   }
 
-  // Don't dispatch events that are for a future frame.
-  if (compositor_event_queue_->PeekTimestamp() > sample_time) {
-    return false;
+  if (base::FeatureList::IsEnabled(
+          features::kRefactorCompositorThreadEventQueue)) {
+    // Don't dispatch events that are for a future frame.
+    if (compositor_event_queue_->PeekTimestamp() > sample_time) {
+      return false;
+    }
   }
 
   return true;
@@ -661,7 +667,10 @@ void InputHandlerProxy::DispatchQueuedInputEvents(bool frame_aligned) {
   //  Coalesce all events in the queue before dispatching.
   auto sample_time = base::TimeTicks::Max();
 
-  compositor_event_queue_->CoalesceEvents(sample_time);
+  if (base::FeatureList::IsEnabled(
+          features::kRefactorCompositorThreadEventQueue)) {
+    compositor_event_queue_->CoalesceEvents(sample_time);
+  }
   while (HasQueuedEventsReadyForDispatch(frame_aligned, sample_time)) {
     DispatchSingleInputEvent(compositor_event_queue_->Pop());
   }
@@ -821,8 +830,12 @@ InputHandlerProxy::RouteToTypeSpecificHandler(
     done_callback = base::BindOnce(
         [](EventWithCallback* event, bool handled) {
           event->DidCompleteProcessingForMetrics();
+          bool keep_metrics =
+              handled ||
+              cc::EventMetrics::ShouldKeepEvenWithoutCausingFrameUpdate(
+                  event->metrics()->type());
           std::unique_ptr<cc::EventMetrics> result =
-              handled ? event->TakeMetrics() : nullptr;
+              keep_metrics ? event->TakeMetrics() : nullptr;
           return result;
         },
         event_with_callback);
@@ -857,12 +870,6 @@ InputHandlerProxy::RouteToTypeSpecificHandler(
           event_with_callback->latency_info().trace_id());
 
     case WebInputEvent::Type::kGestureScrollEnd:
-      if (scoped_event_monitor) {
-        // Always save scroll end metrics to ensure
-        // `ScrollJankDroppedFrameReporter` emits per-scroll metrics at the end
-        // of a scroll.
-        scoped_event_monitor->SetSaveMetrics();
-      }
       return HandleGestureScrollEnd(static_cast<const WebGestureEvent&>(event));
 
     case WebInputEvent::Type::kGesturePinchBegin: {
@@ -1743,9 +1750,12 @@ void InputHandlerProxy::GenerateSyntheticScrollPredictionFromFutureEvent(
 void InputHandlerProxy::ProcessQueuedEventsUpToSampleTime(
     const viz::BeginFrameArgs& args,
     base::TimeTicks sample_time) {
-  // Coalesce scroll and pinch events in the |compositor_event_queue_| till
-  // sample_time.
-  compositor_event_queue_->CoalesceEvents(sample_time);
+  if (base::FeatureList::IsEnabled(
+          features::kRefactorCompositorThreadEventQueue)) {
+    // Coalesce scroll and pinch events in the |compositor_event_queue_| till
+    // sample_time.
+    compositor_event_queue_->CoalesceEvents(sample_time);
+  }
 
   while (HasQueuedEventsReadyForDispatch(true /*frame_aligned*/, sample_time)) {
     auto event_with_callback = compositor_event_queue_->Pop();

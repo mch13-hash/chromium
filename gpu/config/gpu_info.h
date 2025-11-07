@@ -505,9 +505,6 @@ struct GPU_CONFIG_EXPORT GPUInfo {
       video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;
 
-  ImageDecodeAcceleratorSupportedProfiles
-      image_decode_accelerator_supported_profiles;
-
   bool subpixel_font_rendering;
 
   uint32_t visibility_callback_call_count = 0;
@@ -553,11 +550,6 @@ struct GPU_CONFIG_EXPORT GPUInfo {
     // being described.
     virtual void BeginVideoEncodeAcceleratorSupportedProfile() = 0;
     virtual void EndVideoEncodeAcceleratorSupportedProfile() = 0;
-
-    // Markers indicating that an ImageDecodeAcceleratorSupportedProfile is
-    // being described.
-    virtual void BeginImageDecodeAcceleratorSupportedProfile() = 0;
-    virtual void EndImageDecodeAcceleratorSupportedProfile() = 0;
 
     // Markers indicating that "auxiliary" attributes of the GPUInfo
     // (according to the DevTools protocol) are being described.

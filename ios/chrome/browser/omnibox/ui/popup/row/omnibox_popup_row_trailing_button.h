@@ -15,9 +15,7 @@ enum class TrailingIconType {
   /// Append arrow icon type.
   kRefineQuery,
   /// Open existing tab icon type.
-  kOpenExistingTab,
-  /// Search with Aim icon type.
-  kSearchWithAim
+  kOpenExistingTab
 };
 
 // Trailing button view used in the omnibox popup row.
@@ -31,6 +29,9 @@ enum class TrailingIconType {
 
 /// The context in which the omnibox is presented.
 @property(nonatomic, assign) OmniboxPresentationContext presentationContext;
+
+/// Whether to show the omnibox in the bottom when the popup is open.
+@property(nonatomic, assign) BOOL useBottomOmniboxInPopup;
 
 @end
 

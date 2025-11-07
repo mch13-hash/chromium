@@ -635,6 +635,11 @@ void Widget::InitAccessibility() {
   AddObserver(&root_view_->GetViewAccessibility());
 
   ax_mode_observation_.Observe(&ui::AXPlatform::GetInstance());
+
+  // Must be called after `root_view_` is initialized.
+  if (ax_manager_) {
+    ax_manager_->Init();
+  }
 }
 
 void Widget::ShowEmojiPanel() {
@@ -1631,6 +1636,22 @@ void Widget::OnSizeConstraintsChanged() {
   observers_.Notify(&WidgetObserver::OnWidgetSizeConstraintsChanged, this);
 }
 
+void Widget::OnWindowModalVisibilityChanged(bool visible) {
+  // Because there are non-views window modals the initiator of this
+  // notification is platform-dependent:
+  // - On Mac: initiated by NativeWidget, i.e.,
+  //   NativeWidgetMacNSWindowHost::OnSheetModalShown/Closed.
+  // - Others: initiated by child Widget, i.e.,
+  //   Widget::OnNativeWidgetVisibilityChanged.
+  // - all platforms: initiated by a CLIENT_OWNS_WIDGET child Widget when the
+  //   client destroys it.
+  // TODO(crbug.com/450705434): on Windows and Linux the file select dialog is
+  // also non-views dialog. Send the notification on showing and closing such
+  // dialogs too.
+  observers_.Notify(&WidgetObserver::OnWidgetWindowModalVisibilityChanged, this,
+                    visible);
+}
+
 void Widget::OnOwnerClosing() {}
 
 bool Widget::GetIsDesktopWidget() const {
@@ -1912,7 +1933,13 @@ void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
   if (GetCompositor() && root && root->layer()) {
     root->layer()->SetVisible(visible);
   }
-  MaybeNotifyWindowModalVisibilityChanged(visible);
+
+#if !BUILDFLAG(IS_MAC)
+  // MacOS sends these notifications through the NativeWidgetMacNSWindowHost's
+  // OnSheetModalShown and OnSheetModalClosed methods because there're non-views
+  // window modal sheets.
+  MaybeNotifyParentAboutWindowModalVisibilityChanged(visible);
+#endif
 }
 
 void Widget::OnNativeWidgetVisibilityOnScreenChanged(bool visible) {
@@ -1954,7 +1981,7 @@ void Widget::OnNativeWidgetDestroyed() {
   // does not reset the Widget, the Widget will be left in a closed, zombie-like
   // state. It is strongly recommended to reset the Widget within the callback.
   if (weak_this && override_close_) {
-    std::move(override_close_).Run(ClosedReason::kUnspecified);
+    std::move(override_close_).Run(closed_reason());
   }
 }
 
@@ -2692,7 +2719,7 @@ void Widget::ClearFocusManagerFromWidget() {
   }
 }
 
-void Widget::MaybeNotifyWindowModalVisibilityChanged(bool visible) {
+void Widget::MaybeNotifyParentAboutWindowModalVisibilityChanged(bool visible) {
   if (!widget_delegate()) {
     return;
   }
@@ -2705,9 +2732,7 @@ void Widget::MaybeNotifyWindowModalVisibilityChanged(bool visible) {
     return;
   }
 
-  parent_->observers_.Notify(
-      &WidgetObserver::OnWidgetWindowModalVisibilityChanged, parent_.get(),
-      visible);
+  parent_->OnWindowModalVisibilityChanged(visible);
 }
 
 void Widget::HandleShowRequested() {
@@ -2741,7 +2766,7 @@ void Widget::HandleWidgetDestroyed() {
   // the client destroys a CLIENT_OWNS_WIDGET widget. The OS has no
   // chance to send us a visibility change event.
   if (IsVisible()) {
-    MaybeNotifyWindowModalVisibilityChanged(false);
+    MaybeNotifyParentAboutWindowModalVisibilityChanged(false);
   }
 
   ax_mode_observation_.Reset();

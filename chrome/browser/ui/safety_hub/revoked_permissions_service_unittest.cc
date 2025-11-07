@@ -25,6 +25,8 @@
 #include "chrome/browser/ui/safety_hub/abusive_notification_permissions_manager.h"
 #include "chrome/browser/ui/safety_hub/disruptive_notification_permissions_manager.h"
 #include "chrome/browser/ui/safety_hub/mock_safe_browsing_database_manager.h"
+#include "chrome/browser/ui/safety_hub/revoked_permissions_os_notification_display_manager.h"
+#include "chrome/browser/ui/safety_hub/revoked_permissions_os_notification_display_manager_factory.h"
 #include "chrome/browser/ui/safety_hub/revoked_permissions_service_factory.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_constants.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_prefs.h"
@@ -51,6 +53,7 @@
 #include "components/permissions/permission_uma_util.h"
 #include "components/permissions/permission_util.h"
 #include "components/safe_browsing/core/common/features.h"
+#include "components/safety_check/safety_check.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/ukm/content/source_url_recorder.h"
 #include "components/ukm/test_ukm_recorder.h"
@@ -70,6 +73,8 @@ const char url3[] = "https://example3.com:443";
 const char url4[] = "https://example4.com:443";
 const char url5[] = "https://example5.com:443";
 const char url6[] = "https://example6.com:443";
+const char url7[] = "https://example7.com:443";
+const char url8[] = "https://example8.com:443";
 const ContentSettingsType automatic_downloads_type =
     ContentSettingsType::AUTOMATIC_DOWNLOADS;
 const ContentSettingsType geolocation_type = ContentSettingsType::GEOLOCATION;
@@ -79,8 +84,6 @@ const ContentSettingsType notifications_type =
     ContentSettingsType::NOTIFICATIONS;
 const ContentSettingsType chooser_type =
     ContentSettingsType::FILE_SYSTEM_ACCESS_CHOOSER_DATA;
-const ContentSettingsType revoked_abusive_notification =
-    ContentSettingsType::REVOKED_ABUSIVE_NOTIFICATION_PERMISSIONS;
 const ContentSettingsType revoked_unused_site_type =
     ContentSettingsType::REVOKED_UNUSED_SITE_PERMISSIONS;
 
@@ -108,6 +111,25 @@ std::unique_ptr<KeyedService> BuildTestHistoryService(
   auto service = std::make_unique<history::HistoryService>();
   service->Init(history::TestHistoryDatabaseParamsForPath(context->GetPath()));
   return service;
+}
+
+class TestRevokedPermissionsOSNotificationDisplayManager
+    : public RevokedPermissionsOSNotificationDisplayManager {
+ public:
+  explicit TestRevokedPermissionsOSNotificationDisplayManager(
+      HostContentSettingsMap* hcsm)
+      : RevokedPermissionsOSNotificationDisplayManager(hcsm, nullptr) {}
+  MOCK_METHOD(void, DisplayNotification, (), (override));
+  MOCK_METHOD(void, UpdateNotification, (), (override));
+};
+
+std::unique_ptr<KeyedService>
+BuildTestRevokedPermissionsOSNotificationDisplayManager(
+    content::BrowserContext* context) {
+  auto notification_manager =
+      std::make_unique<TestRevokedPermissionsOSNotificationDisplayManager>(
+          HostContentSettingsMapFactory::GetForProfile(context));
+  return notification_manager;
 }
 
 }  // namespace
@@ -173,7 +195,13 @@ class RevokedPermissionsServiceTest
             // Needed for background UKM reporting.
             TestingProfile::TestingFactory{
                 HistoryServiceFactory::GetInstance(),
-                base::BindRepeating(&BuildTestHistoryService)}};
+                base::BindRepeating(&BuildTestHistoryService)},
+            // For testing OnContentSettingChanged.
+            TestingProfile::TestingFactory{
+                RevokedPermissionsOSNotificationDisplayManagerFactory::
+                    GetInstance(),
+                base::BindRepeating(
+                    &BuildTestRevokedPermissionsOSNotificationDisplayManager)}};
   }
 
   // There are two variations of the test: where safe browsing is enabled and
@@ -207,6 +235,13 @@ class RevokedPermissionsServiceTest
 
   sync_preferences::TestingPrefServiceSyncable* prefs() {
     return profile()->GetTestingPrefService();
+  }
+
+  TestRevokedPermissionsOSNotificationDisplayManager*
+  test_revoked_notification_manager() {
+    return static_cast<TestRevokedPermissionsOSNotificationDisplayManager*>(
+        RevokedPermissionsOSNotificationDisplayManagerFactory::GetForProfile(
+            profile()));
   }
 
   uint8_t callback_count() { return callback_count_; }
@@ -295,9 +330,7 @@ class RevokedPermissionsServiceTest
   void SetupRevokedUnusedPermissionSite(
       std::string url,
       base::TimeDelta lifetime =
-          content_settings::features::
-              kSafetyCheckUnusedSitePermissionsRevocationCleanUpThreshold
-                  .Get()) {
+          safety_check::GetUnusedSitePermissionsRevocationCleanUpThreshold()) {
     content_settings::ContentSettingConstraints constraint(clock()->Now());
     constraint.set_lifetime(lifetime);
 
@@ -332,17 +365,17 @@ class RevokedPermissionsServiceTest
 
   void SetupRevokedAbusiveNotificationSite(
       std::string url,
+      safe_browsing::NotificationRevocationSource revocation_source =
+          safe_browsing::NotificationRevocationSource::
+              kSocialEngineeringBlocklist,
       base::TimeDelta lifetime =
-          content_settings::features::
-              kSafetyCheckUnusedSitePermissionsRevocationCleanUpThreshold
-                  .Get()) {
+          safety_check::GetUnusedSitePermissionsRevocationCleanUpThreshold()) {
     content_settings::ContentSettingConstraints constraint(clock()->Now());
     constraint.set_lifetime(lifetime);
-    hcsm()->SetWebsiteSettingDefaultScope(
-        GURL(url), GURL(url), revoked_abusive_notification,
-        base::Value(base::Value::Dict().Set(
-            safety_hub::kRevokedStatusDictKeyStr, safety_hub::kRevokeStr)),
-        constraint);
+    AbusiveNotificationPermissionsManager::
+        SetRevokedAbusiveNotificationPermission(hcsm(), GURL(url),
+                                                /*is_ignored*/ false,
+                                                revocation_source, constraint);
   }
 
   void SetupRevokedDisruptiveNotificationSite(std::string url) {
@@ -1326,8 +1359,7 @@ TEST_P(RevokedPermissionsServiceTest,
 
 TEST_P(RevokedPermissionsServiceTest, InitializeLatestResult) {
   const auto default_lifetime =
-      content_settings::features::
-          kSafetyCheckUnusedSitePermissionsRevocationCleanUpThreshold.Get();
+      safety_check::GetUnusedSitePermissionsRevocationCleanUpThreshold();
   const auto shorter_lifetime = default_lifetime - base::Days(1);
   const auto longer_lifetime = default_lifetime + base::Days(1);
   const auto disruptive_revocations_lifetime = default_lifetime;
@@ -1335,9 +1367,17 @@ TEST_P(RevokedPermissionsServiceTest, InitializeLatestResult) {
     SetupAbusiveNotificationSite(url2, ContentSetting::CONTENT_SETTING_ASK);
     SetupAbusiveNotificationSite(url3, ContentSetting::CONTENT_SETTING_ASK);
     SetupAbusiveNotificationSite(url4, ContentSetting::CONTENT_SETTING_ASK);
-    SetupRevokedAbusiveNotificationSite(url2, longer_lifetime);
+    SetupRevokedAbusiveNotificationSite(
+        url2,
+        safe_browsing::NotificationRevocationSource::
+            kSocialEngineeringBlocklist,
+        longer_lifetime);
     SetupRevokedAbusiveNotificationSite(url3);
-    SetupRevokedAbusiveNotificationSite(url4, shorter_lifetime);
+    SetupRevokedAbusiveNotificationSite(
+        url4,
+        safe_browsing::NotificationRevocationSource::
+            kSocialEngineeringBlocklist,
+        shorter_lifetime);
   }
   if (ShouldSetupUnusedSites()) {
     SetupRevokedUnusedPermissionSite(url1);
@@ -1467,6 +1507,17 @@ TEST_P(RevokedPermissionsServiceTest, PermissionsRevocationType) {
   SetupRevokedAbusiveNotificationSite(url6);
   SetupRevokedDisruptiveNotificationSite(url6);
 
+  // Seventh site: abusive (suspicious) notifications.
+  SetupRevokedAbusiveNotificationSite(
+      url7, safe_browsing::NotificationRevocationSource::
+                kSuspiciousContentAutoRevocation);
+
+  // Eighth site: unused permissions and abusive (suspicious) notifications.
+  SetupRevokedAbusiveNotificationSite(
+      url8, safe_browsing::NotificationRevocationSource::
+                kSuspiciousContentAutoRevocation);
+  SetupRevokedUnusedPermissionSite(url8);
+
   auto new_service = std::make_unique<RevokedPermissionsService>(
       profile(), profile()->GetPrefs());
   std::optional<std::unique_ptr<SafetyHubResult>> opt_result =
@@ -1476,7 +1527,7 @@ TEST_P(RevokedPermissionsServiceTest, PermissionsRevocationType) {
       static_cast<RevokedPermissionsResult*>(opt_result.value().get());
   auto revoked_permissions = result->GetRevokedPermissions();
 
-  EXPECT_EQ(6U, revoked_permissions.size());
+  EXPECT_EQ(8U, revoked_permissions.size());
   // Verify the revocation types are correct.
   auto permission_1 = GetPermissionsDataByUrl(revoked_permissions, url1);
   EXPECT_EQ(permission_1.revocation_type,
@@ -1503,6 +1554,15 @@ TEST_P(RevokedPermissionsServiceTest, PermissionsRevocationType) {
   auto permission_6 = GetPermissionsDataByUrl(revoked_permissions, url6);
   EXPECT_EQ(permission_6.revocation_type,
             PermissionsRevocationType::kAbusiveNotificationPermissions);
+
+  auto permission_7 = GetPermissionsDataByUrl(revoked_permissions, url7);
+  EXPECT_EQ(permission_7.revocation_type,
+            PermissionsRevocationType::kSuspiciousNotificationPermissions);
+
+  auto permission_8 = GetPermissionsDataByUrl(revoked_permissions, url8);
+  EXPECT_EQ(
+      permission_8.revocation_type,
+      PermissionsRevocationType::kUnusedPermissionsAndSuspiciousNotifications);
 }
 
 TEST_P(RevokedPermissionsServiceTest, AutoRevocationSetting) {
@@ -1772,6 +1832,20 @@ TEST_P(RevokedPermissionsServiceTest, OnContentSettingsChanged_WebsiteSetting) {
   if (ShouldSetupDisruptiveSites()) {
     EXPECT_EQ(GetRevokedDisruptiveNotificationPermissionSize(), 1);
   }
+}
+
+TEST_P(RevokedPermissionsServiceTest,
+       OnContentSettingsChanged_RevokedAbusiveNotificationChanged) {
+  EXPECT_CALL(*test_revoked_notification_manager(), UpdateNotification);
+  SetupRevokedAbusiveNotificationSite(url2);
+}
+
+TEST_P(RevokedPermissionsServiceTest,
+       OnContentSettingsChanged_RevokedDisruptiveNotificationChanged) {
+  EXPECT_CALL(*test_revoked_notification_manager(), UpdateNotification);
+  SetupRevokedDisruptiveNotificationSite(url3);
+  ExpectRevokedDisruptiveNotificationSettingValues(url3);
+  EXPECT_EQ(GetRevokedDisruptiveNotificationPermissionSize(), 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(

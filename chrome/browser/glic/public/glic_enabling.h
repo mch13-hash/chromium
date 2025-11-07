@@ -96,6 +96,13 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   // * The profile has completed the first run experience
   static bool ShouldShowSettingsPage(Profile* profile);
 
+  // Whether the FRE screen is displayed in the same window as the chat app.
+  static bool IsUnifiedFreEnabled(Profile* profile);
+
+  // Whether the required feature flags for multi-instance - kGlicMultiInstance,
+  // kGlicMultiTab, and kGlicMultitabUnderlines - are enabled.
+  static bool IsMultiInstanceEnabledByFlags();
+
   struct ProfileEnablement {
     // These conditions are checked first and may prevent following checks from
     // occurring.
@@ -205,6 +212,10 @@ class GlicEnabling : public signin::IdentityManager::Observer {
   base::CallbackListSubscription RegisterOnShowSettingsPageChanged(
       ShowSettingsPageChangedCallback callback);
 
+  using ProfileReadyStateChangedCallback = base::RepeatingClosure;
+  base::CallbackListSubscription RegisterProfileReadyStateChanged(
+      ProfileReadyStateChangedCallback callback);
+
  private:
   void OnGlicSettingsPolicyChanged();
 
@@ -242,6 +253,10 @@ class GlicEnabling : public signin::IdentityManager::Observer {
       base::RepeatingCallbackList<void()>;
   OnShowSettingsPageChangeCallbackList
       show_settings_page_changed_callback_list_;
+  using ProfileReadyStateChangedCallbackList =
+      base::RepeatingCallbackList<void()>;
+  ProfileReadyStateChangedCallbackList
+      profile_ready_state_changed_callback_list_;
   PrefChangeRegistrar pref_registrar_;
   std::unique_ptr<GlicUserStatusFetcher> glic_user_status_fetcher_;
   base::ScopedObservation<signin::IdentityManager,

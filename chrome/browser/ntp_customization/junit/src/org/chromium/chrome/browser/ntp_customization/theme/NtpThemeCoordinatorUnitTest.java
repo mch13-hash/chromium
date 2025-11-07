@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.view.ContextThemeWrapper;
@@ -28,6 +29,7 @@ import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ntp_customization.BottomSheetDelegate;
+import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundImageType;
 import org.chromium.chrome.browser.ntp_customization.R;
 import org.chromium.chrome.browser.profiles.Profile;
 
@@ -39,6 +41,7 @@ public class NtpThemeCoordinatorUnitTest {
     @Mock private BottomSheetDelegate mBottomSheetDelegate;
     @Mock private Profile mProfile;
     @Mock private Runnable mDismissBottomSheet;
+    @Mock private NtpThemeBridge.Natives mNtpThemeBridgeJniMock;
 
     private Context mContext;
     private NtpThemeCoordinator mCoordinator;
@@ -49,6 +52,8 @@ public class NtpThemeCoordinatorUnitTest {
                 new ContextThemeWrapper(
                         ApplicationProvider.getApplicationContext(),
                         R.style.Theme_BrowserUI_DayNight);
+        NtpThemeBridgeJni.setInstanceForTesting(mNtpThemeBridgeJniMock);
+        when(mNtpThemeBridgeJniMock.init(any(), any())).thenReturn(1L);
         mCoordinator =
                 new NtpThemeCoordinator(
                         mContext, mBottomSheetDelegate, mProfile, mDismissBottomSheet);
@@ -62,9 +67,7 @@ public class NtpThemeCoordinatorUnitTest {
     @Test
     public void testRegisterBottomSheetLayout() {
         verify(mBottomSheetDelegate)
-                .registerBottomSheetLayout(
-                        eq(NtpThemeCoordinator.NTPThemeBottomSheetSection.THEME_COLLECTIONS),
-                        any());
+                .registerBottomSheetLayout(eq(NtpBackgroundImageType.THEME_COLLECTION), any());
     }
 
     @Test

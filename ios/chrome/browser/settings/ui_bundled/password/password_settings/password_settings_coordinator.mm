@@ -17,6 +17,7 @@
 #import "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/affiliations/model/ios_chrome_affiliation_service_factory.h"
+#import "ios/chrome/browser/credential_exchange/coordinator/credential_export_coordinator.h"
 #import "ios/chrome/browser/credential_provider/model/features.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_account_password_store_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_profile_password_store_factory.h"
@@ -180,6 +181,9 @@ const NSInteger kErrorUserDismissedUpdateGPMPinFlow = -105;
 
   // Coordinator for displaying errors in update GPM PIN flow.
   AlertCoordinator* _updateGPMPinErrorCoordinator;
+
+  // Coordinator for handling the credential export flow.
+  CredentialExportCoordinator* _credentialExportCoordinator;
 }
 
 #pragma mark - ChromeCoordinator
@@ -359,6 +363,19 @@ const NSInteger kErrorUserDismissedUpdateGPMPinFlow = -105;
 }
 
 - (void)startExportFlow {
+  if (@available(iOS 26, *)) {
+    if (CredentialExchangeEnabled()) {
+      _credentialExportCoordinator = [[CredentialExportCoordinator alloc]
+          initWithBaseNavigationController:_settingsNavigationController
+                                   browser:self.browser
+                   savedPasswordsPresenter:_savedPasswordsPresenter.get()
+                              passkeyModel:IOSPasskeyModelFactory::
+                                               GetForProfile(self.profile)];
+      [_credentialExportCoordinator start];
+      return;
+    }
+  }
+
   UIAlertController* exportConfirmation = [UIAlertController
       alertControllerWithTitle:nil
                        message:l10n_util::GetNSString(

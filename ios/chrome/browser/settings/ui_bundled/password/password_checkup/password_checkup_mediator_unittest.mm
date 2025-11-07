@@ -118,9 +118,9 @@ class PasswordCheckupMediatorTest : public PlatformTest {
 
  private:
   web::WebTaskEnvironment task_environment_;
-  raw_ptr<TestProfileIOS, DanglingUntriaged> profile_;
   IOSChromeScopedTestingLocalState scoped_testing_local_state_;
   TestProfileManagerIOS profile_manager_;
+  raw_ptr<TestProfileIOS> profile_;
   scoped_refptr<IOSChromePasswordCheckManager> password_check_;
   id consumer_;
   PasswordCheckupMediator* mediator_;
@@ -211,7 +211,7 @@ TEST_F(PasswordCheckupMediatorTest,
       passwordCheckStateDidChange:PasswordCheckState::kSignedOut];
 
   // Add a weak password. This password shouldn't be taken into account in the
-  // `insecurePasswordCounts` passed to the conusmer since an error occured.
+  // `insecurePasswordCounts` passed to the conusmer since an error occurred.
   PasswordForm form2 = CreatePasswordForm();
   AddIssueToForm(&form2, InsecureType::kWeak);
   GetTestStore().AddLogin(form2);

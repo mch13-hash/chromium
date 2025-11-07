@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/feature_list.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/companion/text_finder/text_finder_manager.h"
 #include "chrome/browser/companion/text_finder/text_highlighter_manager.h"
@@ -106,7 +107,7 @@ bool IsSiteTrusted(const GURL& url) {
   return false;
 }
 
-SidePanelUI* GetSidePanelUI(LensOverlayController* controller) {
+SidePanelUI* GetSidePanelUI(LensSearchController* controller) {
   return controller->GetTabInterface()
       ->GetBrowserWindowInterface()
       ->GetFeatures()
@@ -169,19 +170,17 @@ void LensOverlaySidePanelCoordinator::RegisterEntryAndShow() {
 
   state_ = State::kOpeningSidePanel;
   RegisterEntry();
-  GetSidePanelUI(GetLensOverlayController())
+  GetSidePanelUI(GetLensSearchController())
       ->Show(SidePanelEntry::Id::kLensOverlayResults);
   GetLensOverlayController()->NotifyResultsPanelOpened();
 
   // Create the initialization data for this journey.
   initialization_data_ = std::make_unique<SidePanelInitializationData>();
+}
 
-  // Store reference to the side panel coordinator for this journey.
-  side_panel_coordinator_ = lens_search_controller_->GetTabInterface()
-                                ->GetBrowserWindowInterface()
-                                ->GetFeatures()
-                                .side_panel_coordinator();
-  CHECK(side_panel_coordinator_);
+SidePanelEntry::PanelType LensOverlaySidePanelCoordinator::GetPanelType()
+    const {
+  return SidePanelEntry::PanelType::kContent;
 }
 
 void LensOverlaySidePanelCoordinator::RecordAndShowSidePanelErrorPage() {
@@ -194,7 +193,6 @@ void LensOverlaySidePanelCoordinator::RecordAndShowSidePanelErrorPage() {
 
 void LensOverlaySidePanelCoordinator::SetSidePanelNewTabUrl(const GURL& url) {
   side_panel_new_tab_url_ = lens::RemoveSidePanelURLParameters(url);
-  side_panel_coordinator_->UpdateNewTabButtonState();
 }
 
 void LensOverlaySidePanelCoordinator::OnEntryWillHide(
@@ -290,7 +288,7 @@ bool LensOverlaySidePanelCoordinator::MaybeHandleContextualMediaLink(
 }
 
 bool LensOverlaySidePanelCoordinator::IsEntryShowing() {
-  auto* side_panel_ui = GetSidePanelUI(GetLensOverlayController());
+  auto* side_panel_ui = GetSidePanelUI(GetLensSearchController());
   if (!side_panel_ui) {
     return false;
   }
@@ -625,6 +623,7 @@ void LensOverlaySidePanelCoordinator::BindSidePanel(
   side_panel_receiver_.Bind(std::move(receiver));
   side_panel_page_.Bind(std::move(page));
 
+  SetIsOverlayShowing(GetLensOverlayController()->IsOverlayShowing());
   if (pending_side_panel_url_.has_value()) {
     side_panel_page_->LoadResultsInFrame(*pending_side_panel_url_);
     pending_side_panel_url_.reset();
@@ -748,9 +747,25 @@ void LensOverlaySidePanelCoordinator::AimResultsChanged(bool on_aim) {
   }
 }
 
+void LensOverlaySidePanelCoordinator::SetIsOverlayShowing(bool is_showing) {
+  if (base::FeatureList::IsEnabled(
+          lens::features::kLensSearchReinvocationAffordance) &&
+      side_panel_page_) {
+    side_panel_page_->SetIsOverlayShowing(is_showing);
+  }
+}
+
 void LensOverlaySidePanelCoordinator::FocusResultsFrame() {
   if (side_panel_page_) {
     side_panel_page_->FocusResultsFrame();
+  }
+}
+
+void LensOverlaySidePanelCoordinator::FocusSearchbox() {
+  auto* web_contents = GetSidePanelWebContents();
+  if (web_contents && side_panel_page_) {
+    web_contents->Focus();
+    side_panel_page_->FocusSearchbox();
   }
 }
 
@@ -781,10 +796,6 @@ void LensOverlaySidePanelCoordinator::DeregisterEntryAndCleanup() {
   // This is a no-op if the entry does not exist.
   registry->Deregister(
       SidePanelEntry::Key(SidePanelEntry::Id::kLensOverlayResults));
-
-  // Remove the reference to the side panel coordinator to prevent dangling
-  // pointers.
-  side_panel_coordinator_ = nullptr;
 
   // Cleanup internal state.
   side_panel_receiver_.reset();
@@ -905,7 +916,10 @@ void LensOverlaySidePanelCoordinator::DidStartNavigation(
   }
 
   // If the search URL should be opened in a new tab, open it here.
-  if (ShouldOpenSearchURLInNewTab(nav_url)) {
+  auto* const profile = lens_search_controller_->GetTabInterface()
+                            ->GetBrowserWindowInterface()
+                            ->GetProfile();
+  if (ShouldOpenSearchURLInNewTab(nav_url, lens::IsAimM3Enabled(profile))) {
     lens_search_controller_->GetTabInterface()
         ->GetBrowserWindowInterface()
         ->OpenGURL(nav_url, WindowOpenDisposition::NEW_FOREGROUND_TAB);
@@ -939,6 +953,9 @@ void LensOverlaySidePanelCoordinator::DidStartNavigation(
     return;
   }
   SetSidePanelIsLoadingResults(true);
+  // Notify the Composebox Controller that a new navigation has started so the
+  // AIM handshake is no longer established.
+  GetLensComposeboxController()->ResetAimHandshake();
 }
 
 void LensOverlaySidePanelCoordinator::DOMContentLoaded(
@@ -1157,7 +1174,8 @@ LensOverlaySidePanelCoordinator::CreateLensOverlayResultsView(
 
 GURL LensOverlaySidePanelCoordinator::GetSidePanelNewTabUrl() {
   return lens::GetSidePanelNewTabUrl(
-      side_panel_new_tab_url_, GetLensOverlayController()->GetVsridForNewTab());
+      side_panel_new_tab_url_,
+      GetLensOverlayQueryController()->GetVsridForNewTab());
 }
 
 void LensOverlaySidePanelCoordinator::ShowToast(std::string message) {

@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_
 #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_
 
+#include <memory>
+
 #include "base/memory/raw_ptr.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/geometry/insets.h"
@@ -19,8 +21,7 @@ class RoundedOmniboxResultsFrame : public views::View {
 
  public:
   RoundedOmniboxResultsFrame(views::View* contents,
-                             LocationBarView* location_bar,
-                             bool include_cutout = true);
+                             LocationBarView* location_bar);
   RoundedOmniboxResultsFrame(const RoundedOmniboxResultsFrame&) = delete;
   RoundedOmniboxResultsFrame& operator=(const RoundedOmniboxResultsFrame&) =
       delete;
@@ -39,6 +40,14 @@ class RoundedOmniboxResultsFrame : public views::View {
   // Returns the blur region taken up by the Omnibox popup shadows.
   static gfx::Insets GetShadowInsets();
 
+  // Removes the `contents_` view and returns ownership to the caller.
+  std::unique_ptr<views::View> ExtractContents();
+
+  // Returns the `contents_` view.
+  views::View* GetContents();
+
+  void SetCutoutVisibility(bool visible);
+
   // views::View:
   void Layout(PassKey) override;
   void AddedToWidget() override;
@@ -53,7 +62,6 @@ class RoundedOmniboxResultsFrame : public views::View {
   raw_ptr<views::View> top_background_ = nullptr;
   raw_ptr<views::View> contents_host_ = nullptr;
   raw_ptr<views::View> contents_;
-  bool include_cutout_ = true;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_OMNIBOX_ROUNDED_OMNIBOX_RESULTS_FRAME_H_

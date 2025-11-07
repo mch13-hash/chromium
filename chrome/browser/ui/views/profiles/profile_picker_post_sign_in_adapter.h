@@ -45,8 +45,6 @@ class WebContents;
 //   acts as its delegate to interact with `host`.
 //   2) At the end of the flow the host is closed and a browser is opened,
 //   via `FinishAndOpenBrowser().
-// TODO(crbug.com/404806750): Update the documentation as we add more cases for
-// the History Sync Optin screen.
 class ProfilePickerPostSignInAdapter : public content::WebContentsDelegate,
                                        public HistorySyncOptinHelper::Delegate {
  public:
@@ -128,7 +126,8 @@ class ProfilePickerPostSignInAdapter : public content::WebContentsDelegate,
   // HistorySyncOptinHelper::Delegate implementation:
   void ShowHistorySyncOptinScreen(
       Profile*,
-      base::OnceClosure history_optin_completed_closure) override;
+      HistorySyncOptinHelper::FlowCompletedCallback
+          history_optin_completed_callback) override;
   void ShowAccountManagementScreen(
       signin::SigninChoiceCallback on_account_management_screen_closed)
       override;
@@ -173,10 +172,10 @@ class ProfilePickerPostSignInAdapter : public content::WebContentsDelegate,
   // enterprise management.
   StepSwitchFinishedCallback step_switch_callback_;
 
-  // Steps to be executed after the user has made a choice in the sync
-  // confirmation screen or the history sync optin screen. Might be executed
-  // when the screen is also skipped.
-  base::OnceClosure on_sync_screen_closed_closure_;
+  // Steps to be executed after the user has made a choice in the history sync
+  // optin screen. Might be executed when the screen is also skipped.
+  HistorySyncOptinHelper::FlowCompletedCallback
+      on_post_signin_in_finished_callback_;
 
   std::unique_ptr<HistorySyncOptinHelper> history_sync_optin_helper_;
 

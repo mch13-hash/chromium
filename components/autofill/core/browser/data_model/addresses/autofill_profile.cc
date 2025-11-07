@@ -500,7 +500,7 @@ bool AutofillProfile::IsPresentButInvalid(FieldType type) const {
     case ADDRESS_HOME_ZIP:
       return !IsValidZip(data, AddressCountryCode(country),
                          base::FeatureList::IsEnabled(
-                             features::kAutofillZipCodeValidationAndMerging));
+                             features::kAutofillExtendZipCodeValidation));
 
     case PHONE_HOME_WHOLE_NUMBER:
       return !i18n::PhoneObject(data, country, /*infer_country_code=*/false)
@@ -558,7 +558,7 @@ int AutofillProfile::Compare(const AutofillProfile& profile) const {
 
   // When adding field types, ensure that they don't need to be added here and
   // update the last checked value.
-  static_assert(FieldType::MAX_VALID_FIELD_TYPE == 206,
+  static_assert(FieldType::MAX_VALID_FIELD_TYPE == 207,
                 "New field type needs to be reviewed for inclusion in the "
                 "profile comparison logic.");
 

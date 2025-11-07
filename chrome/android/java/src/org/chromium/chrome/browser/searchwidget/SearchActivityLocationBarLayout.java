@@ -61,7 +61,6 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
         mIsIncognito = locationBarDataProvider.isIncognitoBranded();
         mPendingSearchPromoDecision = LocaleManager.getInstance().needToCheckForSearchEnginePromo();
         mAutocompleteCoordinator.setShouldPreventOmniboxAutocomplete(mPendingSearchPromoDecision);
-        findViewById(R.id.url_action_container).setVisibility(View.VISIBLE);
 
         var backgroundDrawable = ToolbarPhone.createModernLocationBarBackground(getContext());
         backgroundDrawable.setBackgroundColor(
@@ -73,7 +72,9 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
         // Replicate LocationBarBackground bounds from ToolbarPhone.
         int verticalInsets =
                 getResources().getDimensionPixelSize(R.dimen.location_bar_vertical_margin)
-                        - OmniboxResourceProvider.getToolbarOnFocusHeightIncrease(getContext()) / 2;
+                        - OmniboxResourceProvider.getLocationBarBackgroundOnFocusHeightIncrease(
+                                        getContext())
+                                / 2;
         backgroundDrawable.setInsets(0, verticalInsets, 0, verticalInsets);
 
         setBackground(backgroundDrawable);

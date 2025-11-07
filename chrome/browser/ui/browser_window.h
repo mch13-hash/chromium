@@ -90,26 +90,21 @@ class NativeTheme;
 class ThemeProvider;
 }  // namespace ui
 
-namespace views {
-class Button;
-class WebView;
-}  // namespace views
-
 namespace web_modal {
 class WebContentsModalDialogHost;
 }
 
 enum class ShowTranslateBubbleResult {
   // The Full Page Translate bubble was successfully shown.
-  SUCCESS,
+  kSuccess,
 
   // The various reasons for which the Full Page Translate bubble could fail to
   // be shown.
-  BROWSER_WINDOW_NOT_VALID,
-  BROWSER_WINDOW_MINIMIZED,
-  BROWSER_WINDOW_NOT_ACTIVE,
-  WEB_CONTENTS_NOT_ACTIVE,
-  EDITABLE_FIELD_IS_ACTIVE,
+  kBrowserWindowNotValid,
+  kBrowserWindowMinimized,
+  kBrowserWindowNotActive,
+  kWebContentsNotActive,
+  kEditableFieldIsActive,
 };
 
 enum class BrowserThemeChangeType {
@@ -297,12 +292,16 @@ class BrowserWindow : public ui::BaseWindow {
   virtual bool IsForceFullscreen() const = 0;
   virtual void SetForceFullscreen(bool force_fullscreen) = 0;
 
-  // Returns the size of WebContents in the browser. This may be called before
-  // the TabStripModel has an active tab.
+  // Returns the size of `WebContents` in the browser. This may be called before
+  // the `TabStripModel` has an active tab.
+  // Returns the size of the active `WebContents` if in a split view.
   virtual gfx::Size GetContentsSize() const = 0;
 
-  // Resizes the window to fit a WebContents of a certain size. This should only
-  // be called after the TabStripModel has an active tab.
+  // Resizes the window to fit `WebContents` of a certain size. This should only
+  // be called after the `TabStripModel` has an active tab.
+  // If in a split view, this will resize the active `WebContents` to the
+  // specified size, while preserving the size ratio of the other
+  // `WebContents`.
   virtual void SetContentsSize(const gfx::Size& size) = 0;
 
   // Updates the visual state of the specified page action icon if present on
@@ -456,9 +455,6 @@ class BrowserWindow : public ui::BaseWindow {
                                bool show_signin_button) = 0;
 
 #if BUILDFLAG(IS_CHROMEOS)
-  // Returns the PageActionIconView for the Sharing Hub.
-  virtual views::Button* GetSharingHubIconButton() = 0;
-
   // Toggles the multitask menu on the browser frame size button.
   virtual void ToggleMultitaskMenu() = 0;
 #else
@@ -490,12 +486,6 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void ShowOneClickSigninConfirmation(
       const std::u16string& email,
       base::OnceCallback<void(bool)> confirmed_callback) = 0;
-
-  // Returns the TopContainerView.
-  virtual views::View* GetTopContainer() = 0;
-
-  // Returns the LensOverlayView.
-  virtual views::View* GetLensOverlayView() = 0;
 
   // Returns the DownloadBubbleUIController. Returns null if Download Bubble
   // UI is not enabled, or if the download toolbar button does not exist.
@@ -648,9 +638,6 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Shows the Chrome Labs bubble if enabled.
   virtual void ShowChromeLabs() = 0;
-
-  // Returns the WebView backing the tab-contents area of the BrowserWindow.
-  virtual views::WebView* GetContentsWebView() = 0;
 
   // In production code BrowserView is the only subclass for BrowserWindow. The
   // fact that this is not true in some tests is a problem with the tests. See

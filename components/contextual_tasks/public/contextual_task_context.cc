@@ -8,6 +8,17 @@
 
 namespace contextual_tasks {
 
+UrlAttachmentDecoratorData::UrlAttachmentDecoratorData() = default;
+UrlAttachmentDecoratorData::~UrlAttachmentDecoratorData() = default;
+UrlAttachmentDecoratorData::UrlAttachmentDecoratorData(
+    const UrlAttachmentDecoratorData&) = default;
+UrlAttachmentDecoratorData& UrlAttachmentDecoratorData::operator=(
+    const UrlAttachmentDecoratorData&) = default;
+UrlAttachmentDecoratorData::UrlAttachmentDecoratorData(
+    UrlAttachmentDecoratorData&&) = default;
+UrlAttachmentDecoratorData& UrlAttachmentDecoratorData::operator=(
+    UrlAttachmentDecoratorData&&) = default;
+
 UrlAttachment::UrlAttachment(const GURL& url) : url_(url) {}
 
 UrlAttachment::~UrlAttachment() = default;
@@ -17,17 +28,35 @@ GURL UrlAttachment::GetURL() const {
 }
 
 std::u16string UrlAttachment::GetTitle() const {
+  if (!decorator_data_.tab_strip_data.title.empty()) {
+    return decorator_data_.tab_strip_data.title;
+  }
+  if (!decorator_data_.history_data.title.empty()) {
+    return decorator_data_.history_data.title;
+  }
   return decorator_data_.fallback_title_data.title;
 }
 
-UrlAttachmentDecoratorData& UrlAttachment::GetDecoratorData() {
+gfx::Image UrlAttachment::GetFavicon() const {
+  return decorator_data_.favicon_data.image;
+}
+
+bool UrlAttachment::IsOpen() const {
+  return decorator_data_.tab_strip_data.is_open_in_tab_strip;
+}
+
+UrlAttachmentDecoratorData& UrlAttachment::GetMutableDecoratorDataForTesting() {
+  return decorator_data_;
+}
+
+UrlAttachmentDecoratorData& UrlAttachment::GetMutableDecoratorData() {
   return decorator_data_;
 }
 
 ContextualTaskContext::ContextualTaskContext(const ContextualTask& task)
     : task_id_(task.GetTaskId()) {
-  for (const auto& url : task.GetUrls()) {
-    urls_.emplace_back(url);
+  for (const auto& url_resource : task.GetUrlResources()) {
+    urls_.emplace_back(url_resource.url);
   }
 }
 
@@ -51,6 +80,11 @@ const base::Uuid& ContextualTaskContext::GetTaskId() const {
 
 const std::vector<UrlAttachment>& ContextualTaskContext::GetUrlAttachments()
     const {
+  return urls_;
+}
+
+std::vector<UrlAttachment>&
+ContextualTaskContext::GetMutableUrlAttachmentsForTesting() {
   return urls_;
 }
 

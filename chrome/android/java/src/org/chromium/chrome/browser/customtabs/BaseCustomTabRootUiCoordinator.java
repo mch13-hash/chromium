@@ -30,6 +30,7 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.OneShotCallback;
+import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.supplier.SupplierUtils;
 import org.chromium.chrome.R;
@@ -70,14 +71,11 @@ import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthCoordinatorFa
 import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthManager;
 import org.chromium.chrome.browser.layouts.LayoutManager;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
-import org.chromium.chrome.browser.page_info.ChromePageInfo;
-import org.chromium.chrome.browser.page_info.ChromePageInfoHighlight;
 import org.chromium.chrome.browser.pdf.PdfPageIphController;
 import org.chromium.chrome.browser.privacy_sandbox.ActivityTypeMapper;
 import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxBridge;
 import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxDialogController;
 import org.chromium.chrome.browser.privacy_sandbox.SurfaceType;
-import org.chromium.chrome.browser.privacy_sandbox.TrackingProtectionSnackbarController;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.readaloud.ReadAloudIphController;
 import org.chromium.chrome.browser.reengagement.ReengagementNotificationController;
@@ -99,6 +97,7 @@ import org.chromium.chrome.browser.ui.appmenu.AppMenuBlocker;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuCoordinator;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuDelegate;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuHandler;
+import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTask;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeController;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
 import org.chromium.chrome.browser.ui.google_bottom_bar.GoogleBottomBarCoordinator;
@@ -111,7 +110,6 @@ import org.chromium.chrome.browser.ui.web_app_header.WebAppHeaderUtils;
 import org.chromium.components.browser_ui.desktop_windowing.DesktopWindowStateManager;
 import org.chromium.components.browser_ui.widget.MenuOrKeyboardActionController;
 import org.chromium.components.feature_engagement.Tracker;
-import org.chromium.components.page_info.PageInfoController.OpenedFromSource;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -141,12 +139,12 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
     private @Nullable CustomTabHistoryIphController mCustomTabHistoryIphController;
     private @Nullable ReadAloudIphController mReadAloudIphController;
     private @Nullable GoogleBottomBarCoordinator mGoogleBottomBarCoordinator;
-    private @Nullable TrackingProtectionSnackbarController mTrackingProtectionSnackbarController;
 
     private @Nullable EdgeToEdgeSupplier.ChangeObserver mEdgeToEdgeChangeObserver;
     private final @NonNull Runnable mOpenInBrowserRunnable;
     private @Nullable WebAppHeaderLayoutCoordinator mWebAppHeaderLayoutCoordinator;
     private final Supplier<BrowserServicesThemeColorProvider> mWebAppThemeColorProvider;
+    private final @Nullable String mClientPackageName;
     private boolean mHeaderAsOverlay;
 
     // TODO(crbug.com/402213312): This can be NonNull once the flag is enabled by default.
@@ -165,6 +163,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
      * @param tabModelSelectorSupplier Supplies the {@link TabModelSelector}.
      * @param browserControlsManager Manages the browser controls.
      * @param windowAndroid The current {@link WindowAndroid}.
+     * @param chromeAndroidTaskSupplier Supplies an {@link ChromeAndroidTask}.
      * @param activityLifecycleDispatcher Allows observation of the activity lifecycle.
      * @param layoutManagerSupplier Supplies the {@link LayoutManager}.
      * @param menuOrKeyboardActionController Controls the menu or keyboard action controller.
@@ -193,6 +192,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
      * @param edgeToEdgeManager Manages core edge-to-edge state and logic.
      * @param desktopWindowStateManager Provides information about desktop windowing state.
      * @param webAppThemeColorProvider Provides current theme of a web app.
+     * @param clientPackageName If provided, the client package name of the embedder
      */
     public BaseCustomTabRootUiCoordinator(
             @NonNull AppCompatActivity activity,
@@ -205,6 +205,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
             @NonNull ObservableSupplier<TabModelSelector> tabModelSelectorSupplier,
             @NonNull BrowserControlsManager browserControlsManager,
             @NonNull ActivityWindowAndroid windowAndroid,
+            @NonNull OneshotSupplier<ChromeAndroidTask> chromeAndroidTaskSupplier,
             @NonNull ActivityLifecycleDispatcher activityLifecycleDispatcher,
             @NonNull ObservableSupplier<LayoutManagerImpl> layoutManagerSupplier,
             @NonNull MenuOrKeyboardActionController menuOrKeyboardActionController,
@@ -234,7 +235,8 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
             @NonNull Runnable openInBrowserRunnable,
             @NonNull EdgeToEdgeManager edgeToEdgeManager,
             @Nullable DesktopWindowStateManager desktopWindowStateManager,
-            @Nullable Supplier<BrowserServicesThemeColorProvider> webAppThemeColorProvider) {
+            @Nullable Supplier<BrowserServicesThemeColorProvider> webAppThemeColorProvider,
+            @Nullable String clientPackageName) {
         super(
                 activity,
                 null,
@@ -250,6 +252,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                 new OneshotSupplierImpl<>(),
                 browserControlsManager,
                 windowAndroid,
+                chromeAndroidTaskSupplier,
                 activityLifecycleDispatcher,
                 layoutManagerSupplier,
                 menuOrKeyboardActionController,
@@ -283,6 +286,7 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
         mIntentDataProvider = intentDataProvider;
         mCustomTabSearchClient = new SearchActivityClientImpl(activity, IntentOrigin.CUSTOM_TAB);
         mWebAppThemeColorProvider = webAppThemeColorProvider;
+        mClientPackageName = clientPackageName;
 
         boolean isAuthTab = intentDataProvider.get().isAuthTab();
         if ((activityType == ActivityType.CUSTOM_TAB || isAuthTab)
@@ -533,11 +537,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                                                 /* showAppMenuTextBubble= */ false);
                             }
                         }));
-
-        SupplierUtils.waitForAll(
-                () -> initializeTrackingProtectionSnackbarController(),
-                mActivityTabProvider,
-                mProfileSupplier);
     }
 
     @Override
@@ -549,24 +548,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
         if (googleBottomBarCoordinator != null) {
             googleBottomBarCoordinator.initDefaultSearchEngine(
                     currentlySelectedProfile.getOriginalProfile());
-        }
-    }
-
-    private void initializeTrackingProtectionSnackbarController() {
-        if (ChromeFeatureList.isEnabled(
-                        ChromeFeatureList.TRACKING_PROTECTION_USER_BYPASS_PWA_TRIGGER)
-                && mActivityType == ActivityType.WEB_APK) {
-
-            Profile profile = mProfileSupplier.get();
-            assert profile != null;
-            mTrackingProtectionSnackbarController =
-                    new TrackingProtectionSnackbarController(
-                            getPageInfoSnackbarOnAction(),
-                            mSnackbarManagerSupplier,
-                            mActivityTabProvider.get().getWebContents(),
-                            profile,
-                            mActivityType,
-                            profile.isIncognitoBranded());
         }
     }
 
@@ -795,7 +776,8 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                             mAppMenuSupplier,
                             mBrowserControlsManager.getBrowserVisibilityDelegate(),
                             mWindowAndroid,
-                            () -> mCompositorViewHolderSupplier.get().requestFocus());
+                            () -> mCompositorViewHolderSupplier.get().requestFocus(),
+                            mClientPackageName);
             mBrowserControlsManager.addObserver(mWebAppHeaderLayoutCoordinator);
         }
     }
@@ -831,6 +813,20 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
     }
 
     @Override
+    protected int getFindToolbarStub() {
+        var intentDataProvider = mIntentDataProvider.get();
+        // For PWAs, we have our own app header with a layout that doesn't use
+        // control_container. We need to handle the find toolbar accordingly and use the appropriate
+        // stub.
+        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity)) {
+            return WebAppHeaderUtils.isWebAppHeaderEnabled(intentDataProvider)
+                    ? WebAppHeaderUtils.getWebAppHeaderFindToolbarTabletId()
+                    : R.id.find_toolbar_tablet_stub;
+        }
+        return R.id.find_toolbar_stub;
+    }
+
+    @Override
     protected void onFindToolbarShown() {
         super.onFindToolbarShown();
         CustomTabToolbar toolbar = mActivity.findViewById(R.id.toolbar);
@@ -861,11 +857,16 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
         if (mEdgeToEdgeControllerSupplier.get() != null) {
             mEdgeToEdgeChangeObserver =
                     (int bottomInset, boolean isDrawingToEdge, boolean isPageOptInToEdge) -> {
+                        var systemBarColorHelper =
+                                mEdgeToEdgeManager != null
+                                        ? mEdgeToEdgeManager.getEdgeToEdgeSystemBarColorHelper()
+                                        : null;
                         CustomTabNavigationBarController.update(
                                 mWindowAndroid.getWindow(),
                                 mIntentDataProvider.get(),
                                 mActivity,
-                                isDrawingToEdge && isPageOptInToEdge);
+                                isDrawingToEdge && isPageOptInToEdge,
+                                systemBarColorHelper);
                     };
             mEdgeToEdgeControllerSupplier.get().registerObserver(mEdgeToEdgeChangeObserver);
         }
@@ -1018,15 +1019,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
                                                 mAppMenuCoordinator.getAppMenuHandler(),
                                                 /* isBrowserApp= */ false);
                             }
-
-                            if (!didShowPrompt
-                                    && ChromeFeatureList.isEnabled(
-                                            ChromeFeatureList
-                                                    .TRACKING_PROTECTION_USER_BYPASS_PWA_TRIGGER)
-                                    && mActivityType == ActivityType.WEB_APK
-                                    && mTrackingProtectionSnackbarController != null) {
-                                mTrackingProtectionSnackbarController.maybeTriggerSnackbar();
-                            }
                         }));
         SupplierUtils.waitForAll(
                 () -> maybeRecordPrivacySandboxActivityType(),
@@ -1046,20 +1038,6 @@ public class BaseCustomTabRootUiCoordinator extends RootUiCoordinator {
         PrivacySandboxBridge privacySandboxBridge =
                 new PrivacySandboxBridge(mProfileSupplier.get());
         privacySandboxBridge.recordActivityType(privacySandboxStorageActivityType);
-    }
-
-    private Runnable getPageInfoSnackbarOnAction() {
-        return () ->
-                new ChromePageInfo(
-                                mModalDialogManagerSupplier,
-                                null,
-                                OpenedFromSource.WEBAPK_SNACKBAR,
-                                getMerchantTrustSignalsCoordinatorSupplier()::get,
-                                getEphemeralTabCoordinatorSupplier(),
-                                mTabCreatorManagerSupplier
-                                        .get()
-                                        .getTabCreator(mProfileSupplier.get().isOffTheRecord()))
-                        .show(mActivityTabProvider.get(), ChromePageInfoHighlight.noHighlight());
     }
 
     CustomTabHeightStrategy getCustomTabSizeStrategyForTesting() {

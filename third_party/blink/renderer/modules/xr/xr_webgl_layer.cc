@@ -149,9 +149,11 @@ XRWebGLLayer* XRWebGLLayer::Create(XRSession* session,
     return nullptr;
   }
 
-  return MakeGarbageCollected<XRWebGLLayer>(
+  auto* result = MakeGarbageCollected<XRWebGLLayer>(
       session, webgl_context, std::move(drawing_buffer), framebuffer,
       framebuffer_scale, ignore_depth_values);
+  result->CreateLayerBackend();
+  return result;
 }
 
 XRWebGLLayer::XRWebGLLayer(XRSession* session,
@@ -469,7 +471,8 @@ void XRWebGLLayer::OnFrameEnd() {
       }
 
       // Always call submit, but notify if the contents were changed or not.
-      session()->xr()->frameProvider()->SubmitLayer(this, framebuffer_dirty);
+      session()->xr()->frameProvider()->SubmitLayer(layer_id(), this,
+                                                    framebuffer_dirty);
     }
   }
 }
@@ -501,6 +504,34 @@ XRSession* XRWebGLLayer::session() const {
 
 XRFrameTransportDelegate* XRWebGLLayer::GetTransportDelegate() {
   return transport_delegate_;
+}
+
+XrLayerClient* XRWebGLLayer::LayerClient() {
+  return this;
+}
+
+device::mojom::blink::XRCompositionLayerDataPtr XRWebGLLayer::CreateLayerData()
+    const {
+  auto layer_data = device::mojom::blink::XRCompositionLayerData::New();
+  // Readonly data.
+  layer_data->read_only_data = device::mojom::blink::XRLayerReadOnlyData::New();
+  layer_data->read_only_data->layer_id = layer_id();
+  layer_data->read_only_data->texture_width = framebufferWidth();
+  layer_data->read_only_data->texture_height = framebufferHeight();
+  // Mutable data.
+  layer_data->mutable_data = device::mojom::blink::XRLayerMutableData::New();
+  layer_data->mutable_data->blend_texture_source_alpha = false;
+  layer_data->mutable_data->opacity = 1UL;
+  layer_data->mutable_data->native_origin_information =
+      device::mojom::blink::XRNativeOriginInformation::NewReferenceSpaceType(
+          device::mojom::blink::XRReferenceSpaceType::kLocal);
+
+  // Applies an empty projection layer data.
+  layer_data->mutable_data->layer_data =
+      device::mojom::blink::XRLayerSpecificData::NewProjection(
+          device::mojom::blink::XRProjectionLayerData::New());
+
+  return layer_data;
 }
 
 void XRWebGLLayer::Trace(Visitor* visitor) const {

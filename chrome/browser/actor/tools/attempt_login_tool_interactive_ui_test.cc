@@ -10,6 +10,7 @@
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/execution_engine.h"
 #include "chrome/browser/actor/tools/tools_test_util.h"
+#include "chrome/browser/glic/host/glic_features.mojom.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/glic/test_support/interactive_test_util.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -50,26 +51,63 @@ class MockExecutionEngine : public ExecutionEngine {
 };
 
 using AttemptLoginToolInteractiveUiTestBase =
-    InteractiveBrowserTestT<ActorToolsTest>;
+    InteractiveBrowserTestMixin<ActorToolsTest>;
 
 // TODO(crbug.com/441533831): We should migrate the Javascript tests to
 // typescript.
 class AttemptLoginToolInteractiveUiTest
-    : public glic::test::InteractiveGlicTestT<
-          AttemptLoginToolInteractiveUiTestBase> {
+    : public glic::test::InteractiveGlicTestMixin<
+          AttemptLoginToolInteractiveUiTestBase>,
+      public testing::WithParamInterface<bool> {
  public:
   AttemptLoginToolInteractiveUiTest() {
-    scoped_feature_list_.InitWithFeatures(
-        /*enabled_features=*/{password_manager::features::kActorLogin,
-                              actor::kGlicEnableAutoLoginDialogs},
-        /*disabled_features=*/{});
+    if (multi_instance_enabled()) {
+      scoped_feature_list_.InitWithFeatures(
+          /*enabled_features=*/{password_manager::features::kActorLogin,
+                                actor::kGlicEnableAutoLoginDialogs,
+                                features::kGlicMultiInstance,
+                                glic::mojom::features::kGlicMultiTab},
+          /*disabled_features=*/{});
+    } else {
+      scoped_feature_list_.InitWithFeatures(
+          /*enabled_features=*/{password_manager::features::kActorLogin,
+                                actor::kGlicEnableAutoLoginDialogs},
+          /*disabled_features=*/{features::kGlicMultiInstance,
+                                 glic::mojom::features::kGlicMultiTab});
+    }
   }
   ~AttemptLoginToolInteractiveUiTest() override = default;
 
+  bool multi_instance_enabled() { return GetParam(); }
+
   void SetUpOnMainThread() override {
-    glic::test::InteractiveGlicTestT<
+    glic::test::InteractiveGlicTestMixin<
         AttemptLoginToolInteractiveUiTestBase>::SetUpOnMainThread();
     ASSERT_TRUE(embedded_https_test_server().Start());
+
+    // Open glic window and track instance.
+    RunTestSequence(OpenGlicWindow(GlicWindowMode::kDetached));
+    TrackGlicInstanceWithTabIndex(
+        InProcessBrowserTest::browser()->tab_strip_model()->active_index());
+    // Create new task with instance as ActorTaskDelegate.
+    base::test::TestFuture<
+        base::expected<int32_t, glic::mojom::CreateTaskErrorReason>>
+        create_task_future;
+    if (multi_instance_enabled()) {
+      ASSERT_TRUE(GetGlicInstanceImpl());
+      GetGlicInstanceImpl()->CreateTask(nullptr, nullptr,
+                                        create_task_future.GetCallback());
+    } else {
+      glic::GlicKeyedService* service = glic::GlicKeyedService::Get(
+          InProcessBrowserTest::browser()->profile());
+      service->CreateTask(service->GetWeakPtr(), nullptr,
+                          create_task_future.GetCallback());
+    }
+    auto create_task_result = create_task_future.Get();
+    ASSERT_TRUE(create_task_result.has_value());
+    task_id_ = TaskId(create_task_result.value());
+    actor_task().SetExecutionEngineForTesting(
+        CreateExecutionEngine(InProcessBrowserTest::browser()->profile()));
 
     ON_CALL(mock_execution_engine(), GetActorLoginService())
         .WillByDefault(ReturnRef(mock_login_service_));
@@ -92,7 +130,7 @@ class AttemptLoginToolInteractiveUiTest
     // Must enable the pixel output. Otherwise the PNG icons will not be
     // rendered.
     command_line->AppendSwitch(::switches::kEnablePixelOutputInTests);
-    glic::test::InteractiveGlicTestT<
+    glic::test::InteractiveGlicTestMixin<
         AttemptLoginToolInteractiveUiTestBase>::SetUpCommandLine(command_line);
   }
 
@@ -113,12 +151,13 @@ class AttemptLoginToolInteractiveUiTest
 
   const SkBitmap& red_bitmap() { return red_bitmap_; }
 
+ protected:
+  MockActorLoginService mock_login_service_;
+  favicon::MockFaviconService mock_favicon_service_;
+
  private:
   const SkBitmap red_bitmap_ = GenerateSquareBitmap(/*size=*/10, SK_ColorRED);
   const gfx::Image red_image_ = gfx::Image::CreateFrom1xBitmap(red_bitmap_);
-
-  MockActorLoginService mock_login_service_;
-  favicon::MockFaviconService mock_favicon_service_;
 
   base::test::ScopedFeatureList scoped_feature_list_;
 
@@ -127,10 +166,18 @@ class AttemptLoginToolInteractiveUiTest
 
 }  // namespace
 
-IN_PROC_BROWSER_TEST_F(AttemptLoginToolInteractiveUiTest, SmokeTest) {
+// TODO(https://crbug.com/456675144):
+// AttemptLoginToolInteractiveUiTest.SmokeTest is flaky on asan.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_SmokeTest DISABLED_SmokeTest
+#else
+#define MAYBE_SmokeTest SmokeTest
+#endif
+IN_PROC_BROWSER_TEST_P(AttemptLoginToolInteractiveUiTest, MAYBE_SmokeTest) {
   const GURL url =
       embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
   ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
   const bool immediately_available_to_login = true;
   mock_login_service().SetCredentials(std::vector{
       MakeTestCredential(u"username1", url, immediately_available_to_login),
@@ -140,7 +187,6 @@ IN_PROC_BROWSER_TEST_F(AttemptLoginToolInteractiveUiTest, SmokeTest) {
 
   // Toggle the glic window.
   RunTestSequence(
-      OpenGlicWindow(GlicWindowMode::kDetached),
       InAnyContext(WithElement(
           glic::test::kGlicContentsElementId,
           [](::ui::TrackedElement* el) mutable {
@@ -167,6 +213,8 @@ IN_PROC_BROWSER_TEST_F(AttemptLoginToolInteractiveUiTest, SmokeTest) {
                 response: {
                   taskId: request.taskId,
                   selectedCredentialId: request.credentials[1].id,
+                  // 1 corresponds to UserGrantedPermissionDuration.ALWAYS_ALLOW
+                  permissionDuration: 1,
                 }
               });
 
@@ -265,6 +313,11 @@ IN_PROC_BROWSER_TEST_F(AttemptLoginToolInteractiveUiTest, SmokeTest) {
       mock_login_service().last_credential_used();
   ASSERT_TRUE(last_credential_used.has_value());
   EXPECT_EQ(u"username2", last_credential_used->username);
+  EXPECT_TRUE(mock_login_service().last_permission_was_permanent());
 }
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         AttemptLoginToolInteractiveUiTest,
+                         testing::Bool());
 
 }  // namespace actor

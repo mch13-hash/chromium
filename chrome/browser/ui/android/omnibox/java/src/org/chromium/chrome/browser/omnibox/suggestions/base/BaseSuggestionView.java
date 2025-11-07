@@ -9,6 +9,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 import android.content.Context;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
@@ -16,7 +17,6 @@ import android.widget.ImageView;
 import androidx.annotation.LayoutRes;
 import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.content.res.AppCompatResources;
-import androidx.appcompat.widget.AppCompatImageView;
 
 import org.chromium.build.annotations.CheckDiscard;
 import org.chromium.build.annotations.NullMarked;
@@ -41,9 +41,10 @@ public class BaseSuggestionView<T extends View> extends SuggestionLayout {
     public final T contentView;
     public final ActionChipsView actionChipsView;
     public final RoundedCornerOutlineProvider decorationIconOutline;
-    private final List<ImageView> mActionButtons;
+    private final List<ActionButtonView> mActionButtons;
     private final SimpleSelectionController mActionButtonsHighlighter;
     private @Nullable Runnable mOnFocusViaSelectionListener;
+    private boolean mIsHovered;
 
     /**
      * Constructs a new suggestion view and inflates supplied layout as the contents view.
@@ -113,7 +114,7 @@ public class BaseSuggestionView<T extends View> extends SuggestionLayout {
     /**
      * @return List of Action views.
      */
-    public List<ImageView> getActionButtons() {
+    public List<ActionButtonView> getActionButtons() {
         return mActionButtons;
     }
 
@@ -140,10 +141,20 @@ public class BaseSuggestionView<T extends View> extends SuggestionLayout {
      */
     private void increaseActionButtonsCount(int desiredViewCount) {
         for (int index = mActionButtons.size(); index < desiredViewCount; index++) {
-            ImageView actionView = new AppCompatImageView(getContext());
+            ActionButtonView actionView = new ActionButtonView(getContext());
             actionView.setClickable(true);
             actionView.setFocusable(true);
             actionView.setScaleType(ImageView.ScaleType.CENTER);
+            actionView.setDuplicateParentStateEnabled(true);
+            actionView.setOnHoverListener(
+                    (v, event) -> {
+                        int action = event.getActionMasked();
+                        if (action == MotionEvent.ACTION_HOVER_ENTER
+                                || action == MotionEvent.ACTION_HOVER_EXIT) {
+                            updateHoverState(actionView, action == MotionEvent.ACTION_HOVER_ENTER);
+                        }
+                        return false;
+                    });
 
             actionView.setLayoutParams(
                     LayoutParams.forViewType(LayoutParams.SuggestionViewType.ACTION_BUTTON));
@@ -200,9 +211,54 @@ public class BaseSuggestionView<T extends View> extends SuggestionLayout {
     }
 
     @Override
+    public boolean onHoverEvent(MotionEvent event) {
+        boolean result = super.onHoverEvent(event);
+
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_HOVER_ENTER || action == MotionEvent.ACTION_HOVER_EXIT) {
+            mIsHovered = action == MotionEvent.ACTION_HOVER_ENTER;
+            for (ActionButtonView v : mActionButtons) {
+                v.onParentViewHoverChanged(mIsHovered);
+            }
+
+            updateHoverState(/* actionButtonView= */ null, false);
+        }
+
+        return result;
+    }
+
+    /**
+     * Update the hover state based on whether the suggestion view or any of child action button
+     * views is being hovered.
+     *
+     * @param actionButtonView An action button that receives the hovered event.
+     * @param isActionButtonHovered Whether this action button is hovered.
+     */
+    private void updateHoverState(
+            @Nullable ActionButtonView actionButtonView, boolean isActionButtonHovered) {
+        boolean isAnyActionButtonHovered = false;
+        if (actionButtonView != null) {
+            isAnyActionButtonHovered = isActionButtonHovered;
+        }
+        if (!isAnyActionButtonHovered) {
+            for (ActionButtonView v : mActionButtons) {
+                if (v != actionButtonView && v.isActionButtonHovered()) {
+                    isAnyActionButtonHovered = true;
+                    break;
+                }
+            }
+        }
+        setHovered(mIsHovered || isAnyActionButtonHovered);
+    }
+
+    @Override
     public void setSelected(boolean selected) {
         super.setSelected(selected);
         if (mActionButtonsHighlighter != null) mActionButtonsHighlighter.reset();
+        for (ActionButtonView v : mActionButtons) {
+            v.onParentViewSelected(selected);
+        }
+
         if (selected && mOnFocusViaSelectionListener != null) {
             mOnFocusViaSelectionListener.run();
         }

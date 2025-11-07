@@ -21,7 +21,6 @@
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/mailbox.h"
-#include "gpu/command_buffer/common/presentation_feedback_utils.h"
 #include "gpu/command_buffer/common/swap_buffers_flags.h"
 #include "gpu/command_buffer/service/gl_context_virtual.h"
 #include "gpu/command_buffer/service/gl_state_restorer_impl.h"
@@ -37,7 +36,6 @@
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "gpu/ipc/service/image_transport_surface.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_fence.h"
 #include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/switches.h"
@@ -92,7 +90,6 @@ gpu::ContextResult GLES2CommandBufferStub::Initialize(
       manager->shader_translator_cache(),
       manager->framebuffer_completeness_cache(), feature_info,
       manager->watchdog() /* progress_reporter */, manager->gpu_feature_info(),
-      manager->discardable_manager(),
       manager->shared_image_manager());
 
   // If the `fail_if_major_perf_caveat` context creation attribute was true

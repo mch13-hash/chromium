@@ -946,6 +946,18 @@ enum CSSSampleId {
     kOverscrollPosition = 884,
     kFontLanguageOverride = 885,
     kRubyOverhang = 886,
+    kRuleBreak = 887,
+    kRuleOutset = 888,
+    kColumnRuleVisibilityItems = 889,
+    kRowRuleVisibilityItems = 890,
+    kColumnRuleEdgeStartOutset = 891,
+    kColumnRuleEdgeEndOutset = 892,
+    kColumnRuleInteriorStartOutset = 893,
+    kColumnRuleInteriorEndOutset = 894,
+    kRowRuleEdgeStartOutset = 895,
+    kRowRuleEdgeEndOutset = 896,
+    kRowRuleInteriorStartOutset = 897,
+    kRowRuleInteriorEndOutset = 898,
 
     // 1. Add new features above this line (don't change the assigned numbers of
     //    the existing items).

@@ -29,6 +29,11 @@
     <application android:name="org.chromium.android_browsertests_apk.ChromeBrowserTestsApplication"
             android:label="ChromeBrowserTests"
             android:requestLegacyExternalStorage="true">
+
+        <!--
+          The default Activity started by Android browser tests.
+          It's a subclass of ChromeTabbedActivity.
+        -->
         <activity android:name="org.chromium.android_browsertests_apk.ChromeBrowserTestsActivity"
                   android:launchMode="singleTask"
                   android:theme="@style/Theme.Chromium.TabbedMode"
@@ -40,6 +45,36 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+        </activity>
+
+        <!--
+          Explicitly declare ChromeTabbedActivity for browser tests
+          that will start it besides the default Activity
+          (ChromeBrowserTestsActivity).
+
+          The taskAffinity attribute is set to an empty string to
+          ensure a ChromeTabbedActivity can be launched into a new Task
+          when its Intent has FLAG_ACTIVITY_NEW_TASK and
+          FLAG_ACTIVITY_MULTIPLE_TASK.
+        -->
+        <activity android:name="org.chromium.chrome.browser.ChromeTabbedActivity"
+                  android:theme="@style/Theme.Chromium.TabbedMode"
+                  android:exported="true"
+                  android:launchMode="singleTask"
+                  android:taskAffinity=""
+                  android:configChanges="orientation|keyboardHidden|keyboard|screenSize"
+                  android:hardwareAccelerated="true"
+                  android:process=":test_process">
+
+          <!--
+            Mirrors meta-data in the production manifest containing ChromeTabbedActivity.
+
+            This is needed to enable MultiInstanceManagerApi31 in browser tests.
+            See: https://source.chromium.org/chromium/chromium/src/+/main:chrome/android/java/src/org/chromium/chrome/browser/multiwindow/MultiWindowUtils.java;l=187-191;drc=0bcba72c5246a910240b311def40233f7d3f15af
+          -->
+          <meta-data
+                android:name="android.activity.launch_mode"
+                android:value="singleInstancePerTask"/>
         </activity>
 
         <activity android:name="org.chromium.chrome.browser.media.MediaLauncherActivity"
@@ -136,6 +171,10 @@
             android:name="androidx.startup.InitializationProvider"
             android:exported="false"
             tools:node="remove" />
+
+        <service android:name="org.chromium.build.gtest_apk.ProcessKeepaliveService"
+            android:process=":test_process"
+            android:exported="false" />
     </application>
 
     <instrumentation android:name="org.chromium.android_browsertests_apk.ChromeBrowserTestsInstrumentationTestRunner"

@@ -19,10 +19,8 @@ SessionRestoreInfobarModel::~SessionRestoreInfobarModel() = default;
 
 SessionRestoreInfobarModel::SessionRestoreInfobarModel(
     Profile& profile,
-    bool was_restarted,
     bool is_post_crash_launch)
     : profile_(profile),
-      was_restarted_(was_restarted),
       is_post_crash_launch_(is_post_crash_launch),
       initial_restore_on_startup_value_(
           profile_->GetPrefs()->GetInteger(prefs::kRestoreOnStartup)) {}
@@ -35,13 +33,13 @@ SessionRestoreInfobarModel::GetSessionRestoreMessageValue() const {
   // Get the value for chrome session restore.
   switch (restore_on_startup_value) {
     case 1:
-      return ContinueWhereLeftOff;
+      return SessionRestoreMessageValue::kContinueWhereLeftOff;
     case 4:
-      return OpenSpecificPages;
+      return SessionRestoreMessageValue::kOpenSpecificPages;
     case 5:
-      return OpenNewTabPage;
+      return SessionRestoreMessageValue::kOpenNewTabPage;
     default:
-      return OpenNewTabPage;
+      return SessionRestoreMessageValue::kOpenNewTabPage;
   }
 }
 
@@ -52,13 +50,10 @@ bool SessionRestoreInfobarModel::ShouldShowOnStartup() const {
 
   SessionRestoreMessageValue message_value = GetSessionRestoreMessageValue();
 
-  return message_value == SessionRestoreMessageValue::ContinueWhereLeftOff ||
-         message_value == SessionRestoreMessageValue::OpenNewTabPage;
+  return message_value == SessionRestoreMessageValue::kContinueWhereLeftOff ||
+         message_value == SessionRestoreMessageValue::kOpenNewTabPage;
 }
 
-bool SessionRestoreInfobarModel::IsBrowserRestarting() const {
-  return was_restarted_;
-}
 
 bool SessionRestoreInfobarModel::IsDefaultSessionRestorePref() const {
   const PrefService::Preference* pref =

@@ -5,16 +5,19 @@
 package org.chromium.chrome.browser.ui.browser_window;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
 import android.graphics.Rect;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTaskImpl.State;
 import org.chromium.chrome.browser.ui.browser_window.PendingActionManager.PendingAction;
 
 /** Unit tests for {@link PendingActionManager}. */
@@ -125,6 +128,10 @@ public class PendingActionManagerUnitTest {
                 "Bounds should be saved.",
                 TEST_SET_BOUNDS_INPUT_1,
                 mManager.getPendingBoundsInDp());
+        assertEquals(
+                "Restored bounds should be saved.",
+                TEST_SET_BOUNDS_INPUT_1,
+                mManager.getPendingRestoredBoundsInDp());
     }
 
     @Test
@@ -156,6 +163,10 @@ public class PendingActionManagerUnitTest {
                 "Bounds should be updated.",
                 TEST_SET_BOUNDS_INPUT_2,
                 mManager.getPendingBoundsInDp());
+        assertEquals(
+                "Restored bounds should be updated.",
+                TEST_SET_BOUNDS_INPUT_2,
+                mManager.getPendingRestoredBoundsInDp());
     }
 
     @Test
@@ -418,6 +429,86 @@ public class PendingActionManagerUnitTest {
         }
     }
 
+    @Test
+    public void testIsActiveFuture_afterRequestActivate_returnsTrue() {
+        // Arrange.
+        mManager.requestAction(PendingAction.ACTIVATE);
+
+        // Assert.
+        Assert.assertEquals(
+                "isActive should be true in the future when ACTIVATE is in progress",
+                true,
+                mManager.isActiveFuture(State.PENDING_CREATE));
+    }
+
+    @Test
+    public void testIsVisibleFuture_afterRequestShow_returnsTrue() {
+        // Arrange.
+        mManager.requestAction(PendingAction.SHOW);
+
+        // Assert.
+        Assert.assertTrue(
+                "isVisible should be true in the future when SHOW is in progress",
+                mManager.isVisibleFuture());
+    }
+
+    @Test
+    public void testIsMaximizedFuture_afterRequestMaximize_returnsTrue() {
+        // Arrange.
+        mManager.requestAction(PendingAction.MAXIMIZE);
+
+        // Assert.
+        Assert.assertTrue(
+                "isMaximized should be true in the future when MAXIMIZE is in progress",
+                mManager.isMaximizedFuture());
+    }
+
+    @Test
+    public void testIsActiveFuture_afterRequestMaximize_returnsTrue() {
+        // Arrange.
+        mManager.requestAction(PendingAction.MAXIMIZE);
+
+        // Assert.
+        Assert.assertEquals(
+                "isActive should be true in the future when MAXIMIZE is in progress",
+                true,
+                mManager.isActiveFuture(State.PENDING_UPDATE));
+    }
+
+    @Test
+    public void testSetBounds_afterSetBounds_returnsPendingBounds() {
+        // Arrange.
+        mManager.requestSetBounds(TEST_SET_BOUNDS_INPUT_1);
+
+        // Assert.
+        Assert.assertEquals(
+                "Should return pending bounds",
+                TEST_SET_BOUNDS_INPUT_1,
+                mManager.getPendingBoundsInDp());
+    }
+
+    @Test
+    public void testClearSetBounds_afterSetBounds_returnsNull() {
+        // Arrange.
+        mManager.requestSetBounds(TEST_SET_BOUNDS_INPUT_1);
+        mManager.getAndClearTargetPendingActions(PendingAction.SET_BOUNDS);
+
+        // Assert.
+        Assert.assertNull("Pending bounds should have been clear", mManager.getFutureBoundsInDp());
+    }
+
+    @Test
+    public void testGetAndClearTargetPendingActions_afterClear_stateReturnsNull() {
+        // Arrange.
+        mManager.requestAction(PendingAction.ACTIVATE);
+        assertEquals(true, mManager.isActiveFuture(State.PENDING_UPDATE));
+
+        mManager.getAndClearTargetPendingActions(PendingAction.ACTIVATE);
+        Assert.assertNull(
+                "No pending action affecting isActive's future state",
+                mManager.isActiveFuture(State.PENDING_UPDATE));
+    }
+
     private void doTestActionOverridesLowerPrecedenceAction(
             @PendingAction int action, @PendingAction int[] lowerPrecedenceActions) {
         doTestActionOverridesLowerPrecedenceAction(
@@ -427,7 +518,9 @@ public class PendingActionManagerUnitTest {
     private void doTestActionOverridesLowerPrecedenceAction(
             @PendingAction int action, @PendingAction int[] lowerPrecedenceActions, Rect bounds) {
         for (@PendingAction int lowerPrecedenceAction : lowerPrecedenceActions) {
-            if (lowerPrecedenceAction == action) continue;
+            if (lowerPrecedenceAction == action) {
+                continue;
+            }
 
             // Arrange.
             mManager.clearPendingActionsForTesting();
@@ -457,8 +550,19 @@ public class PendingActionManagerUnitTest {
                         "Primary action should be NONE.", PendingAction.NONE, pendingActions[0]);
             }
 
+            if (lowerPrecedenceAction == PendingAction.SET_BOUNDS) {
+                assertNull("Bounds should be cleared.", mManager.getPendingBoundsInDp());
+                assertNotNull(
+                        "Restored bounds should not be cleared.",
+                        mManager.getPendingRestoredBoundsInDp());
+            }
+
             if (action == PendingAction.SET_BOUNDS) {
                 assertEquals("Bounds should be saved.", bounds, mManager.getPendingBoundsInDp());
+                assertEquals(
+                        "Restored bounds should be saved.",
+                        bounds,
+                        mManager.getPendingRestoredBoundsInDp());
             }
         }
     }
@@ -526,6 +630,10 @@ public class PendingActionManagerUnitTest {
                             "Bounds should be preserved.",
                             TEST_SET_BOUNDS_INPUT_1,
                             mManager.getPendingBoundsInDp());
+                    assertEquals(
+                            "Restored bounds should be preserved.",
+                            TEST_SET_BOUNDS_INPUT_1,
+                            mManager.getPendingRestoredBoundsInDp());
                 }
             }
         }
@@ -567,6 +675,10 @@ public class PendingActionManagerUnitTest {
                             "Bounds should be saved.",
                             TEST_SET_BOUNDS_INPUT_2,
                             mManager.getPendingBoundsInDp());
+                    assertEquals(
+                            "Restored bounds should be saved.",
+                            TEST_SET_BOUNDS_INPUT_2,
+                            mManager.getPendingRestoredBoundsInDp());
                 }
             }
         }

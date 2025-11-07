@@ -97,23 +97,13 @@ NotifyObserversCallback(Functor&& functor, Args&&... args) {
 
 // Returns true if `live_form` has changed compared to `cached_form` in aspects
 // that may affect type predictions.
-// TODO(crbug.com/40183094): This should be some form of FormData::DeepEqual().
 bool NeedsReparse(const FormData& live_form, const FormStructure& cached_form) {
-  if (cached_form.version() > live_form.version()) {
-    return false;
-  }
-
-  if (live_form.fields().size() != cached_form.field_count()) {
-    return true;
-  }
-
-  for (auto [cached_field, live_field] :
-       base::zip(cached_form.fields(), live_form.fields())) {
-    if (!FormFieldData::DeepEqual(*cached_field, live_field)) {
-      return true;
-    }
-  }
-  return false;
+  return live_form.version() >= cached_form.version() &&
+         !std::ranges::equal(live_form.fields(), cached_form.fields(),
+                             [](const FormFieldData& f,
+                                const std::unique_ptr<AutofillField>& g) {
+                               return FormFieldData::DeepEqual(f, *g);
+                             });
 }
 
 bool IsCreditCardFormForSignaturePurposes(const FormStructure& form_structure) {
@@ -218,14 +208,13 @@ LanguageCode AutofillManager::GetCurrentPageLanguage() {
   return LanguageCode(language_state->current_language());
 }
 
-void AutofillManager::OnDidAutofillForm(const FormData& form,
-                                        const base::TimeTicks timestamp) {
+void AutofillManager::OnDidAutofillForm(const FormData& form) {
   if (!IsValidFormData(form)) {
     return;
   }
   NotifyObservers(&Observer::OnBeforeDidAutofillForm, form.global_id());
   ParseFormAsync(
-      form, ParsingCallback(&AutofillManager::OnDidAutofillFormImpl, timestamp)
+      form, ParsingCallback(&AutofillManager::OnDidAutofillFormImpl)
                 .Then(NotifyObserversCallback(&Observer::OnAfterDidAutofillForm,
                                               form.global_id())));
 }
@@ -286,16 +275,21 @@ void AutofillManager::OnFormsParsed(const std::vector<FormData>& forms) {
 
   std::vector<raw_ptr<const FormStructure, VectorExperimental>> queryable_forms;
   for (const FormData& form : forms) {
-    const FormStructure& form_structure =
-        CHECK_DEREF(FindCachedFormById(form.global_id()));
+    // The FormStructure might not exist if the form cache hit its capacity of
+    // `kAutofillManagerMaxFormCacheSize` and due to race conditions the initial
+    // check in ParseFormsAsync() was passed.
+    const FormStructure* form_structure = FindCachedFormById(form.global_id());
+    if (!form_structure) {
+      continue;
+    }
 
     // Configure the query encoding for this form and add it to the appropriate
     // collection of forms: queryable vs non-queryable.
-    if (ShouldBeQueried(form_structure)) {
-      queryable_forms.push_back(&form_structure);
+    if (ShouldBeQueried(*form_structure)) {
+      queryable_forms.push_back(form_structure);
     }
 
-    OnFormProcessed(form, form_structure);
+    OnFormProcessed(form, *form_structure);
   }
 
   if (base::FeatureList::IsEnabled(features::test::kShowDomNodeIDs)) {
@@ -547,11 +541,11 @@ AutofillManager::GetServerPredictionsForForm(
 }
 
 base::flat_map<FieldGlobalId, FieldType>
-AutofillManager::GetHeursticPredictionForForm(
+AutofillManager::GetHeuristicPredictionForForm(
     HeuristicSource source,
     FormGlobalId form_id,
     const std::vector<FieldGlobalId>& field_ids) const {
-  FormStructure* cached_form = FindCachedFormById(form_id);
+  const FormStructure* const cached_form = FindCachedFormById(form_id);
   if (!cached_form) {
     return {};
   }
@@ -935,8 +929,7 @@ void AutofillManager::OnLoadedServerPredictions(
 
   for (const raw_ptr<FormStructure, VectorExperimental> form : queried_forms) {
     form->RationalizeAndAssignSections(client().GetVariationConfigCountryCode(),
-                                       GetCurrentPageLanguage(), log_manager(),
-                                       /*legacy_order=*/true);
+                                       GetCurrentPageLanguage(), log_manager());
 
     autofill_metrics::LogQualityMetricsBasedOnAutocomplete(
         *form, client().GetFormInteractionsUkmLogger(),

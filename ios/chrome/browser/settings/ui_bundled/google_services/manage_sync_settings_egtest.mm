@@ -17,7 +17,7 @@
 #import "ios/chrome/browser/authentication/test/signin_matchers.h"
 #import "ios/chrome/browser/authentication/ui_bundled/views/views_constants.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_storage_type.h"
-#import "ios/chrome/browser/bookmarks/ui_bundled/bookmark_earl_grey.h"
+#import "ios/chrome/browser/bookmarks/test/bookmark_earl_grey.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_feature.h"
 #import "ios/chrome/browser/policy/model/policy_app_interface.h"
 #import "ios/chrome/browser/policy/model/policy_earl_grey_utils.h"
@@ -106,16 +106,9 @@ void SignOutFromAccountSettings() {
 
   // Tap the "Sign out" button.
   [[EarlGrey selectElementWithMatcher:
-                 grey_accessibilityLabel(l10n_util::GetNSString(
-                     IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SIGN_OUT_ITEM))]
-      performAction:grey_tap()];
-}
-
-void DismissSignOutSnackbar() {
-  // The tap checks the existence of the snackbar and also closes it.
-  NSString* snackbar_label = l10n_util::GetNSString(
-      IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SIGN_OUT_SNACKBAR_MESSAGE);
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(snackbar_label)]
+                 grey_allOf(grey_accessibilityLabel(l10n_util::GetNSString(
+                                IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SIGN_OUT_ITEM)),
+                            grey_userInteractionEnabled(), nil)]
       performAction:grey_tap()];
 }
 
@@ -233,7 +226,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
   [ChromeEarlGreyUI tapSettingsMenuButton:SettingsAccountButton()];
 
   SignOutFromAccountSettings();
-  DismissSignOutSnackbar();
+  [SigninEarlGreyUI dismissSignoutSnackbar];
   [ChromeEarlGreyUI waitForAppToIdle];
 
   [SigninEarlGrey verifySignedOut];
@@ -409,7 +402,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
       performAction:chrome_test_util::TurnTableViewSwitchOn(/*on=*/NO)];
 
   SignOutFromAccountSettings();
-  DismissSignOutSnackbar();
+  [SigninEarlGreyUI dismissSignoutSnackbar];
 
   [SigninEarlGrey verifySignedOut];
 
@@ -450,7 +443,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
       performAction:chrome_test_util::TurnTableViewSwitchOn(/*on=*/NO)];
 
   SignOutFromAccountSettings();
-  DismissSignOutSnackbar();
+  [SigninEarlGreyUI dismissSignoutSnackbar];
 
   [SigninEarlGrey verifySignedOut];
   [[EarlGrey
@@ -912,15 +905,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
 
 // Tests that the batch upload button description in the account settings
 // contains the correct string for reading list.
-// TODO(crbug.com/435139218): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testBulkUploadDescriptionTextForReadingList \
-  testBulkUploadDescriptionTextForReadingList
-#else
-#define MAYBE_testBulkUploadDescriptionTextForReadingList \
-  FLAKY_testBulkUploadDescriptionTextForReadingList
-#endif
-- (void)MAYBE_testBulkUploadDescriptionTextForReadingList {
+- (void)testBulkUploadDescriptionTextForReadingList {
   // Add local data.
   reading_list_test_utils::AddURLToReadingListWithSnackbarDismiss(
       GURL("https://example.com"), nil);
@@ -944,15 +929,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
 
 // Tests that the batch upload button description in the account settings
 // contains the correct string for passwords and other data type.
-// TODO(crbug.com/435139218): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testBulkUploadDescriptionTextForPasswordsAndOthers \
-  testBulkUploadDescriptionTextForPasswordsAndOthers
-#else
-#define MAYBE_testBulkUploadDescriptionTextForPasswordsAndOthers \
-  FLAKY_testBulkUploadDescriptionTextForPasswordsAndOthers
-#endif
-- (void)MAYBE_testBulkUploadDescriptionTextForPasswordsAndOthers {
+- (void)testBulkUploadDescriptionTextForPasswordsAndOthers {
   // Add local data.
   password_manager_test_utils::SavePasswordFormToProfileStore(
       @"password", @"user", @"https://example.com");
@@ -981,15 +958,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
 // - Passwords
 // - Bookmarks
 // - Reading list
-// TODO(crbug.com/435139218): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testBulkUploadPageForAllDataTypes \
-  testBulkUploadPageForAllDataTypes
-#else
-#define MAYBE_testBulkUploadPageForAllDataTypes \
-  FLAKY_testBulkUploadPageForAllDataTypes
-#endif
-- (void)MAYBE_testBulkUploadPageForAllDataTypes {
+- (void)testBulkUploadPageForAllDataTypes {
   // Add local data.
   password_manager_test_utils::SavePasswordFormToProfileStore(
       @"password", @"user", @"https://example.com");
@@ -1227,15 +1196,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
 // Tests that bulk upload moves the following data types to account:
 // - Bookmarks
 // - Reading List
-// TODO(crbug.com/435139218): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testBulkUploadForBookmarksAndReadingList \
-  testBulkUploadForBookmarksAndReadingList
-#else
-#define MAYBE_testBulkUploadForBookmarksAndReadingList \
-  FLAKY_testBulkUploadForBookmarksAndReadingList
-#endif
-- (void)MAYBE_testBulkUploadForBookmarksAndReadingList {
+- (void)testBulkUploadForBookmarksAndReadingList {
   // Add local data.
   password_manager_test_utils::SavePasswordFormToProfileStore(
       @"password", @"user", @"https://example.com");
@@ -1317,13 +1278,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
 // - Passwords
 // - Bookmarks
 // - Reading List
-// TODO(crbug.com/435139218): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testBulkUploadForAllDataTypes testBulkUploadForAllDataTypes
-#else
-#define MAYBE_testBulkUploadForAllDataTypes FLAKY_testBulkUploadForAllDataTypes
-#endif
-- (void)MAYBE_testBulkUploadForAllDataTypes {
+- (void)testBulkUploadForAllDataTypes {
   // Add local data.
   password_manager_test_utils::SavePasswordFormToProfileStore(
       @"password", @"user", @"https://example.com");
@@ -1613,7 +1568,7 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
 
   // Sign out.
   SignOutFromAccountSettings();
-  DismissSignOutSnackbar();
+  [SigninEarlGreyUI dismissSignoutSnackbar];
   [ChromeEarlGreyUI waitForAppToIdle];
   [SigninEarlGrey verifySignedOut];
 
@@ -1704,15 +1659,17 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
   [ChromeEarlGreyUI tapSettingsMenuButton:SettingsAccountButton()];
 
   // Scroll to the bottom to view all section.
-  id<GREYMatcher> scroll_view_matcher =
+  id<GREYMatcher> scrollViewMatcher =
       grey_accessibilityID(kManageSyncTableViewAccessibilityIdentifier);
-  [[EarlGrey selectElementWithMatcher:scroll_view_matcher]
+  [[EarlGrey selectElementWithMatcher:scrollViewMatcher]
       performAction:grey_scrollToContentEdge(kGREYContentEdgeBottom)];
 
   // Tap on switch account item.
-  [[EarlGrey selectElementWithMatcher:
-                 grey_accessibilityLabel(l10n_util::GetNSString(
-                     IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SWITCH_ACCOUNT_ITEM))]
+  [[EarlGrey
+      selectElementWithMatcher:
+          grey_allOf(grey_accessibilityLabel(l10n_util::GetNSString(
+                         IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SWITCH_ACCOUNT_ITEM)),
+                     grey_userInteractionEnabled(), nil)]
       performAction:grey_tap()];
 
   // Verify the account menu is shown.
@@ -1725,30 +1682,8 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
                                           kAccountMenuSecondaryAccountButtonId)]
       performAction:grey_tap()];
 
-  // Verify the account menu is closed.
-  ConditionBlock wait_for_disappearance = ^{
-    NSError* error;
-    // Checking if collection view does not exist in the UI hierarchy.
-    [[EarlGrey
-        selectElementWithMatcher:grey_accessibilityID(kAccountMenuTableViewId)]
-        assertWithMatcher:grey_nil()
-                    error:&error];
-
-    return error == nil;
-  };
-  // The account menu fades with animation; wait for 5 seconds to ensure the
-  // animation is completed.
-  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(
-                 base::Seconds(5), wait_for_disappearance),
-             @"Account menu did not disappear.");
-
   // Verify the account settings view remains on top of screen.
-  [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityID(
-                                   kManageSyncTableViewAccessibilityIdentifier)]
-      assertWithMatcher:grey_sufficientlyVisible()];
-
-  [[EarlGrey selectElementWithMatcher:scroll_view_matcher]
+  [[EarlGrey selectElementWithMatcher:scrollViewMatcher]
       performAction:grey_scrollToContentEdgeWithStartPoint(kGREYContentEdgeTop,
                                                            0.5, 0.25)];
   // And it displays the new account.
@@ -1781,9 +1716,11 @@ void ExpectBatchUploadConfirmationSnackbar(int count, NSString* email) {
       performAction:grey_scrollToContentEdge(kGREYContentEdgeBottom)];
 
   // Tap on switch account item.
-  [[EarlGrey selectElementWithMatcher:
-                 grey_accessibilityLabel(l10n_util::GetNSString(
-                     IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SWITCH_ACCOUNT_ITEM))]
+  [[EarlGrey
+      selectElementWithMatcher:
+          grey_allOf(grey_accessibilityLabel(l10n_util::GetNSString(
+                         IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_SWITCH_ACCOUNT_ITEM)),
+                     grey_userInteractionEnabled(), nil)]
       performAction:grey_tap()];
 
   // Verify the account menu is shown.

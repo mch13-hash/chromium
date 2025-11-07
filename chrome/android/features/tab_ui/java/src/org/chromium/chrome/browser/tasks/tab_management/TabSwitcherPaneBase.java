@@ -102,6 +102,8 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
             new ObservableSupplierImpl<>();
     private final ObservableSupplierImpl<@Nullable View> mOverlayViewSupplier =
             new ObservableSupplierImpl<>();
+    private final ObservableSupplierImpl<Boolean> mHubSearchBoxVisibilitySupplier =
+            new ObservableSupplierImpl<>();
     private final Callback<Boolean> mVisibilityObserver = this::onVisibilityChanged;
     private final Handler mHandler = new Handler();
     private final Runnable mSoftCleanupRunnable = this::softCleanupInternal;
@@ -210,6 +212,7 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
         mCompositorViewHolderSupplier = compositorViewHolderSupplier;
         mUiFlow = tabGroupCreationUiDelegate;
         mXrSpaceModeObservableSupplier = xrSpaceModeObservableSupplier;
+        mHairlineVisibilitySupplier.set(false);
     }
 
     @Override
@@ -288,6 +291,10 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
         return mReferenceButtonDataSupplier;
     }
 
+    /**
+     * Tab switcher pane manages its own hairline and hence, doesn't use central hub's hairline.
+     * Check {@link TabSwitcherPaneCoordinator} for more details.
+     */
     @Override
     public ObservableSupplier<Boolean> getHairlineVisibilitySupplier() {
         return mHairlineVisibilitySupplier;
@@ -453,18 +460,21 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
                         viewportRect.bottom = windowViewportRect.bottom;
                     }
 
-                    int leftOffset = 0;
+                    int initialLeftOffset = 0;
+                    int finalLeftOffset = 0;
                     int initialTopOffset = 0;
                     int finalTopOffset = 0;
                     if (isShrink) {
                         initialRect = viewportRect;
                         finalRect = coordinator.getTabThumbnailRect(tabId);
-                        leftOffset = initialRect.left;
+                        initialLeftOffset = initialRect.left;
+                        finalLeftOffset = hubRect.left;
                         finalTopOffset = hubRect.top;
                     } else {
                         initialRect = coordinator.getTabThumbnailRect(tabId);
                         finalRect = viewportRect;
-                        leftOffset = finalRect.left;
+                        initialLeftOffset = hubRect.left;
+                        finalLeftOffset = finalRect.left;
                         initialTopOffset = hubRect.top;
                     }
 
@@ -474,8 +484,8 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
                         useFallbackAnimation = true;
                     }
                     // Ignore left offset and just ensure the width is correct. See crbug/1502437.
-                    initialRect.offset(-leftOffset, -initialTopOffset);
-                    finalRect.offset(-leftOffset, -finalTopOffset);
+                    initialRect.offset(-initialLeftOffset, -initialTopOffset);
+                    finalRect.offset(-finalLeftOffset, -finalTopOffset);
                     animationDataSupplier.set(
                             ShrinkExpandAnimationData.createHubShrinkExpandAnimationData(
                                     initialRect,
@@ -647,7 +657,6 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
     void createTabSwitcherPaneCoordinator() {
         TabSwitcherPaneCoordinator coordinator = mTabSwitcherPaneCoordinatorSupplier.get();
         if (coordinator != null) return;
-
         coordinator =
                 mFactory.create(
                         mRootView,
@@ -655,17 +664,24 @@ public abstract class TabSwitcherPaneBase implements Pane, TabSwitcher, TabSwitc
                         mIsVisibleSupplier,
                         mIsAnimatingSupplier,
                         this::onTabClick,
-                        mHairlineVisibilitySupplier::set,
                         mIsIncognito,
                         getOnTabGroupCreationRunnable(),
                         mEdgeToEdgeSupplier,
-                        (view) -> mOverlayViewSupplier.set(assumeNonNull(view)));
+                        (view) -> mOverlayViewSupplier.set(assumeNonNull(view)),
+                        mHubSearchBoxVisibilitySupplier);
         mTabSwitcherPaneCoordinatorSupplier.set(coordinator);
         mTabSwitcherCustomViewManager.setDelegate(
                 coordinator.getTabSwitcherCustomViewManagerDelegate());
         if (mNativeInitialized) {
             coordinator.initWithNative();
         }
+    }
+
+    @Override
+    public ObservableSupplier<Boolean> getHubSearchBoxVisibilitySupplier() {
+        // TODO(crbug.com/445195388): Implement search visibility supplier for tab switcher for
+        //  search box auto-roll.
+        return mHubSearchBoxVisibilitySupplier;
     }
 
     /**

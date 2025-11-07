@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
-import("//build/config/features.gni")
 import("//content/public/common/features.gni")
 import("//pdf/features.gni")
 import("//services/screen_ai/buildflags/features.gni")
@@ -25,6 +24,10 @@ buildflag_header("buildflags") {
     "ENABLE_PDF_SAVE_TO_DRIVE=$enable_pdf_save_to_drive",
     "ENABLE_PDF=$enable_pdf",
   ]
+}
+
+source_set("pdf_accessibility_constants") {
+  public = [ "pdf_accessibility_constants.h" ]
 }
 
 if (enable_pdf) {
@@ -347,15 +350,20 @@ if (enable_pdf) {
       "accessibility_structs.cc",
       "accessibility_structs.h",
       "pdf_accessibility_action_handler.h",
+      "pdf_accessibility_constants_helper.cc",
+      "pdf_accessibility_constants_helper.h",
       "pdf_accessibility_data_handler.h",
     ]
 
     configs += [ ":strict" ]
 
-    public_deps = [ ":structs" ]
+    public_deps = [
+      ":pdf_accessibility_constants",
+      ":structs",
+      "//base",
+    ]
 
     deps = [
-      "//base",
       "//services/screen_ai/buildflags",
       "//skia",
       "//ui/gfx/geometry",

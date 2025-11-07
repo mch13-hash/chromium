@@ -24,6 +24,7 @@ import "services/network/public/mojom/cookie_manager.mojom";
 import "services/network/public/mojom/cookie_setting_overrides.mojom";
 import "services/network/public/mojom/cors_origin_pattern.mojom";
 import "services/network/public/mojom/cross_origin_embedder_policy.mojom";
+import "services/network/public/mojom/ct_policy.mojom";
 import "services/network/public/mojom/default_credentials.mojom";
 import "services/network/public/mojom/device_bound_sessions.mojom";
 import "services/network/public/mojom/devtools_observer.mojom";
@@ -75,6 +76,7 @@ import "services/network/public/mojom/web_transport.mojom";
 import "services/network/public/mojom/websocket.mojom";
 import "services/proxy_resolver/public/mojom/proxy_resolver.mojom";
 import "url/mojom/origin.mojom";
+import "url/mojom/scheme_host_port.mojom";
 import "url/mojom/url.mojom";
 
 [EnableIf=is_chromeos]
@@ -86,8 +88,6 @@ import "services/network/public/mojom/p2p.mojom";
 [EnableIf=is_p2p_enabled]
 import "services/network/public/mojom/p2p_trusted.mojom";
 
-[EnableIf=is_win]
-import "services/proxy_resolver_win/public/mojom/proxy_resolver_win.mojom";
 
 const uint32 kWebSocketOptionNone = 0;
 
@@ -171,7 +171,7 @@ interface TrustedHeaderClient {
   // used. If |preserve_fragment_on_redirect_url| is populated, and the
   // request is redirected to exactly that URL, then the fragment of the
   // original URL will not be copied to the redirect target URL.
-  OnHeadersReceived(string headers, IPEndPoint remote_endpoint)
+  OnHeadersReceived(string headers, IPEndPoint remote_endpoint, SSLInfo? ssl_info)
       => (int32 result,
           string? headers,
           url.mojom.Url? preserve_fragment_on_redirect_url);
@@ -198,12 +198,6 @@ struct HttpAuthStaticNetworkContextParams {
   // on the system can be used without specifying an account.
   DefaultCredentials allow_default_credentials =
       DefaultCredentials.ALLOW_DEFAULT_CREDENTIALS;
-};
-
-[EnableIf=is_ct_supported]
-struct CTPolicy {
-  array<string> excluded_hosts;
-  array<string> excluded_spkis;
 };
 
 struct NetworkContextFilePaths {
@@ -350,8 +344,8 @@ struct NetworkContextParams {
   // the operating system. Otherwise, or if this is not populated, proxy
   // resolution is handled by Chrome as normal.
   [EnableIf=is_win]
-  pending_remote<proxy_resolver_win.mojom.WindowsSystemProxyResolver>?
-      windows_system_proxy_resolver;
+  pending_remote<proxy_resolver.mojom.SystemProxyResolver>?
+      system_proxy_resolver;
 
   // Retrieves the PAC script URL set via DHCP from the browser process. Only
   // used if |proxy_resolver_factory| is set. Note: optional because some tests
@@ -467,13 +461,6 @@ struct NetworkContextParams {
   map<ip_protection.mojom.ProxyLayer,
       array<ip_protection.mojom.BlindSignedAuthToken>>
           initial_ip_protection_tokens;
-
-  // Points to the user-data directory of the active profile, where
-  // Probabilistic Reveal Tokens will be stored if the
-  // `StoreProbabilisticRevealTokens` switch is enabled. This path will be
-  // populated when the IP Protection feature and the PRT storage switch are
-  // enabled, even for incognito contexts when `file_paths` is empty.
-  mojo_base.mojom.FilePath? ip_protection_data_directory;
 
   // When PAC quick checking is enabled, DNS lookups for PAC script's host are
   // timed out aggressively. This prevents hanging all network request on DNS
@@ -656,6 +643,10 @@ struct NetworkContextParams {
   // for the profile.
   array<content_settings.mojom.ContentSettingPatternSource>
       tracking_protection_content_settings;
+
+  // If true, the HTTP cache will be encrypted on disk. For now, this only
+  // switches the backend on Windows.
+  bool enable_encrypted_http_cache = false;
 };
 
 struct NetworkConditions {
@@ -1852,4 +1843,9 @@ interface NetworkContext {
   [AllowedContext=sandbox.mojom.Context.kBrowser]
   GetDeviceBoundSessionManager(
       pending_receiver<DeviceBoundSessionManager> device_bound_session_manager);
+
+  // Request that the network service prioritizes QUIC connections to the given
+  // origins.
+  AddQuicHints(array<url.mojom.SchemeHostPort> origins,
+              NetworkAnonymizationKey network_anonymization_key);
 };

@@ -27,6 +27,7 @@
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
 #import "ios/chrome/browser/signin/model/authentication_service_factory.h"
+#import "ios/chrome/browser/signin/model/avatar_provider.h"
 #import "ios/chrome/browser/signin/model/chrome_account_manager_service.h"
 #import "ios/chrome/browser/signin/model/chrome_account_manager_service_factory.h"
 #import "ios/chrome/browser/signin/model/fake_authentication_service_delegate.h"
@@ -250,9 +251,11 @@ TEST_P(AccountMenuMediatorTest, TestAddSecondaryIdentity) {
       break;
   }
   OCMExpect([consumer_mock_
-      updateAccountListWithGaiaIDsToAdd:@[ thirdIdentity.gaiaID ]
+      updateAccountListWithGaiaIDsToAdd:@[ thirdIdentity.gaiaId.ToNSString() ]
                         gaiaIDsToRemove:@[]
-                          gaiaIDsToKeep:@[ kSecondaryIdentity.gaiaID ]]);
+                          gaiaIDsToKeep:@[
+                            kSecondaryIdentity.gaiaId.ToNSString()
+                          ]]);
   fake_system_identity_manager_->AddIdentity(thirdIdentity);
 
   // Simulate that the identity gets updated (e.g. the username became known).
@@ -260,8 +263,9 @@ TEST_P(AccountMenuMediatorTest, TestAddSecondaryIdentity) {
   // identities is unchanged.
   thirdIdentity.userFullName = @"First Last";
   thirdIdentity.userGivenName = @"First";
-  NSArray<NSString*>* gaiaIDsToKeep =
-      @[ kSecondaryIdentity.gaiaID, thirdIdentity.gaiaID ];
+  NSArray<NSString*>* gaiaIDsToKeep = @[
+    kSecondaryIdentity.gaiaId.ToNSString(), thirdIdentity.gaiaId.ToNSString()
+  ];
   OCMExpect([consumer_mock_ updateAccountListWithGaiaIDsToAdd:@[]
                                               gaiaIDsToRemove:@[]
                                                 gaiaIDsToKeep:gaiaIDsToKeep]);
@@ -277,7 +281,9 @@ TEST_P(AccountMenuMediatorTest, TestRemoveSecondaryIdentity) {
 
   OCMExpect([consumer_mock_
       updateAccountListWithGaiaIDsToAdd:@[]
-                        gaiaIDsToRemove:@[ kSecondaryIdentity.gaiaID ]
+                        gaiaIDsToRemove:@[
+                          kSecondaryIdentity.gaiaId.ToNSString()
+                        ]
                           gaiaIDsToKeep:@[]]);
   {
     base::RunLoop run_loop;
@@ -298,7 +304,7 @@ TEST_P(AccountMenuMediatorTest, TestRemoveSecondaryIdentity) {
 TEST_P(AccountMenuMediatorTest, TestRemovePrimaryIdentity) {
   OCMExpect([delegate_mock_
       mediatorWantsToBeDismissed:mediator_
-                      withResult:SigninCoordinatorResultInterrupted
+           withCancelationReason:signin_ui::CancelationReason::kFailed
                   signedIdentity:nil
                  userTappedClose:NO]);
   OCMExpect([consumer_mock_ setUserInteractionsEnabled:NO]);
@@ -310,30 +316,32 @@ TEST_P(AccountMenuMediatorTest, TestRemovePrimaryIdentity) {
 
 // Tests the result of secondaryAccountsGaiaIDs.
 TEST_P(AccountMenuMediatorTest, TestSecondaryAccountsGaiaID) {
-  EXPECT_NSEQ([mediator_ secondaryAccountsGaiaIDs],
-              @[ kSecondaryIdentity.gaiaID ]);
+  EXPECT_EQ([mediator_ secondaryAccountsGaiaIDs],
+            std::vector<GaiaId> { kSecondaryIdentity.gaiaId });
 }
 
 #pragma mark - AccountMenuDataSource and SyncObserverModelBridge
 
 // Tests the result of nameForGaiaID.
 TEST_P(AccountMenuMediatorTest, nameForGaiaID) {
-  EXPECT_NSEQ([mediator_ nameForGaiaID:kSecondaryIdentity.gaiaID],
+  EXPECT_NSEQ([mediator_ nameForGaiaID:kSecondaryIdentity.gaiaId],
               kSecondaryIdentity.userFullName);
 }
 
 // Tests the result of emailForGaiaID.
 TEST_P(AccountMenuMediatorTest, emailForGaiaID) {
-  EXPECT_NSEQ([mediator_ emailForGaiaID:kSecondaryIdentity.gaiaID],
+  EXPECT_NSEQ([mediator_ emailForGaiaID:kSecondaryIdentity.gaiaId],
               kSecondaryIdentity.userEmail);
 }
 
 // Tests the result of imageForGaiaID.
 TEST_P(AccountMenuMediatorTest, imageForGaiaID) {
-  EXPECT_NSEQ([mediator_ imageForGaiaID:kSecondaryIdentity.gaiaID],
-              account_manager_service_ -> GetIdentityAvatarWithIdentity(
-                                           kSecondaryIdentity,
-                                           IdentityAvatarSize::TableViewIcon));
+  EXPECT_NSEQ(
+      [mediator_ imageForGaiaID:kSecondaryIdentity.gaiaId],
+      GetApplicationContext() -> GetIdentityAvatarProvider()
+                                  -> GetIdentityAvatar(
+                                      kSecondaryIdentity,
+                                      IdentityAvatarSize::TableViewIcon));
 }
 
 // Tests the result of primaryAccountEmail.
@@ -350,9 +358,10 @@ TEST_P(AccountMenuMediatorTest, TestPrimaryAccountUserFullName) {
 // Tests the result of primaryAccountAvatar.
 TEST_P(AccountMenuMediatorTest, TestPrimaryAccountAvatar) {
   EXPECT_NSEQ([mediator_ primaryAccountAvatar],
-              account_manager_service_ -> GetIdentityAvatarWithIdentity(
-                                           kPrimaryIdentity,
-                                           IdentityAvatarSize::Large));
+              GetApplicationContext() -> GetIdentityAvatarProvider()
+                                          -> GetIdentityAvatar(
+                                              kPrimaryIdentity,
+                                              IdentityAvatarSize::Large));
 }
 
 // Tests the result of TestError when there is no error.
@@ -405,11 +414,10 @@ TEST_P(AccountMenuMediatorTest, TestAccountTapedSignoutFailed) {
         return mediator_ == value;
       }]]);
   OCMExpect([authentication_flow_mock_ startSignIn]);
-  [mediator_ accountTappedWithGaiaID:kSecondaryIdentity.gaiaID
-                          targetRect:target];
+  auto gaiaId2 = kSecondaryIdentity.gaiaId;
+  [mediator_ accountTappedWithGaiaID:&gaiaId2 targetRect:target];
   // Simulate a double tap. The second tap should be ignored.
-  [mediator_ accountTappedWithGaiaID:kSecondaryIdentity.gaiaID
-                          targetRect:target];
+  [mediator_ accountTappedWithGaiaID:&gaiaId2 targetRect:target];
   VerifyMock();
 
   OCMExpect([consumer_mock_ switchingStopped]);
@@ -417,9 +425,9 @@ TEST_P(AccountMenuMediatorTest, TestAccountTapedSignoutFailed) {
   OCMExpect([delegate_mock_ signinFinished]);
   // Simulate AuthenticationFlow failure.
   [authentication_flow_request_helper
-      authenticationFlowDidSignInInSameProfileWithResult:
-          SigninCoordinatorResultCanceledByUser
-                                                identity:nil];
+      authenticationFlowDidSignInInSameProfileWithCancelationReason:
+          signin_ui::CancelationReason::kUserCanceled
+                                                           identity:nil];
 }
 
 // Tests the result of accountTappedWithGaiaID:targetRect:
@@ -449,20 +457,19 @@ TEST_P(AccountMenuMediatorTest, TestAccountTapedSignInFailed) {
       }]]);
   // Simulate account switching.
   OCMExpect([authentication_flow_mock_ startSignIn]);
-  [mediator_ accountTappedWithGaiaID:kSecondaryIdentity.gaiaID
-                          targetRect:target];
+  auto gaiaId2 = kSecondaryIdentity.gaiaId;
+  [mediator_ accountTappedWithGaiaID:&gaiaId2 targetRect:target];
   // Simulate a double tap. The second tap should be ignored.
-  [mediator_ accountTappedWithGaiaID:kSecondaryIdentity.gaiaID
-                          targetRect:target];
+  [mediator_ accountTappedWithGaiaID:&gaiaId2 targetRect:target];
 
   // Expect that the consumer unlocks the UI.
   OCMExpect([consumer_mock_ switchingStopped]);
   OCMExpect([consumer_mock_ setUserInteractionsEnabled:YES]);
   OCMExpect([delegate_mock_ signinFinished]);
   [authentication_flow_request_helper
-      authenticationFlowDidSignInInSameProfileWithResult:
-          SigninCoordinatorResult::SigninCoordinatorResultInterrupted
-                                                identity:nil];
+      authenticationFlowDidSignInInSameProfileWithCancelationReason:
+          signin_ui::CancelationReason::kFailed
+                                                           identity:nil];
 
   // Checks the user is signed-back in.
   ASSERT_EQ(kPrimaryIdentity, authentication_service_->GetPrimaryIdentity(
@@ -492,22 +499,22 @@ TEST_P(AccountMenuMediatorTest, TestAccountTapedWithSuccessfulSwitch) {
         return mediator_ == value;
       }]]);
   OCMExpect([authentication_flow_mock_ startSignIn]);
-  [mediator_ accountTappedWithGaiaID:kSecondaryIdentity.gaiaID
-                          targetRect:target];
+  auto gaiaId2 = kSecondaryIdentity.gaiaId;
+  [mediator_ accountTappedWithGaiaID:&gaiaId2 targetRect:target];
   // Simulate a double tap. The second tap should be ignored.
-  [mediator_ accountTappedWithGaiaID:kSecondaryIdentity.gaiaID
-                          targetRect:target];
+  [mediator_ accountTappedWithGaiaID:&gaiaId2 targetRect:target];
   VerifyMock();
   OCMExpect([delegate_mock_
       mediatorWantsToBeDismissed:mediator_
-                      withResult:SigninCoordinatorResultSuccess
+           withCancelationReason:signin_ui::CancelationReason::kNotCanceled
                   signedIdentity:kSecondaryIdentity
                  userTappedClose:NO]);
   OCMExpect([delegate_mock_ signinFinished]);
   [authentication_flow_request_helper
-      authenticationFlowDidSignInInSameProfileWithResult:
-          SigninCoordinatorResultSuccess
-                                                identity:kSecondaryIdentity];
+      authenticationFlowDidSignInInSameProfileWithCancelationReason:
+          signin_ui::CancelationReason::kNotCanceled
+                                                           identity:
+                                                               kSecondaryIdentity];
 }
 
 // Tests the result of didTapErrorButton when a passphrase is required.
@@ -597,7 +604,7 @@ TEST_P(AccountMenuMediatorTest, TestSignoutFromTargetRect) {
   [mediator_ signOutFromTargetRect:rect];
   OCMExpect([delegate_mock_
       mediatorWantsToBeDismissed:mediator_
-                      withResult:SigninCoordinatorResultCanceledByUser
+           withCancelationReason:signin_ui::CancelationReason::kUserCanceled
                   signedIdentity:nil
                  userTappedClose:NO]);
   completion(YES, nil);
@@ -625,7 +632,7 @@ TEST_P(AccountMenuMediatorTest, TestSignoutAndClose) {
 TEST_P(AccountMenuMediatorTest, TestViewControllerWantToBeClosed) {
   OCMExpect([delegate_mock_
       mediatorWantsToBeDismissed:mediator_
-                      withResult:SigninCoordinatorResultCanceledByUser
+           withCancelationReason:signin_ui::CancelationReason::kUserCanceled
                   signedIdentity:nil
                  userTappedClose:YES]);
   OCMExpect([consumer_mock_ setUserInteractionsEnabled:NO]);

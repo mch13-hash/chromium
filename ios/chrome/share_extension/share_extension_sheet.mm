@@ -11,6 +11,7 @@
 #import "build/branding_buildflags.h"
 #import "ios/chrome/common/app_group/app_group_constants.h"
 #import "ios/chrome/common/app_group/app_group_utils.h"
+#import "ios/chrome/common/ui/button_stack/button_stack_configuration.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/elements/branded_navigation_item_title_view.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
@@ -38,8 +39,6 @@ CGFloat const kTextStackSpacing = 30.0;
 
 // The horizontal spacing between image preview and the URL stack.
 CGFloat const kInnerViewSpacing = 30;
-
-CGFloat const kSharedImageHeight = 181;
 
 // Custom radius for the half sheet presentation.
 CGFloat const kHalfSheetCornerRadius = 20;
@@ -90,8 +89,8 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
 
 - (void)viewDidLoad {
   self.actionHandler = self;
-  self.primaryActionString = _primaryString;
-  self.secondaryActionString = _secondaryString;
+  self.configuration.primaryActionString = _primaryString;
+  self.configuration.secondaryActionString = _secondaryString;
 
   self.scrollEnabled = NO;
   self.showDismissBarButton = YES;
@@ -99,7 +98,7 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
   self.topAlignedLayout = YES;
   self.scrollEnabled = YES;
 
-  self.customScrollViewBottomInsets = 0;
+  self.customContentBottomInset = 0;
   self.customGradientViewHeight = 0;
 
   self.titleView = [self configureSheetTitleView];
@@ -214,7 +213,7 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
 }
 
 - (void)setSharedURLPreview:(UIImage*)sharedURLPreview {
-  CHECK(!_sharedImage && !_sharedText);
+  CHECK(!_sharedText);
   _sharedURLPreview = sharedURLPreview;
 }
 
@@ -257,7 +256,7 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
 }
 
 - (void)confirmationAlertPrimaryAction {
-  NSString* gaiaID = self.selectedAccountInfo.gaiaID;
+  NSString* gaiaID = self.selectedAccountInfo.gaiaIDString;
   switch (_sharedItemType) {
     case kURL:
       [self.delegate didTapOpenInChromeShareExtensionSheet:self gaiaID:gaiaID];
@@ -271,7 +270,7 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
 }
 
 - (void)confirmationAlertSecondaryAction {
-  NSString* gaiaID = self.selectedAccountInfo.gaiaID;
+  NSString* gaiaID = self.selectedAccountInfo.gaiaIDString;
   switch (_sharedItemType) {
     case kURL:
       [self.delegate didTapMoreOptionsShareExtensionSheet:self gaiaID:gaiaID];
@@ -292,7 +291,7 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
   CHECK(self.selectedAccountInfo);
 
   UIListContentConfiguration* content = cell.defaultContentConfiguration;
-  if ([self.selectedAccountInfo.gaiaID isEqual:app_group::kNoAccount]) {
+  if ([self.selectedAccountInfo.gaiaIDString isEqual:app_group::kNoAccount]) {
     content.text = NSLocalizedString(
         @"IDS_IOS_SIGNED_OUT_USER_TITLE_SHARE_EXTENSION",
         @"The title of the item representing a signed out user.");
@@ -411,7 +410,6 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
 
   innerView.translatesAutoresizingMaskIntoConstraints = NO;
   mainView.translatesAutoresizingMaskIntoConstraints = NO;
-
   [NSLayoutConstraint activateConstraints:@[
     [innerView.widthAnchor constraintEqualToAnchor:mainView.widthAnchor
                                           constant:-kInnerViewWidthPadding],
@@ -419,7 +417,6 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
         constraintGreaterThanOrEqualToAnchor:innerView.heightAnchor
                                     constant:kMainViewHeightPadding],
   ]];
-
   AddSameCenterConstraints(mainView, innerView);
 
   return mainView;
@@ -487,14 +484,29 @@ CGFloat const kUpdatedMainViewCornerRadius = 32.0;
   UIImageView* sharedImageView =
       [[UIImageView alloc] initWithImage:_sharedImage];
   sharedImageView.backgroundColor = [UIColor clearColor];
-
+  sharedImageView.contentMode = UIViewContentModeScaleAspectFit;
   sharedImageView.layer.cornerRadius = kMainViewCornerRadius;
-  sharedImageView.contentMode = UIViewContentModeScaleAspectFill;
-  sharedImageView.layer.masksToBounds = YES;
+  sharedImageView.clipsToBounds = YES;
   sharedImageView.translatesAutoresizingMaskIntoConstraints = NO;
-  [sharedImageView.heightAnchor constraintEqualToConstant:kSharedImageHeight]
-      .active = YES;
-  return sharedImageView;
+
+  // The container view will act as a bounding box for the image view.
+  UIView* imageContainerView = [[UIView alloc] init];
+  imageContainerView.translatesAutoresizingMaskIntoConstraints = NO;
+  [imageContainerView addSubview:sharedImageView];
+
+  // The image view MUST maintain the image's aspect ratio for the corner radius
+  // to look correct.
+  if (_sharedImage.size.height > 0) {
+    CGFloat aspectRatio = _sharedImage.size.width / _sharedImage.size.height;
+    [sharedImageView.widthAnchor
+        constraintEqualToAnchor:sharedImageView.heightAnchor
+                     multiplier:aspectRatio]
+        .active = YES;
+  }
+
+  AddSameConstraints(imageContainerView, sharedImageView);
+
+  return imageContainerView;
 }
 
 - (UIView*)configureSharedTextView {

@@ -21,7 +21,7 @@ function remainder(lhs: number, rhs: number) {
 // A dropdown element that contains autocomplete matches.
 export class ComposeboxDropdownElement extends CrLitElement {
   static get is() {
-    return 'ntp-composebox-dropdown';
+    return 'cr-composebox-dropdown';
   }
 
   static override get styles() {
@@ -45,11 +45,16 @@ export class ComposeboxDropdownElement extends CrLitElement {
         type: Number,
         notify: true,
       },
+      lastQueriedInput: {
+        type: String,
+        notify: true,
+      },
     };
   }
 
   accessor result: AutocompleteResult|null = null;
   accessor selectedMatchIndex: number = -1;
+  accessor lastQueriedInput: string = '';
 
   //============================================================================
   // Public methods
@@ -63,7 +68,7 @@ export class ComposeboxDropdownElement extends CrLitElement {
   /** Focuses the selected match, if any. */
   focusSelected() {
     const selectableMatchElements =
-        this.shadowRoot.querySelectorAll('ntp-composebox-match');
+        this.shadowRoot.querySelectorAll('cr-composebox-match');
     selectableMatchElements[this.selectedMatchIndex]?.focus();
   }
 
@@ -87,9 +92,19 @@ export class ComposeboxDropdownElement extends CrLitElement {
       return;
     }
 
-    // The value of -1 for |this.selectedMatchIndex| indicates no selection.
-    // Therefore subtract one from the maximum of its value and 0.
-    const previous = Math.max(this.selectedMatchIndex, 0) - 1;
+    let previous: number;
+    const isTypedSuggest = this.lastQueriedInput.trim().length > 0;
+    if (isTypedSuggest && this.selectedMatchIndex === 1) {
+      // Since we're hiding the first match, if we're on the second match (first
+      // shown match) and we're selecting the previous match, go to the last
+      // match in the result.
+      previous = -1;
+    } else {
+      // The value of -1 for |this.selectedMatchIndex| indicates no selection.
+      // Therefore subtract one from the maximum of its value and 0.
+      previous = Math.max(this.selectedMatchIndex, 0) - 1;
+    }
+
     this.selectedMatchIndex =
         remainder(previous, this.result.matches.length);
   }
@@ -109,7 +124,18 @@ export class ComposeboxDropdownElement extends CrLitElement {
       return;
     }
 
-    const next = this.selectedMatchIndex + 1;
+    let next;
+    const isTypedSuggest = this.lastQueriedInput.trim().length > 0;
+    if (isTypedSuggest &&
+        this.selectedMatchIndex === this.result.matches.length - 1) {
+      // Since we're hiding the first match, if we're on the last match and
+      // we're selecting the next match, go to the second match (the first shown
+      // match).
+      next = 1;
+    } else {
+      next = this.selectedMatchIndex + 1;
+    }
+
     this.selectedMatchIndex = remainder(next, this.result.matches.length);
   }
 
@@ -155,7 +181,7 @@ export class ComposeboxDropdownElement extends CrLitElement {
 
 declare global {
   interface HTMLElementTagNameMap {
-    'ntp-composebox-dropdown': ComposeboxDropdownElement;
+    'cr-composebox-dropdown': ComposeboxDropdownElement;
   }
 }
 

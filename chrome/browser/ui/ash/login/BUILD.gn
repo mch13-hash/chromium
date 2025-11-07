@@ -107,6 +107,7 @@ static_library("login") {
     "//chrome/browser/ash/base",
     "//chrome/browser/ash/boot_times_recorder",
     "//chrome/browser/ash/browser_delegate",
+    "//chrome/browser/ash/certificate_provider",
     "//chrome/browser/ash/child_accounts/parent_access_code",
     "//chrome/browser/ash/input_method",
     "//chrome/browser/ash/login",

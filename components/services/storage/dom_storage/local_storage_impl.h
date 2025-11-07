@@ -16,7 +16,7 @@
 #include "base/files/file_path.h"
 #include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/threading/sequence_bound.h"
 #include "base/trace_event/memory_allocator_dump.h"
@@ -142,7 +142,7 @@ class LocalStorageImpl : public base::trace_event::MemoryDumpProvider,
   // from that function, or through |on_database_open_callbacks_|.
   void RetrieveStorageUsage(GetUsageCallback callback);
   void OnGotWriteMetaData(GetUsageCallback callback,
-                          std::vector<DomStorageDatabase::KeyValuePair> data);
+                          StatusOr<DomStorageDatabase::Metadata> all_metadata);
 
   void OnGotStorageUsageForShutdown(
       std::vector<mojom::StorageUsageInfoPtr> usage);
@@ -156,7 +156,7 @@ class LocalStorageImpl : public base::trace_event::MemoryDumpProvider,
   // the database. See crbug.com/40281870 for more info.
   void DeleteStaleStorageAreas();
   void OnGotMetaDataToDeleteStaleStorageAreas(
-      std::vector<DomStorageDatabase::KeyValuePair> data);
+      StatusOr<DomStorageDatabase::Metadata> all_metadata);
   void OnReceiverDisconnected();
 
   // Passed in by the StorageServiceImpl that owns this object. Used to signal
@@ -188,7 +188,6 @@ class LocalStorageImpl : public base::trace_event::MemoryDumpProvider,
   // Maps between a StorageKey and its prefixed LevelDB view.
   std::map<blink::StorageKey, std::unique_ptr<StorageAreaHolder>> areas_;
 
-  bool is_low_end_device_;
   // Counts consecutive commit errors. If this number reaches a threshold, the
   // whole database is thrown away.
   int commit_error_count_ = 0;

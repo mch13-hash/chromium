@@ -37,8 +37,6 @@ These builders must pass before a CL may land that affects files outside of
 
 * [chromeos-arm64-generic-rel](https://ci.chromium.org/p/chromium/builders/try/chromeos-arm64-generic-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""chromeos-arm64-generic-rel""))
 
-* [chromium_presubmit](https://ci.chromium.org/p/chromium/builders/try/chromium_presubmit) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""chromium_presubmit""))
-
 * [compile-size](https://ci.chromium.org/p/chromium/builders/try/compile-size) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""compile-size""))
 
 * [fuchsia-binary-size](https://ci.chromium.org/p/chromium/builders/try/fuchsia-binary-size) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""fuchsia-binary-size""))
@@ -52,6 +50,8 @@ These builders must pass before a CL may land that affects files outside of
 * [linux-chromeos-rel](https://ci.chromium.org/p/chromium/builders/try/linux-chromeos-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-chromeos-rel""))
 
 * [linux-libfuzzer-asan-rel](https://ci.chromium.org/p/chromium/builders/try/linux-libfuzzer-asan-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-libfuzzer-asan-rel""))
+
+* [linux-presubmit](https://ci.chromium.org/p/chromium/builders/try/linux-presubmit) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-presubmit""))
 
 * [linux-rel](https://ci.chromium.org/p/chromium/builders/try/linux-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-rel""))
 
@@ -567,6 +567,12 @@ builder.
   * [`//chromeos/services/chromebox_for_meetings/.+`](https://cs.chromium.org/chromium/src/chromeos/services/chromebox_for_meetings/)
   * [`//chrome/browser/ash/chromebox_for_meetings/.+`](https://cs.chromium.org/chromium/src/chrome/browser/ash/chromebox_for_meetings/)
 
+* [linux-crossbench](https://ci.chromium.org/p/chromium/builders/try/linux-crossbench) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-crossbench""))
+
+  Location filters:
+  * [`//third_party/crossbench/.+`](https://cs.chromium.org/chromium/src/third_party/crossbench/)
+  * [`//third_party/speedometer/.+`](https://cs.chromium.org/chromium/src/third_party/speedometer/)
+
 * [linux-enterprise-companion-try-builder-dbg](https://ci.chromium.org/p/chromium/builders/try/linux-enterprise-companion-try-builder-dbg) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-enterprise-companion-try-builder-dbg""))
 
   Location filters:
@@ -588,6 +594,20 @@ builder.
 
   Location filters:
   * [`//.*\.(js|ts)`](https://cs.chromium.org/search?q=+file:.*\.(js|ts))
+
+* [linux-oi-rel](https://ci.chromium.org/p/chromium/builders/try/linux-oi-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-oi-rel""))
+
+  Location filters:
+  * [`//chrome/browser/renderer_host/javascript_optimizer_feature_browsertest\.cc$`](https://cs.chromium.org/search?q=+file:chrome/browser/renderer_host/javascript_optimizer_feature_browsertest\.cc$)
+  * [`//chrome/browser/policy/test/v8_optimizer_policy_browsertest\.cc$`](https://cs.chromium.org/search?q=+file:chrome/browser/policy/test/v8_optimizer_policy_browsertest\.cc$)
+  * [`//chrome/browser/site_protection/.*\.(cc|h)$`](https://cs.chromium.org/search?q=+file:chrome/browser/site_protection/.*\.(cc|h)$)
+  * [`//content/browser/agent_cluster_key.+`](https://cs.chromium.org/chromium/src/content/browser/agent_cluster_key)
+  * [`//content/browser/child_process_security_policy.+`](https://cs.chromium.org/chromium/src/content/browser/child_process_security_policy)
+  * [`//content/browser/process_lock.+`](https://cs.chromium.org/chromium/src/content/browser/process_lock)
+  * [`//content/browser/renderer_host/render_frame_host_manager.+`](https://cs.chromium.org/chromium/src/content/browser/renderer_host/render_frame_host_manager)
+  * [`//content/browser/site_info\.(cc|h)$`](https://cs.chromium.org/search?q=+file:content/browser/site_info\.(cc|h)$)
+  * [`//content/browser/site_instance.*\.(cc|h)$`](https://cs.chromium.org/search?q=+file:content/browser/site_instance.*\.(cc|h)$)
+  * [`//content/public/browser/site_instance.*\.(cc|h)$`](https://cs.chromium.org/search?q=+file:content/public/browser/site_instance.*\.(cc|h)$)
 
 * [linux-perfetto-rel](https://ci.chromium.org/p/chromium/builders/try/linux-perfetto-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-perfetto-rel""))
 
@@ -626,7 +646,7 @@ builder.
 * [linux-wayland-mutter-rel](https://ci.chromium.org/p/chromium/builders/try/linux-wayland-mutter-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""linux-wayland-mutter-rel""))
 
   Location filters:
-  * [`//chrome/browser/.+(ui|browser)test.+`](https://cs.chromium.org/search?q=+file:chrome/browser/.+(ui|browser)test)
+  * [`//chrome/browser/.+uitest.+`](https://cs.chromium.org/search?q=+file:chrome/browser/.+uitest)
   * [`//chrome/browser/ui/views/.+test.+`](https://cs.chromium.org/search?q=+file:chrome/browser/ui/views/.+test)
   * [`//chrome/browser/ui/views/tabs/.+`](https://cs.chromium.org/chromium/src/chrome/browser/ui/views/tabs/)
   * [`//testing/xvfb\.py`](https://cs.chromium.org/search?q=+file:testing/xvfb\.py)
@@ -855,6 +875,9 @@ by CQ. These are often used to test new configurations before they are added
 as required builders.
 
 ### chrome
+* [linux-perf-trigger](https://ci.chromium.org/p/chrome/builders/try/linux-perf-trigger) ([definition](https://source.corp.google.com/search?q=+file:/try/.*\.star$+""linux-perf-trigger""))
+  * Experiment percentage: 100.0
+
 * [win-perf-trigger](https://ci.chromium.org/p/chrome/builders/try/win-perf-trigger) ([definition](https://source.corp.google.com/search?q=+file:/try/.*\.star$+""win-perf-trigger""))
   * Experiment percentage: 100.0
 
@@ -892,7 +915,7 @@ as required builders.
   * Experiment percentage: 10.0
 
 * [mac15-arm64-rel](https://ci.chromium.org/p/chromium/builders/try/mac15-arm64-rel) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""mac15-arm64-rel""))
-  * Experiment percentage: 66.0
+  * Experiment percentage: 100.0
 
 * [tricium-clang-tidy](https://ci.chromium.org/p/chromium/builders/try/tricium-clang-tidy) ([definition](https://cs.chromium.org/search?q=+file:/try/.*\.star$+""tricium-clang-tidy""))
   * Experiment percentage: 100.0

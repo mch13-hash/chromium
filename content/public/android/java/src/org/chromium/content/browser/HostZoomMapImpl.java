@@ -4,8 +4,11 @@
 
 package org.chromium.content.browser;
 
+import static org.chromium.content_public.browser.HostZoomMap.DESKTOP_PLATFORM_SCALE_FACTOR;
 import static org.chromium.content_public.browser.HostZoomMap.TEXT_SIZE_MULTIPLIER_RATIO;
+import static org.chromium.content_public.browser.HostZoomMap.getPlatformScale;
 import static org.chromium.content_public.browser.HostZoomMap.getSystemFontScale;
+import static org.chromium.content_public.browser.HostZoomMap.setPlatformScale;
 import static org.chromium.content_public.browser.HostZoomMap.setSystemFontScale;
 
 import org.jni_zero.CalledByNative;
@@ -15,10 +18,13 @@ import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.Callback;
+import org.chromium.base.DeviceInfo;
 import org.chromium.base.MathUtils;
 import org.chromium.base.ResettersForTesting;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.content_public.browser.BrowserContextHandle;
+import org.chromium.content_public.browser.ContentFeatureList;
+import org.chromium.content_public.browser.ContentFeatureMap;
 import org.chromium.content_public.browser.HostZoomMap;
 import org.chromium.content_public.browser.SiteZoomInfo;
 import org.chromium.content_public.browser.WebContents;
@@ -106,7 +112,13 @@ public class HostZoomMapImpl {
         if (!shouldAdjustForOSLevel()) {
             systemFontScale = 1;
         }
-        return adjustZoomLevel(zoomLevel, systemFontScale);
+        // The platform adjustment only applies to Desktop devices currently.
+        // TODO(crbug.com/450281745): Add treatment for external monitors on per tab basis.
+        if (DeviceInfo.isDesktop()) {
+            // TODO(crbug.com/450281745): Add tunable FeatureParam to test value.
+            setPlatformScale(DESKTOP_PLATFORM_SCALE_FACTOR);
+        }
+        return adjustZoomLevel(zoomLevel, systemFontScale, getPlatformScale());
     }
 
     @CalledByNative
@@ -137,11 +149,27 @@ public class HostZoomMapImpl {
      *
      * @param zoomLevel The zoom level to adjust.
      * @param systemFontScale User selected font scale value.
+     * @param platformAdjustment Platform/hardware-specific additional scaling factor.
      * @return double The adjusted zoom level.
      */
-    public static double adjustZoomLevel(double zoomLevel, float systemFontScale) {
-        // No calculation to do if the user has set OS-level |fontScale| to 1 (default).
-        if (MathUtils.areFloatsEqual(systemFontScale, 1f) || !shouldAdjustForOSLevel()) {
+    public static double adjustZoomLevel(
+            double zoomLevel, float systemFontScale, float platformAdjustment) {
+        // If we are not supposed to adjust for OS-level font scale, set the effective scale to 1.
+        float effectiveSystemFontScale = systemFontScale;
+        if (!shouldAdjustForOSLevel()) {
+            effectiveSystemFontScale = 1.0f;
+        }
+
+        // When the Desktop zoom scaling flag is not enabled, set the effective adjustment to 1.
+        float effectivePlatformAdjustment = platformAdjustment;
+        if (!ContentFeatureMap.isEnabled(ContentFeatureList.ANDROID_DESKTOP_ZOOM_SCALING)) {
+            effectivePlatformAdjustment = 1.0f;
+        }
+
+        float scaleAdjustment = effectiveSystemFontScale * effectivePlatformAdjustment;
+
+        // No calculation to do if the |scaleAdjustment| is 1.0 (default).
+        if (MathUtils.areFloatsEqual(scaleAdjustment, 1.0f)) {
             return zoomLevel;
         }
 
@@ -150,7 +178,7 @@ public class HostZoomMapImpl {
         // Chrome-level zoom of 150%, and a OS-level setting of XL (130%), then we want to continue
         // to display 150% to the user but actually render 1.5 * 1.3 = 1.95 (195%) zoom. We must
         // apply this at the zoom level (not factor) to compensate for logarithmic scale.
-        double adjustedLevel = systemFontScale * Math.pow(TEXT_SIZE_MULTIPLIER_RATIO, zoomLevel);
+        double adjustedLevel = scaleAdjustment * Math.pow(TEXT_SIZE_MULTIPLIER_RATIO, zoomLevel);
 
         // We do not pass levels to the backend, but factors. So convert back and round.
         double adjustedFactor = Math.log10(adjustedLevel) / Math.log10(TEXT_SIZE_MULTIPLIER_RATIO);

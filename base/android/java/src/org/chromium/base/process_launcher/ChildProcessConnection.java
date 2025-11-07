@@ -476,6 +476,14 @@ public class ChildProcessConnection {
     }
 
     /**
+     * @return whether the connection to the child process is established and the connected process
+     *     is still alive.
+     */
+    public boolean isConnectedProcessAlive() {
+        return mService != null && mService.asBinder().pingBinder();
+    }
+
+    /**
      * @return the connection pid, or 0 if not yet connected
      */
     public int getPid() {
@@ -738,7 +746,7 @@ public class ChildProcessConnection {
                 TAG,
                 "onServiceDisconnected (crash or killed by oom): pid=%d %s",
                 mPid,
-                mConnectionController.buildDebugStateString());
+                buildDebugStateString());
         stop(); // We don't want to auto-restart on crash. Let the browser do that.
 
         // If we have a pending connection callback, we need to communicate the failure to
@@ -747,6 +755,25 @@ public class ChildProcessConnection {
             mConnectionCallback.onConnected(null);
             mConnectionCallback = null;
         }
+    }
+
+    /**
+     * @return the detailed binding state for debugging/metrics purposes.
+     */
+    public ChildProcessConnectionState getConnectionStateForDebugging() {
+        return mConnectionController.getConnectionStateForDebugging();
+    }
+
+    private String buildDebugStateString() {
+        ChildProcessConnectionState connectionState =
+                mConnectionController.getConnectionStateForDebugging();
+        StringBuilder s = new StringBuilder();
+        s.append("bindings:");
+        s.append(connectionState.mIsWaivedBound ? "W" : " ");
+        s.append(connectionState.mIsVisibleBound ? "V" : " ");
+        s.append(connectionState.mIsNotPerceptibleBound ? "N" : " ");
+        s.append(connectionState.mIsStrongBound ? "S" : " ");
+        return s.toString();
     }
 
     private void onSetupConnectionResultOnLauncherThread(

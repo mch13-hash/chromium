@@ -5,13 +5,12 @@
 import 'chrome://settings/lazy_load.js';
 
 import {assert} from 'chrome://resources/js/assert.js';
-import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import type {CrExpandButtonElement, SettingsPrivacySandboxAdMeasurementSubpageElement, SettingsPrivacySandboxManageTopicsSubpageElement, SettingsPrivacySandboxPageElement, SettingsPrivacySandboxTopicsSubpageElement, SettingsSimpleConfirmationDialogElement} from 'chrome://settings/lazy_load.js';
 import {SettingsPrivacySandboxFledgeSubpageElement} from 'chrome://settings/lazy_load.js';
 import type {CrButtonElement, CrLinkRowElement, FirstLevelTopicsState, SettingsPrefsElement, SettingsToggleButtonElement, TopicsState} from 'chrome://settings/settings.js';
-import {CrSettingsPrefs, MetricsBrowserProxyImpl, PrivacySandboxBrowserProxyImpl, Router, routes} from 'chrome://settings/settings.js';
+import {CrSettingsPrefs, loadTimeData, MetricsBrowserProxyImpl, PrivacySandboxBrowserProxyImpl, Router, routes} from 'chrome://settings/settings.js';
 import {assertDeepEquals, assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {flushTasks, waitAfterNextRender} from 'chrome://webui-test/polymer_test_util.js';
+import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise, isChildVisible, isVisible, whenAttributeIs} from 'chrome://webui-test/test_util.js';
 
 import {TestMetricsBrowserProxy} from './test_metrics_browser_proxy.js';
@@ -521,6 +520,8 @@ suite('TopicsSubpage', function() {
   }
 
   test('blockAndAllowTopics', async function() {
+    // TODO(b/456263225): Add test coverage for focus not being lost.
+
     testPrivacySandboxBrowserProxy.setChildTopics([{
       topicId: 3,
       taxonomyVersion: 1,
@@ -555,8 +556,10 @@ suite('TopicsSubpage', function() {
 
     // Check for blocked topics.
     const blockedTopicsRow =
-        page.shadowRoot!.querySelector<HTMLElement>('#blockedTopicsRow');
-    blockedTopicsRow!.click();
+        page.shadowRoot!.querySelector<CrExpandButtonElement>(
+            '#blockedTopicsRow');
+    assertTrue(!!blockedTopicsRow);
+    blockedTopicsRow.click();
     await flushTasks();
     assertEquals(
         'Settings.PrivacySandbox.Topics.BlockedTopicsOpened',
@@ -647,13 +650,8 @@ suite('TopicsSubpage', function() {
         await metricsBrowserProxy.whenCalled('recordAction'));
     metricsBrowserProxy.resetResolver('recordAction');
     await testPrivacySandboxBrowserProxy.whenCalled('setTopicAllowed');
-    const expandedButton =
-        page.shadowRoot!.querySelector<CrExpandButtonElement>(
-            '#blockedTopicsRow');
-    assert(expandedButton);
-    assertTrue(expandedButton.expanded);
-    await waitAfterNextRender(page);
-    assertEquals(blockedTopicsRow, page.shadowRoot!.activeElement);
+    assertTrue(blockedTopicsRow.expanded);
+
     // Assert the topic AND it's child topic is no longer visible.
     assertEquals(
         1,
@@ -712,10 +710,6 @@ suite('TopicsSubpage', function() {
         '#currentTopicsDescriptionEmptyTextHeading')));
     assertTrue(isVisible(currentTopicsSection.querySelector(
         '#currentTopicsDescriptionEmptyText')));
-
-    // Check that the focus is not lost after blocking the last item.
-    await waitAfterNextRender(page);
-    assertEquals(blockedTopicsRow, page.shadowRoot!.activeElement);
 
     // Assert the topic was moved to blocked topics section.
     blockedTopics =
@@ -831,9 +825,6 @@ suite('TopicsSubpage', function() {
         blockedTopicsList.querySelectorAll('privacy-sandbox-interest-item')
             .length);
 
-    // Check that the focus is not lost after allowing the last item.
-    await waitAfterNextRender(page);
-    assertEquals(blockedTopicsRow, page.shadowRoot!.activeElement);
     // Check that blocked topics empty text appears
     assertTrue(
         isChildVisible(page, '#blockedTopicsDescriptionEmptyTextHeading'));

@@ -63,6 +63,13 @@ constexpr auto kPageActionProperties =
             },
         },
         {
+            kActionSidePanelShowReadAnything,
+            {
+                .histogram_name = "ReadingMode",
+                .type = PageActionIconType::kReadingMode,
+            },
+        },
+        {
             kActionOffersAndRewardsForPage,
             {
                 .histogram_name = "PaymentsOfferNotification",
@@ -133,6 +140,55 @@ constexpr auto kPageActionProperties =
                 // TODO(crbug.com/376283618): Create a dedicated element ID once
                 // `FindBarIcon` is removed.
                 .element_identifier = FindBarIcon::kElementId,
+            },
+        },
+        {
+            kActionShowCookieControls,
+            {
+                .histogram_name = "CookieControls",
+                .type = PageActionIconType::kCookieControls,
+                .element_identifier = kCookieControlsIconElementId,
+            },
+        },
+        {
+            kActionShowAddressesBubbleOrPage,
+            {
+                .histogram_name = "AddressAutofill",
+                .type = PageActionIconType::kAutofillAddress,
+            },
+        },
+        {
+            kActionVirtualCardEnroll,
+            {
+                .histogram_name = "VirtualCardEnroll",
+                .type = PageActionIconType::kVirtualCardEnroll,
+            },
+        },
+        {
+            kActionFilledCardInformation,
+            {
+                .histogram_name = "FilledCardInformation",
+                .type = PageActionIconType::kFilledCardInformation,
+            },
+        },
+        {
+            kActionShowPaymentsBubbleOrPage,
+            {
+                .histogram_name = "SavePayments",
+                // This action id corresponds to both `kSaveCard` and
+                // `kSaveIban` page action icon types. Since the framework only
+                // supports 1:1 mapping of `ActionId`<->`PageActionIconType`,
+                // and since `PageActionIconType` will be removed as an
+                // identifier for page actions post migration, we choose to only
+                // represent `kSaveCard` as the corresponding
+                // `PageActionIconType` for `kActionShowPaymentsBubbleOrPage`.
+                //
+                // This peculiarity is handled well in all flows that rely on
+                // `ActionId`<->`PageActionIconType` conversions, except in
+                // framework level metrics for individual page action icons.
+                // Therefore, we should rely on feature level metrics for this
+                // particular page action.
+                .type = PageActionIconType::kSaveCard,
             },
         },
     });

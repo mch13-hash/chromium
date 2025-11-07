@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -49,7 +49,8 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
   // DesktopCaptureDevice for it. May return NULL in case of a failure (e.g. if
   // requested window was destroyed).
   static std::unique_ptr<media::VideoCaptureDevice> Create(
-      const DesktopMediaID& source);
+      const DesktopMediaID& source,
+      Client* device_client);
 
   DesktopCaptureDevice(const DesktopCaptureDevice&) = delete;
   DesktopCaptureDevice& operator=(const DesktopCaptureDevice&) = delete;

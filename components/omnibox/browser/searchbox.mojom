@@ -38,6 +38,7 @@ struct SuggestionAnswer {
 };
 
 struct AutocompleteMatch {
+  bool is_hidden;  // Whether match should be hidden from UI.
   mojo_base.mojom.String16 a11y_label;
   bool allowed_to_be_default_match;
   array<Action> actions;
@@ -83,6 +84,8 @@ struct AutocompleteMatch {
   // holes for sale in" is "hobbit holes for sale" and the match contents
   // would be the text following "sale".
   mojo_base.mojom.String16? tail_suggest_common_prefix;
+  // Used to determine if keyword visual treatment should be applied.
+  bool has_instant_keyword;
   // Derived from `AutocompleteMatch::associated_keyword` and a few other
   // fields. Determines the text shown in the keyword chip, which is shown if
   // this is non-empty.
@@ -103,12 +106,63 @@ struct TabInfo {
   mojo_base.mojom.TimeTicks last_active;
 };
 
-// Information about a file selected by the user in the WebUI.
+// LINT.IfChange(ToolMode)
+// See also:
+// https://crsrc.org/c/third_party/omnibox_proto/aim_tools_and_models.proto
+enum ToolMode {
+  kDefault = 0,
+  kDeepSearch = 1,
+  kCreateImage = 4,
+};
+// LINT.ThenChange(//ui/webui/resources/cr_components/composebox/contextual_entrypoint_and_carousel.ts:ComposeboxMode)
+
+// Represents a file attachment who's upload was started browser-side (currently
+// an image or PDF only). The stub name is intended to indicate that usage of
+// this struct is being iterated on and usage must currently be flagged with
+// `MojomWorkInProgress`.
+struct FileAttachmentStub {
+  // The unique identifier of the file.
+  mojo_base.mojom.UnguessableToken uuid;
+  // The name of the file.
+  string name;
+  // The mime type of the file.
+  string mime_type;
+  // The data URL of the file if it is an image.
+  string? image_data_url;
+};
+
+// Represents a tab attachment chosen browser-side and communicated to WebUI.
+// The stub name is intended to indicate that usage of
+// this struct is being iterated on and usage must currently be flagged with
+// `MojomWorkInProgress`.
+struct TabAttachmentStub {
+  // The unique identifier of the tab.
+  int32 tab_id;
+  // The title of the tab.
+  string title;
+  // The URL of the tab.
+  url.mojom.Url url;
+};
+
+// Represents a single attachment to the search context, either a file or a tab.
+// The stub name is intended to indicate that usage of
+// this struct is being iterated on and usage must currently be flagged with
+// `MojomWorkInProgress`.
+union SearchContextAttachmentStub {
+  FileAttachmentStub file_attachment;
+  TabAttachmentStub tab_attachment;
+};
+
+// Information about a contextual input.
 struct SelectedFileInfo {
   // Name of the file.
   string file_name;
   // Mime type of the file.
   string mime_type;
+  // The data URL of the file if it is an image.
+  string? image_data_url;
+  // Whether the file is deletable from the UI.
+  bool is_deletable;
   // Time that the file was selected at.
   mojo_base.mojom.JSTime selection_time;
 };
@@ -208,9 +262,21 @@ interface PageHandler {
   // it is deletable. |url| is used to confirm the match |line| selection.
   DeleteAutocompleteMatch(uint8 line, url.mojom.Url url);
 
-  // Executes the Pedal Action. match_selection_timestamp is the number of
-  // microseconds since Jan. 1, 1970 (ECMAScript epoch).
-  // |url| is only used to confirm the match |line| selection.
+  // Activate a keyword. `match_selection_timestamp` is the number of
+  // microseconds since Jan. 1, 1970 (ECMAScript epoch). `url` is only used to
+  // confirm the match `line` selection. `is_mouse_event` is used for logging.
+  ActivateKeyword(uint8 line,
+                url.mojom.Url url,
+                mojo_base.mojom.TimeTicks match_selection_timestamp,
+                bool is_mouse_event);
+
+  // Opens Context Menu
+  ShowContextMenu(gfx.mojom.Point point);
+
+  // Executes the Pedal Action. `match_selection_timestamp` is the number of
+  // microseconds since Jan. 1, 1970 (ECMAScript epoch). `url` is only used to
+  // confirm the match `line` selection. `mouse_button`, and modifier keys are
+  // used to determine the disposition.
   ExecuteAction(uint8 line,
                 uint8 action_index,
                 url.mojom.Url url,
@@ -256,7 +322,8 @@ interface PageHandler {
 
   // Attach a tab to the query context. If the tab is not found, no token will
   // be returned.
-  AddTabContext(int32 tab_id) => (mojo_base.mojom.UnguessableToken? token);
+  AddTabContext(int32 tab_id, bool delay_upload) =>
+                (mojo_base.mojom.UnguessableToken? token);
 
   // Notify handler of context deletion. This removes the context data (e.g.
   // File, or tab page content) from the browser-side cache.
@@ -264,6 +331,14 @@ interface PageHandler {
 
   // Clears all files from cache.
   ClearFiles();
+
+  // Called when a user submits a query with valid input.
+  SubmitQuery(string query_text,
+              uint8 mouse_button,
+              bool alt_key,
+              bool ctrl_key,
+              bool meta_key,
+              bool shift_key);
 };
 
 // WebUI-side handler for requests from the browser.
@@ -290,4 +365,11 @@ interface Page {
       mojo_base.mojom.UnguessableToken token,
       composebox_query.mojom.FileUploadStatus status,
       composebox_query.mojom.FileUploadErrorType? error_type);
+
+  // Notifies the page that the tab strip has changed.
+  OnTabStripChanged();
+
+  // Adds a contextual input to the UI.
+  AddFileContext(mojo_base.mojom.UnguessableToken token,
+                 SelectedFileInfo file_info);
 };

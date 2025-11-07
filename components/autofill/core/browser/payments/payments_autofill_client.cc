@@ -7,7 +7,6 @@
 #include <optional>
 #include <vector>
 
-#include "base/functional/callback.h"
 #include "components/autofill/core/browser/autofill_progress_dialog_type.h"
 #include "components/autofill/core/browser/data_model/payments/credit_card.h"
 #include "components/autofill/core/browser/payments/autofill_error_dialog_context.h"
@@ -69,6 +68,11 @@ const AutofillOfferManager* PaymentsAutofillClient::GetAutofillOfferManager()
 const PaymentsDataManager& PaymentsAutofillClient::GetPaymentsDataManager()
     const {
   return const_cast<PaymentsAutofillClient*>(this)->GetPaymentsDataManager();
+}
+
+const payments::SaveAndFillManager*
+PaymentsAutofillClient::GetSaveAndFillManager() const {
+  return const_cast<PaymentsAutofillClient*>(this)->GetSaveAndFillManager();
 }
 
 }  // namespace autofill::payments

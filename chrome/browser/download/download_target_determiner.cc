@@ -51,7 +51,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/origin.h"
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "extensions/common/feature_switch.h"
 #endif
@@ -72,9 +72,11 @@
 #include "chrome/browser/chromeos/policy/dlp/dlp_file_destination.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager_factory.h"
+#include "components/download/public/common/base_file.h"
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
+#include "components/download/public/common/download_file.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
 #endif
 
@@ -606,13 +608,17 @@ DownloadTargetDeterminer::DoRequestConfirmation() {
       while (!sanitized_name.empty() && sanitized_name.back() == L'.') {
           sanitized_name.pop_back();
       }
+      // trim trailing whitespace (space, tab, NBSP) to prevent stale extensions
+      base::TrimWhitespace(sanitized_name, base::TrimPositions::TRIM_TRAILING, &sanitized_name);
       if (sanitized_name.empty()) {
         sanitized_name = base::UTF8ToWide(
             l10n_util::GetStringUTF8(IDS_DEFAULT_DOWNLOAD_FILENAME));
       }
       sanitized_path =
           virtual_path_.DirName().Append(base::FilePath(sanitized_name));
-      GenerateSafeFileName(&sanitized_path, virtual_path_.Extension(),
+      const base::FilePath::StringType post_sanitize_ext =
+          base::FilePath(sanitized_name).Extension();
+      GenerateSafeFileName(&sanitized_path, post_sanitize_ext,
                            download_->GetMimeType());
 #endif  // BUILDFLAG(IS_WIN)
       delegate_->RequestConfirmation(
@@ -627,8 +633,8 @@ DownloadTargetDeterminer::DoRequestConfirmation() {
           content::DownloadItemUtils::GetBrowserContext(download_);
       bool isOffTheRecord =
           Profile::FromBrowserContext(browser_context)->IsOffTheRecord();
-      if (isOffTheRecord &&
-          (!download_->IsTransient() || download_->IsMustDownload())) {
+      if (isOffTheRecord && (!download_->IsTransient() ||
+                             !download_->AllowAutoOpenAfterCompletion())) {
         delegate_->RequestIncognitoWarningConfirmation(base::BindOnce(
             &DownloadTargetDeterminer::RequestIncognitoWarningConfirmationDone,
             weak_ptr_factory_.GetWeakPtr()));
@@ -1242,8 +1248,8 @@ DownloadConfirmationReason DownloadTargetDeterminer::NeedsConfirmation(
       DownloadItem::TARGET_DISPOSITION_PROMPT)
     return DownloadConfirmationReason::SAVE_AS;
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // Don't prompt for extension downloads if the installation site is white
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+  // Don't prompt for extension downloads if the installation site is allow
   // listed.
   if (download_crx_util::IsTrustedExtensionDownload(GetProfile(), *download_))
     return DownloadConfirmationReason::NONE;

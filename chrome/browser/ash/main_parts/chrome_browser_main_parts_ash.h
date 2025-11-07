@@ -10,12 +10,12 @@
 #include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/ash/external_metrics/external_metrics.h"
 #include "chrome/browser/ash/performance/doze_mode_power_status_scheduler.h"
 #include "chrome/browser/chrome_browser_main_linux.h"
 #include "chrome/browser/memory/memory_kills_monitor.h"
 #include "chromeos/ash/components/pcie_peripheral/ash_usb_detector.h"
+#include "printing/buildflags/buildflags.h"  // USE_CUPS
 
 class AmbientClientImpl;
 class AssistantBrowserDelegateImpl;
@@ -96,6 +96,10 @@ class VideoConferenceAppServiceClient;
 class VideoConferenceAshFeatureClient;
 class DozeModePowerStatusScheduler;
 class UserLoginPermissionTracker;
+
+#if BUILDFLAG(USE_CUPS)
+class LocalPrinter;
+#endif
 
 namespace carrier_lock {
 class CarrierLockManager;
@@ -304,6 +308,10 @@ class ChromeBrowserMainPartsAsh : public ChromeBrowserMainPartsLinux {
   std::unique_ptr<ash::MagicBoostControllerAsh> magic_boost_controller_ash_;
 
   std::unique_ptr<parent_access::ParentAccessService> parent_access_service_;
+
+#if BUILDFLAG(USE_CUPS)
+  std::unique_ptr<ash::LocalPrinter> local_printer_;
+#endif
 
   base::WeakPtrFactory<ChromeBrowserMainPartsAsh> weak_ptr_factory_{this};
 };

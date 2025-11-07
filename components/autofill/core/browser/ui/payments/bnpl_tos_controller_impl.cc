@@ -26,8 +26,10 @@ using autofill_metrics::BnplTosDialogResult;
 using autofill_metrics::LogBnplTosDialogShown;
 
 namespace {
+// LINT.IfChange
 constexpr std::string_view kWalletLinkText = "wallet.google.com";
 constexpr std::string_view kWalletUrlString = "https://wallet.google.com/";
+// LINT.ThenChange(//chrome/browser/touch_to_fill/autofill/android/internal/java/src/org/chromium/chrome/browser/touch_to_fill/payments/TouchToFillPaymentMethodMediator.java)
 }  // namespace
 
 BnplTosModel::BnplTosModel() = default;
@@ -41,6 +43,8 @@ BnplTosModel& BnplTosModel::operator=(const BnplTosModel& other) = default;
 BnplTosModel& BnplTosModel::operator=(BnplTosModel&& other) = default;
 
 BnplTosModel::~BnplTosModel() = default;
+
+bool BnplTosModel::operator==(const BnplTosModel&) const = default;
 
 BnplTosControllerImpl::BnplTosControllerImpl(AutofillClient* client)
     : client_(CHECK_DEREF(client)) {}
@@ -69,7 +73,14 @@ u16string BnplTosControllerImpl::GetCancelButtonLabel() const {
 }
 
 u16string BnplTosControllerImpl::GetTitle() const {
-  return GetStringFUTF16(IDS_AUTOFILL_BNPL_TOS_TITLE,
+  if (model_.issuer.payment_instrument() &&
+      model_.issuer.payment_instrument()->action_required().contains(
+          autofill::PaymentInstrument::ActionRequired::kAcceptTos)) {
+    return GetStringFUTF16(IDS_AUTOFILL_BNPL_TOS_LINKED_TITLE,
+                           model_.issuer.GetDisplayName());
+  }
+
+  return GetStringFUTF16(IDS_AUTOFILL_BNPL_TOS_UNLINKED_TITLE,
                          model_.issuer.GetDisplayName());
 }
 

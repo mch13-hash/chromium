@@ -47,16 +47,29 @@ public class UiAndroidFeatureList {
                     /* defaultValue= */ false,
                     /* defaultValueInTests= */ true);
 
-    public static final CachedFlag sFormFactorUseMaxWindowMetrics =
+    public static final CachedFlag sRefactorMinWidthContextOverride =
             newCachedFlag(
-                    UiAndroidFeatures.FORM_FACTOR_USE_MAX_WINDOW_METRICS,
-                    /* defaultValue= */ false,
-                    /* defaultValueInTests= */ false);
+                    UiAndroidFeatures.REFACTOR_MIN_WIDTH_CONTEXT_OVERRIDE,
+                    /* defaultValue= */ true,
+                    /* defaultValueInTests= */ true);
+
+    public static final CachedFlag sReportBottomOverscrolls =
+            newCachedFlag(
+                    UiAndroidFeatures.REPORT_BOTTOM_OVERSCROLLS,
+                    /* defaultValue= */ true,
+                    /* defaultValueInTests= */ true);
+
+    public static final MutableFlagWithSafeDefault sAndroidTouchpadOverscrollHistoryNavigation =
+            // public static final CachedFlag sAndroidTouchpadOverscrollHistoryNavigation =
+            // newCachedFlag(UiAndroidFeatures.ANDROID_TOUCHPAD_OVERSCROLL_HISTORY_NAVIGATION,
+            newMutableFlagWithSafeDefault(
+                    UiAndroidFeatures.ANDROID_TOUCHPAD_OVERSCROLL_HISTORY_NAVIGATION,
+                    /* defaultValue= */ true);
 
     public static final List<CachedFlag> sFlagsCachedUiAndroid =
             List.of(
                     sAndroidUseCorrectWindowBounds,
                     sAndroidUseDisplayTopology,
                     sAndroidWindowOcclusion,
-                    sFormFactorUseMaxWindowMetrics);
+                    sRefactorMinWidthContextOverride);
 }

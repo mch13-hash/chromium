@@ -12,7 +12,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
@@ -52,7 +51,7 @@
 #include "ui/gfx/image/image_skia_rep_default.h"
 
 #if BUILDFLAG(IS_WIN)
-#include "ui/gfx/icon_util.h"
+#include "ui/gfx/win/icon_util.h"
 #endif
 
 #if BUILDFLAG(IS_MAC)

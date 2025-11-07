@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/features.gni")
 import("//ios/web/public/js_messaging/optimize_js.gni")
 import("//ios/web/public/js_messaging/optimize_ts.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
@@ -125,6 +124,7 @@ compile_ts("fill_js_dependencies") {
     "resources/fill_element_inference.ts",
     "resources/fill_element_inference_util.ts",
     "resources/fill_util.ts",
+    "resources/form_utils.ts",
   ]
 
   deps = [
@@ -177,7 +177,7 @@ optimize_ts("form_js") {
 optimize_ts("form_handlers_js") {
   sources = [ "resources/form_handlers.ts" ]
   deps = [
-    "//components/autofill/ios/form_util:fill_js_dependencies",
+    ":fill_js_dependencies",
     "//ios/web/public/js_messaging:gcrweb",
     "//ios/web/public/js_messaging:util_scripts",
   ]

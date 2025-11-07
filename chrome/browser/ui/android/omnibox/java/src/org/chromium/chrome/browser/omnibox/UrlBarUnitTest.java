@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.text.InputType;
 import android.text.Layout;
 import android.text.SpannableStringBuilder;
@@ -62,6 +64,7 @@ import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.omnibox.UrlBar.UrlBarDelegate;
 import org.chromium.chrome.browser.omnibox.test.R;
+import org.chromium.components.omnibox.OmniboxFeatureList;
 
 import java.util.Collections;
 import java.util.List;
@@ -97,6 +100,9 @@ public class UrlBarUnitTest {
     private @Mock Layout mLayout;
     private @Mock TextPaint mPaint;
 
+    private int mLastTextDirection;
+    private int mLastTextAlignment;
+
     private final String mShortPath = "/aaaa";
     private final String mLongPath =
             "/" + TextUtils.join("", Collections.nCopies(MIN_LENGTH_FOR_TRUNCATION, "a"));
@@ -113,6 +119,16 @@ public class UrlBarUnitTest {
                         ContextUtils.getApplicationContext(), R.style.Theme_BrowserUI_DayNight);
         mUrlBar = spy(new UrlBarApi26(ctx, null));
         mUrlBar.setDelegate(mUrlBarDelegate);
+
+        mLastTextDirection = -1;
+        mLastTextAlignment = -1;
+
+        doAnswer(i -> mLastTextDirection = i.getArgument(0))
+                .when(mUrlBar)
+                .setTextDirection(anyInt());
+        doAnswer(i -> mLastTextAlignment = i.getArgument(0))
+                .when(mUrlBar)
+                .setTextAlignment(anyInt());
 
         lenient().doReturn(1).when(mLayout).getLineCount();
         lenient()
@@ -614,7 +630,7 @@ public class UrlBarUnitTest {
         mUrlBar.setScrollState(UrlBar.ScrollType.SCROLL_TO_TLD, mShortDomain.length());
         verify(mUrlBar, times(1)).calculateVisibleHint();
         String visibleHint = mUrlBar.getVisibleTextPrefixHint().toString();
-        assertEquals(url2.substring(0, NUMBER_OF_VISIBLE_CHARACTERS + 2), visibleHint);
+        assertEquals(url2.substring(0, NUMBER_OF_VISIBLE_CHARACTERS + 1), visibleHint);
     }
 
     @Test
@@ -921,5 +937,88 @@ public class UrlBarUnitTest {
         mUrlBar.setLayoutParams(new LayoutParams(123, LayoutParams.WRAP_CONTENT));
         mUrlBar.layout(0, 0, 123, 123);
         verify(mUrlBar, never()).post(mUrlBar.mEnforceMaxTextHeight);
+    }
+
+    @Test
+    public void fixupTextDirection_unfocusedWithText() {
+        mUrlBar.onFocusChanged(false, 0, null);
+        mUrlBar.setText("test");
+        assertEquals(View.TEXT_DIRECTION_LTR, mLastTextDirection);
+        assertEquals(View.TEXT_ALIGNMENT_TEXT_START, mLastTextAlignment);
+    }
+
+    @Test
+    public void fixupTextDirection_focusedWithText() {
+        mUrlBar.onFocusChanged(true, 0, null);
+        mUrlBar.setText("test");
+        assertEquals(View.TEXT_DIRECTION_INHERIT, mLastTextDirection);
+        assertEquals(View.TEXT_ALIGNMENT_TEXT_START, mLastTextAlignment);
+    }
+
+    @Test
+    public void fixupTextDirection_unfocusedWithoutText() {
+        mUrlBar.onFocusChanged(false, 0, null);
+        mUrlBar.setText("");
+        assertEquals(View.TEXT_DIRECTION_INHERIT, mLastTextDirection);
+        assertEquals(View.TEXT_ALIGNMENT_VIEW_START, mLastTextAlignment);
+    }
+
+    @Test
+    public void fixupTextDirection_focusedWithoutText() {
+        mUrlBar.onFocusChanged(true, 0, null);
+        mUrlBar.setText("");
+        assertEquals(View.TEXT_DIRECTION_INHERIT, mLastTextDirection);
+        assertEquals(View.TEXT_ALIGNMENT_VIEW_START, mLastTextAlignment);
+    }
+
+    @Test
+    public void getTextWithAutocomplete_modelNotInitialized() {
+        mUrlBar.setText("some autocomplete text");
+        assertNull(mUrlBar.getModelForTesting());
+        assertEquals("some autocomplete text", mUrlBar.getTextWithAutocomplete());
+    }
+
+    @Test
+    public void getTextWithoutAutocomplete_modelNotInitialized() {
+        mUrlBar.setText("some text");
+        assertNull(mUrlBar.getModelForTesting());
+        assertEquals("some text", mUrlBar.getTextWithoutAutocomplete());
+    }
+
+    @Test
+    public void getTextWithAutocomplete_modelInitialized() {
+        AutocompleteEditTextModelBase model = mock(AutocompleteEditTextModelBase.class);
+        doReturn("model autocomplete text").when(model).getTextWithAutocomplete();
+        mUrlBar.setText("user input");
+        mUrlBar.setModelForTesting(model);
+        assertEquals("model autocomplete text", mUrlBar.getTextWithAutocomplete());
+    }
+
+    @Test
+    public void getTextWithoutAutocomplete_modelInitialized() {
+        AutocompleteEditTextModelBase model = mock(AutocompleteEditTextModelBase.class);
+        doReturn("model non-autocomplete text").when(model).getTextWithoutAutocomplete();
+        mUrlBar.setText("user input");
+        mUrlBar.setModelForTesting(model);
+        assertEquals("model non-autocomplete text", mUrlBar.getTextWithoutAutocomplete());
+    }
+
+    @Test
+    @EnableFeatures(OmniboxFeatureList.MULTILINE_EDIT_FIELD)
+    public void setInputIsMultilineEligible() {
+        mUrlBar.onFocusChanged(true, View.LAYOUT_DIRECTION_LTR, new Rect());
+        mUrlBar.setInputIsMultilineEligible(true);
+        assertEquals(UrlBar.MULTILINE_EDIT_MAX_LINES, mUrlBar.getMaxLines());
+        assertFalse(mUrlBar.isSingleLine());
+
+        mUrlBar.setInputIsMultilineEligible(false);
+        assertEquals(1, mUrlBar.getMaxLines());
+        assertTrue(mUrlBar.isSingleLine());
+
+        // Defocused omnibox - never multiline
+        mUrlBar.onFocusChanged(false, View.LAYOUT_DIRECTION_LTR, new Rect());
+        mUrlBar.setInputIsMultilineEligible(true);
+        assertEquals(1, mUrlBar.getMaxLines());
+        assertTrue(mUrlBar.isSingleLine());
     }
 }

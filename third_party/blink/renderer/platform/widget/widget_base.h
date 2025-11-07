@@ -208,6 +208,7 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   // scheduler::WidgetScheduler::Delegate overrides:
   void RequestBeginMainFrameNotExpected(bool) override;
+  bool AreMainFramesPausedOrDeferred() const override;
 
   cc::AnimationHost* AnimationHost() const;
   cc::AnimationTimeline* ScrollAnimationTimeline() const;
@@ -278,7 +279,7 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
   void ImeFinishComposingText(bool keep_selection);
   bool IsForProvisionalFrame();
   void FlushInputProcessedCallback();
-  void CancelCompositionForPepper();
+  void CancelComposition();
 
   void RequestPresentationAfterScrollAnimationEnd(
       mojom::blink::Widget::ForceRedrawCallback callback);

@@ -8,6 +8,7 @@
 #import <variant>
 
 #import "base/check_deref.h"
+#import "base/containers/span.h"
 #import "base/functional/callback.h"
 #import "base/functional/callback_helpers.h"
 #import "base/memory/ptr_util.h"
@@ -16,11 +17,13 @@
 #import "base/strings/sys_string_conversions.h"
 #import "components/autofill/core/browser/autofill_progress_dialog_type.h"
 #import "components/autofill/core/browser/data_manager/payments/payments_data_manager.h"
+#import "components/autofill/core/browser/data_model/payments/bnpl_issuer.h"
 #import "components/autofill/core/browser/field_types.h"
 #import "components/autofill/core/browser/metrics/payments/credit_card_save_metrics.h"
 #import "components/autofill/core/browser/payments/autofill_error_dialog_context.h"
 #import "components/autofill/core/browser/payments/autofill_save_card_delegate.h"
 #import "components/autofill/core/browser/payments/autofill_save_card_ui_info.h"
+#import "components/autofill/core/browser/payments/bnpl_util.h"
 #import "components/autofill/core/browser/payments/card_unmask_challenge_option.h"
 #import "components/autofill/core/browser/payments/credit_card_cvc_authenticator.h"
 #import "components/autofill/core/browser/payments/credit_card_otp_authenticator.h"
@@ -34,6 +37,7 @@
 #import "components/autofill/core/browser/payments/virtual_card_enrollment_manager.h"
 #import "components/autofill/core/browser/ui/payments/autofill_progress_dialog_controller.h"
 #import "components/autofill/core/browser/ui/payments/autofill_progress_dialog_controller_impl.h"
+#import "components/autofill/core/browser/ui/payments/bnpl_tos_controller.h"
 #import "components/autofill/core/browser/ui/payments/card_unmask_authentication_selection_dialog_controller_impl.h"
 #import "components/autofill/core/browser/ui/payments/card_unmask_otp_input_dialog_controller.h"
 #import "components/autofill/core/browser/ui/payments/card_unmask_otp_input_dialog_controller_impl.h"
@@ -467,6 +471,10 @@ bool IOSChromePaymentsAutofillClient::IsRiskBasedAuthEffectivelyAvailable()
   return true;
 }
 
+bool IOSChromePaymentsAutofillClient::IsMandatoryReauthEnabled() {
+  return GetPaymentsDataManager().IsPaymentMethodsMandatoryReauthEnabled();
+}
+
 void IOSChromePaymentsAutofillClient::ShowMandatoryReauthOptInPrompt(
     base::OnceClosure accept_mandatory_reauth_callback,
     base::OnceClosure cancel_mandatory_reauth_callback,
@@ -525,29 +533,39 @@ bool IOSChromePaymentsAutofillClient::ShowTouchToFillLoyaltyCard(
 }
 
 bool IOSChromePaymentsAutofillClient::UpdateTouchToFillBnplPaymentMethod(
-    std::optional<uint64_t> extracted_amount,
+    std::optional<int64_t> extracted_amount,
     bool is_amount_supported_by_any_issuer) {
   return false;
 }
 
 bool IOSChromePaymentsAutofillClient::ShowTouchToFillProgress(
-    base::WeakPtr<TouchToFillDelegate> delegate) {
+    base::OnceClosure cancel_callback) {
   return false;
 }
 
 bool IOSChromePaymentsAutofillClient::ShowTouchToFillBnplIssuers(
-    base::WeakPtr<TouchToFillDelegate> delegate,
-    base::span<const BnplIssuer> bnpl_issuers_to_suggest) {
+    base::span<const payments::BnplIssuerContext> bnpl_issuer_contexts,
+    const std::string& app_locale,
+    base::OnceCallback<void(BnplIssuer)> selected_issuer_callback,
+    base::OnceClosure cancel_callback) {
+  return false;
+}
+
+bool IOSChromePaymentsAutofillClient::ShowTouchToFillBnplTos(
+    BnplTosModel model,
+    base::OnceClosure accept_callback,
+    base::OnceClosure cancel_callback) {
   return false;
 }
 
 bool IOSChromePaymentsAutofillClient::ShowTouchToFillError(
-    base::WeakPtr<TouchToFillDelegate> delegate,
     const AutofillErrorDialogContext& context) {
   return false;
 }
 
 void IOSChromePaymentsAutofillClient::HideTouchToFillPaymentMethod() {}
+
+void IOSChromePaymentsAutofillClient::SetTouchToFillVisible(bool visible) {}
 
 PaymentsDataManager& IOSChromePaymentsAutofillClient::GetPaymentsDataManager() {
   return client_->GetPersonalDataManager().payments_data_manager();

@@ -127,26 +127,12 @@ public class BaseJUnit4ClassRunner extends AndroidJUnit4ClassRunner {
      * failure.
      */
     public static class CascadingFailureException extends RuntimeException {
-        private CascadingFailureException(String message) {
-            super(message);
-        }
-
-        @Override
-        public String toString() {
-            // Shorten full name to just simple name.
-            return getClass().getSimpleName() + ": " + getLocalizedMessage();
-        }
-
-        /**
-         * Returns a new CascadingFailureException with the originalException marked as suppressed.
-         *
-         * @param message Error message for the CascadingFailureException
-         * @param originalException The original throwable being suppressed.
-         */
-        public static CascadingFailureException wrap(String message, Throwable originalException) {
-            CascadingFailureException exception = new CascadingFailureException(message);
-            exception.addSuppressed(originalException);
-            return exception;
+        private CascadingFailureException(String failedTestName, Throwable orig) {
+            super(
+                    "A previous batched test ("
+                            + failedTestName
+                            + ") failed and may be the cause of this failure (see \"Caused By\").",
+                    orig);
         }
     }
 
@@ -446,12 +432,7 @@ public class BaseJUnit4ClassRunner extends AndroidJUnit4ClassRunner {
 
     private Throwable wrapExceptionIfCascadingFailure(Throwable originalFailure) {
         if (mFailedBatchTestName == null) return originalFailure;
-        return CascadingFailureException.wrap(
-                "A previous batched test ("
-                        + mFailedBatchTestName
-                        + ") failed and may be the cause of the current failure. See suppressed"
-                        + " failure below.",
-                originalFailure);
+        return new CascadingFailureException(mFailedBatchTestName, originalFailure);
     }
 
     private void onBeforeTestMethod(FrameworkMethod method) {
@@ -461,17 +442,10 @@ public class BaseJUnit4ClassRunner extends AndroidJUnit4ClassRunner {
         boolean firstTestMethod = ResettersForTesting.getState() != State.BETWEEN_METHODS;
         ResettersForTesting.beforeHooksWillExecute();
         if (firstTestMethod) {
-            BaseChromiumAndroidJUnitRunner.sInMemorySharedPreferencesContext
-                    .createSharedPreferencesSnapshot();
             mJniZeroSnapshot = JniTestInstancesSnapshot.snapshotOverridesForTesting();
         } else {
-            BaseChromiumAndroidJUnitRunner.sInMemorySharedPreferencesContext
-                    .restoreSharedPreferencesSnapshot();
             JniTestInstancesSnapshot.restoreSnapshotForTesting(mJniZeroSnapshot);
         }
-
-        // TODO: Might be slow to do this before every test.
-        SharedPreferencesTestUtil.deleteOnDiskSharedPreferences(getApplication());
 
         Class<?> testClass = getTestClass().getJavaClass();
         CommandLineFlags.reset(testClass.getAnnotations(), method.getAnnotations());
@@ -489,9 +463,14 @@ public class BaseJUnit4ClassRunner extends AndroidJUnit4ClassRunner {
     protected void onBeforeTestClass() {
         Class<?> testClass = getTestClass().getJavaClass();
         ResettersForTesting.beforeClassHooksWillExecute();
-        BaseChromiumAndroidJUnitRunner.sInMemorySharedPreferencesContext.resetSharedPreferences();
-        JniTestInstancesSnapshot.clearAllForTesting();
 
+        // Reset SharedPreferences only between test classes (not methods) since some tests rely
+        // on state persisting between methods (e.g. when an Activity remains open).
+        // Clear between classes to ensure that one test class cannot impact another.
+        BaseChromiumAndroidJUnitRunner.sInMemorySharedPreferencesContext.resetSharedPreferences();
+        SharedPreferencesTestUtil.deleteOnDiskSharedPreferences(getApplication());
+
+        JniTestInstancesSnapshot.clearAllForTesting();
         CommandLineFlags.reset(testClass.getAnnotations(), null);
         TestAnimations.reset(testClass, null);
 

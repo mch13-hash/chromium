@@ -1839,6 +1839,11 @@ static std::optional<ColorInterpolationSpace> ConsumeColorInterpolationSpace(
     case CSSValueID::kDisplayP3:
       read_color_space = Color::ColorSpace::kDisplayP3;
       break;
+    case CSSValueID::kDisplayP3Linear:
+      if (RuntimeEnabledFeatures::ColorSpaceDisplayP3LinearEnabled()) {
+        read_color_space = Color::ColorSpace::kDisplayP3Linear;
+      }
+      break;
     case CSSValueID::kA98Rgb:
       read_color_space = Color::ColorSpace::kA98RGB;
       break;
@@ -1847,6 +1852,11 @@ static std::optional<ColorInterpolationSpace> ConsumeColorInterpolationSpace(
       break;
     case CSSValueID::kRec2020:
       read_color_space = Color::ColorSpace::kRec2020;
+      break;
+    case CSSValueID::kRec2100Linear:
+      if (RuntimeEnabledFeatures::ColorSpaceRec2100LinearEnabled()) {
+        read_color_space = Color::ColorSpace::kRec2100Linear;
+      }
       break;
     case CSSValueID::kLab:
       read_color_space = Color::ColorSpace::kLab;
@@ -3665,6 +3675,16 @@ CSSIdentifierValue* ConsumeGeometryBox(CSSParserTokenStream& stream) {
                       CSSValueID::kViewBox>(stream);
 }
 
+// https://drafts.csswg.org/css-shapes-1/#valdef-shape-box-half-border-box
+CSSIdentifierValue* ConsumeGeometryBoxForBorderShape(
+    CSSParserTokenStream& stream) {
+  if (CSSIdentifierValue* value =
+          ConsumeIdent<CSSValueID::kHalfBorderBox>(stream)) {
+    return value;
+  }
+  return ConsumeGeometryBox(stream);
+}
+
 void AddProperty(CSSPropertyID resolved_property,
                  CSSPropertyID current_shorthand,
                  const CSSValue& value,
@@ -4398,59 +4418,40 @@ CSSValue* ConsumeAnimationDuration(CSSParserTokenStream& stream,
                      CSSPrimitiveValue::ValueRange::kNonNegative);
 }
 
+CSSIdentifierValue* ConsumeAnimationTriggerBehavior(
+    CSSParserTokenStream& stream,
+    const CSSParserContext& context) {
+  return ConsumeIdent<CSSValueID::kPlay, CSSValueID::kPause, CSSValueID::kReset,
+                      CSSValueID::kPlayOnce, CSSValueID::kPlayAlternate,
+                      CSSValueID::kPlayForwards, CSSValueID::kPlayBackwards,
+                      CSSValueID::kPlayPause, CSSValueID::kReplay,
+                      CSSValueID::kNone>(stream);
+}
+
 CSSValue* ConsumeSingleAnimationTriggerAttachment(
     CSSParserTokenStream& stream,
     const CSSParserContext& context) {
-  if (stream.Peek().FunctionId() != CSSValueID::kTrigger) {
+  CSSCustomIdentValue* trigger_name = nullptr;
+
+  // Consume the trigger name.
+  trigger_name = ConsumeDashedIdent(stream, context);
+  if (!trigger_name) {
     return nullptr;
   }
 
-  CSSCustomIdentValue* trigger_name = nullptr;
-  HeapVector<std::pair<Member<const CSSCustomIdentValue>,
-                       Member<const CSSCustomIdentValue>>>
-      action_behavior_pairs;
-
-  {
-    CSSParserTokenStream::BlockGuard guard(stream);
-    stream.ConsumeWhitespace();
-    // First get the trigger name.
-    trigger_name = ConsumeDashedIdent(stream, context);
-    if (!trigger_name) {
-      return nullptr;
-    }
-
-    stream.ConsumeWhitespace();
-
-    // Now get the action-behavior pairs.
-    while (!stream.AtEnd()) {
-      if (!ConsumeCommaIncludingWhitespace(stream)) {
-        return nullptr;
-      }
-
-      // TODO: separate this out into a ConsumeTriggerAction method, which can
-      // consume actions which are functions, e.g. keypress("Enter"). For now,
-      // we only support simple ident actions.
-      CSSCustomIdentValue* action = ConsumeCustomIdent(stream, context);
-      if (!action) {
-        return nullptr;
-      }
-
-      CSSCustomIdentValue* behavior = ConsumeCustomIdent(stream, context);
-      if (!behavior) {
-        return nullptr;
-      }
-
-      action_behavior_pairs.push_back(std::make_pair(action, behavior));
-    }
-  }
-  stream.ConsumeWhitespace();
-
-  if (!action_behavior_pairs.empty()) {
-    return MakeGarbageCollected<cssvalue::CSSTriggerAttachmentValue>(
-        trigger_name, action_behavior_pairs);
+  // Consume the enter-behavior.
+  const CSSIdentifierValue* enter_behavior =
+      ConsumeAnimationTriggerBehavior(stream, context);
+  if (!enter_behavior) {
+    return nullptr;
   }
 
-  return nullptr;
+  // Consume the (optional) exit-behavior.
+  const CSSIdentifierValue* exit_behavior =
+      ConsumeAnimationTriggerBehavior(stream, context);
+
+  return MakeGarbageCollected<cssvalue::CSSTriggerAttachmentValue>(
+      trigger_name, enter_behavior, exit_behavior);
 }
 
 CSSValue* ConsumeTimelineRangeName(CSSParserTokenStream& stream) {
@@ -4636,10 +4637,6 @@ CSSValue* ConsumeTimelineTriggerValue(CSSPropertyID property,
     case CSSPropertyID::kTimelineTriggerName:
       return css_parsing_utils::ConsumeSingleTimelineTriggerName(stream,
                                                                  context);
-    case CSSPropertyID::kTimelineTriggerBehavior:
-      return css_parsing_utils::ConsumeIdent<
-          CSSValueID::kOnce, CSSValueID::kRepeat, CSSValueID::kAlternate,
-          CSSValueID::kState>(stream);
     case CSSPropertyID::kTimelineTriggerSource:
       return css_parsing_utils::ConsumeAnimationTimeline(stream, context);
     case CSSPropertyID::kTimelineTriggerRangeStart:
@@ -5480,12 +5477,16 @@ CSSValue* ConsumeGapDecorationPropertyValue(
     case CSSGapDecorationPropertyType::kWidth:
       return ConsumeLineWidth(stream, context,
                               css_parsing_utils::UnitlessQuirk::kForbid);
-    case CSSGapDecorationPropertyType::kStyle: {
+    case CSSGapDecorationPropertyType::kStyle:
       if (CSSParserFastPaths::IsBorderStyleValue(stream.Peek().Id())) {
         return ConsumeIdent(stream);
       }
       return nullptr;
-    }
+    case CSSGapDecorationPropertyType::kEdgeEndOutset:
+    case CSSGapDecorationPropertyType::kEdgeStartOutset:
+    case CSSGapDecorationPropertyType::kInteriorEndOutset:
+    case CSSGapDecorationPropertyType::kInteriorStartOutset:
+      return nullptr;
   }
 }
 
@@ -7339,6 +7340,96 @@ bool ConsumeGapDecorationsShorthandRepeatFunction(
   return true;
 }
 
+// Consuming the `rule-outset`, `column-rule-outset`, `row-rule-outset`
+// shorthands with syntax <length-percentage> <length-percentage>?
+// [ / <length-percentage> <length-percentage>?]?
+bool ConsumeGapDecorationsRuleOutsetShorthand(
+    bool important,
+    const CSSParserContext& context,
+    CSSParserTokenStream& stream,
+    CSSValue*& rule_edge_start_outset,
+    CSSValue*& rule_edge_end_outset,
+    CSSValue*& rule_interior_start_outset,
+    CSSValue*& rule_interior_end_outset) {
+  CHECK(RuntimeEnabledFeatures::CSSGapDecorationEnabled());
+
+  rule_edge_start_outset = nullptr;
+  rule_edge_end_outset = nullptr;
+  rule_interior_start_outset = nullptr;
+  rule_interior_end_outset = nullptr;
+
+  wtf_size_t edge_count = 0;
+  wtf_size_t interior_count = 0;
+  bool consumed_slash = false;
+
+  while (!stream.AtEnd() && !(stream.Peek().GetType() == kDelimiterToken &&
+                              stream.Peek().Delimiter() == '!')) {
+    if (ConsumeSlashIncludingWhitespace(stream)) {
+      // Slash rules: only one allowed; must follow at least one edge value.
+      if (consumed_slash || edge_count == 0) {
+        return false;
+      }
+      consumed_slash = true;
+      continue;
+    }
+
+    CSSValue* value = ConsumeLengthOrPercent(
+        stream, context, CSSPrimitiveValue::ValueRange::kAll);
+    if (!value) {
+      return false;
+    }
+
+    if (!consumed_slash) {
+      if (edge_count >= 2) {
+        return false;
+      }
+      if (edge_count == 0) {
+        rule_edge_start_outset = value;
+      } else {
+        rule_edge_end_outset = value;
+      }
+      ++edge_count;
+    } else {
+      if (interior_count >= 2) {
+        return false;
+      }
+      if (interior_count == 0) {
+        rule_interior_start_outset = value;
+      } else {
+        rule_interior_end_outset = value;
+      }
+      ++interior_count;
+    }
+  }
+
+  // At least one column/row rule edge value is needed.
+  if (edge_count == 0) {
+    return false;
+  }
+
+  // If slash present, there must be at least one interior value.
+  if (consumed_slash && interior_count == 0) {
+    return false;
+  }
+
+  // Expand shorthands per grammar:
+  // <len-perc> <len-perc>? [ / <len-perc> <len-perc>? ]?
+  if (!rule_edge_end_outset) {
+    rule_edge_end_outset = rule_edge_start_outset;
+  }
+
+  if (!consumed_slash) {
+    rule_interior_start_outset = rule_edge_start_outset;
+    rule_interior_end_outset = rule_edge_end_outset;
+  } else {
+    if (!rule_interior_end_outset) {
+      rule_interior_end_outset = rule_interior_start_outset;
+    }
+  }
+
+  return true;
+}
+
 // Top level parsing function for the gap-decorations shorthand, which handles
 // the parsing of simple <gap-rule> or repeat <gap-rule> values.
 bool ConsumeGapDecorationsRuleShorthand(bool important,
@@ -8901,22 +8992,24 @@ CSSValue* ConsumeFontSizeAdjust(CSSParserTokenStream& stream,
 
 namespace {
 
-// Consume 'flip-block || flip-inline || flip-start' into `flips`,
-// in the order that they appear.
+// Consume 'flip-block || flip-inline || flip-start || flip-x || flip-y'
+// into `flips`, in the order that they appear.
 //
 // Returns true if anything was set in `flip`.
 //
 // https://drafts.csswg.org/css-anchor-position-1/#typedef-position-try-fallbacks-try-tactic
 bool ConsumeFlipsInto(CSSParserTokenStream& stream,
-                      std::array<CSSValue*, 3>& flips) {
+                      std::array<CSSValue*, 5>& flips) {
   bool seen_flip_block = false;
   bool seen_flip_inline = false;
   bool seen_flip_start = false;
+  bool seen_flip_x = false;
+  bool seen_flip_y = false;
 
   wtf_size_t i = 0;
 
   while (!stream.AtEnd()) {
-    CHECK_LE(i, 3u);
+    CHECK_LE(i, 5u);
     if (!seen_flip_block &&
         (flips[i] = ConsumeIdent<CSSValueID::kFlipBlock>(stream))) {
       seen_flip_block = true;
@@ -8935,6 +9028,16 @@ bool ConsumeFlipsInto(CSSParserTokenStream& stream,
       ++i;
       continue;
     }
+    if (!seen_flip_x && (flips[i] = ConsumeIdent<CSSValueID::kFlipX>(stream))) {
+      seen_flip_x = true;
+      ++i;
+      continue;
+    }
+    if (!seen_flip_y && (flips[i] = ConsumeIdent<CSSValueID::kFlipY>(stream))) {
+      seen_flip_y = true;
+      ++i;
+      continue;
+    }
     break;
   }
   return i != 0;
@@ -8944,7 +9047,7 @@ bool ConsumeFlipsInto(CSSParserTokenStream& stream,
 CSSValue* ConsumeDashedIdentOrTactic(CSSParserTokenStream& stream,
                                      const CSSParserContext& context) {
   CSSValue* dashed_ident = nullptr;
-  std::array<CSSValue*, 3> flips = {nullptr};
+  std::array<CSSValue*, 5> flips = {nullptr};
   while (!stream.AtEnd()) {
     if (!dashed_ident && (dashed_ident = ConsumeDashedIdent(stream, context))) {
       continue;
@@ -8956,7 +9059,7 @@ CSSValue* ConsumeDashedIdentOrTactic(CSSParserTokenStream& stream,
         continue;
       }
     }
-    // flip-block || flip-inline || flip-start
+    // flip-block || flip-inline || flip-start || flip-x || flip-y
     if (!flips[0] && ConsumeFlipsInto(stream, flips)) {
       CHECK(flips[0]);
       continue;
@@ -9063,12 +9166,12 @@ struct PositionAreaKeyword {
     // [ span-all | center ]
     kGeneral,
     // [ left | right | span-left | span-right | x-start | x-end |
-    //   span-x-start | span-x-end | x-self-start | x-self-end |
-    //   span-x-self-start | span-x-self-end ]
+    //   span-x-start | span-x-end | self-x-start | self-x-end |
+    //   span-self-x-start | span-self-x-end ]
     kHorizontal,
     // [ top | bottom | span-top | span-bottom | y-start | y-end |
-    //   span-y-start | span-y-end | y-self-start | y-self-end |
-    //   span-y-self-start | span-y-self-end ]
+    //   span-y-start | span-y-end | self-y-start | self-y-end |
+    //   span-self-y-start | span-self-y-end ]
     kVertical,
     // [ inline-start | inline-end | span-inline-start | span-inline-end |
     //   self-inline-start | self-inline-end | span-self-inline-start |
@@ -9109,6 +9212,50 @@ struct PositionAreaKeyword {
   Type type;
 };
 
+namespace {
+
+std::optional<PositionAreaKeyword> ConsumeLegacyPositionAreaKeyword(
+    CSSParserTokenStream& stream) {
+  CHECK(RuntimeEnabledFeatures::PositionAreaXYSelfEnabled());
+  PositionAreaKeyword::Type type = PositionAreaKeyword::kHorizontal;
+  CSSValueID value_id = stream.ConsumeIncludingWhitespace().Id();
+  switch (value_id) {
+    case CSSValueID::kXSelfStart:
+      value_id = CSSValueID::kSelfXStart;
+      break;
+    case CSSValueID::kXSelfEnd:
+      value_id = CSSValueID::kSelfXEnd;
+      break;
+    case CSSValueID::kSpanXSelfStart:
+      value_id = CSSValueID::kSpanSelfXStart;
+      break;
+    case CSSValueID::kSpanXSelfEnd:
+      value_id = CSSValueID::kSpanSelfXEnd;
+      break;
+    case CSSValueID::kYSelfStart:
+      value_id = CSSValueID::kSelfYStart;
+      type = PositionAreaKeyword::kVertical;
+      break;
+    case CSSValueID::kYSelfEnd:
+      value_id = CSSValueID::kSelfYEnd;
+      type = PositionAreaKeyword::kVertical;
+      break;
+    case CSSValueID::kSpanYSelfStart:
+      value_id = CSSValueID::kSpanSelfYStart;
+      type = PositionAreaKeyword::kVertical;
+      break;
+    case CSSValueID::kSpanYSelfEnd:
+      value_id = CSSValueID::kSpanSelfYEnd;
+      type = PositionAreaKeyword::kVertical;
+      break;
+    default:
+      NOTREACHED();
+  }
+  return PositionAreaKeyword(CSSIdentifierValue::Create(value_id), type);
+}
+
+}  // namespace
+
 std::optional<PositionAreaKeyword> ConsumePositionAreaKeyword(
     CSSParserTokenStream& stream,
     bool allow_any_keyword) {
@@ -9131,10 +9278,10 @@ std::optional<PositionAreaKeyword> ConsumePositionAreaKeyword(
     case CSSValueID::kXEnd:
     case CSSValueID::kSpanXStart:
     case CSSValueID::kSpanXEnd:
-    case CSSValueID::kXSelfStart:
-    case CSSValueID::kXSelfEnd:
-    case CSSValueID::kSpanXSelfStart:
-    case CSSValueID::kSpanXSelfEnd:
+    case CSSValueID::kSelfXStart:
+    case CSSValueID::kSelfXEnd:
+    case CSSValueID::kSpanSelfXStart:
+    case CSSValueID::kSpanSelfXEnd:
       type = PositionAreaKeyword::kHorizontal;
       break;
     case CSSValueID::kTop:
@@ -9145,10 +9292,10 @@ std::optional<PositionAreaKeyword> ConsumePositionAreaKeyword(
     case CSSValueID::kYEnd:
     case CSSValueID::kSpanYStart:
     case CSSValueID::kSpanYEnd:
-    case CSSValueID::kYSelfStart:
-    case CSSValueID::kYSelfEnd:
-    case CSSValueID::kSpanYSelfStart:
-    case CSSValueID::kSpanYSelfEnd:
+    case CSSValueID::kSelfYStart:
+    case CSSValueID::kSelfYEnd:
+    case CSSValueID::kSpanSelfYStart:
+    case CSSValueID::kSpanSelfYEnd:
       type = PositionAreaKeyword::kVertical;
       break;
     case CSSValueID::kBlockStart:
@@ -9187,6 +9334,18 @@ std::optional<PositionAreaKeyword> ConsumePositionAreaKeyword(
     case CSSValueID::kSpanSelfEnd:
       type = PositionAreaKeyword::kSelfStartEnd;
       break;
+    case CSSValueID::kXSelfStart:
+    case CSSValueID::kXSelfEnd:
+    case CSSValueID::kSpanXSelfStart:
+    case CSSValueID::kSpanXSelfEnd:
+    case CSSValueID::kYSelfStart:
+    case CSSValueID::kYSelfEnd:
+    case CSSValueID::kSpanYSelfStart:
+    case CSSValueID::kSpanYSelfEnd:
+      if (RuntimeEnabledFeatures::PositionAreaXYSelfEnabled()) {
+        return ConsumeLegacyPositionAreaKeyword(stream);
+      }
+      return std::nullopt;
     default:
       return std::nullopt;
   }
@@ -9198,12 +9357,12 @@ std::optional<PositionAreaKeyword> ConsumePositionAreaKeyword(
 // <position-area> = [
 //                  [ left | center | right | span-left | span-right |
 //                    x-start | x-end | span-x-start | span-x-end |
-//                    x-self-start | x-self-end | span-x-self-start |
-//                    span-x-self-end | span-all ] ||
+//                    self-x-start | self-x-end | span-self-x-start |
+//                    span-self-x-end | span-all ] ||
 //                  [ top | center | bottom | span-top | span-bottom |
 //                    y-start | y-end | span-y-start | span-y-end |
-//                    y-self-start | y-self-end | span-y-self-start |
-//                    span-y-self-end | span-all ]
+//                    self-y-start | self-y-end | span-self-y-start |
+//                    span-self-y-end | span-all ]
 //                 |
 //                  [ block-start | center | block-end | span-block-start |
 //                    span-block-end | span-all ] ||

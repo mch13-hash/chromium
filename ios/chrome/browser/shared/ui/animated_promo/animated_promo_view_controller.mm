@@ -6,6 +6,7 @@
 
 #import "base/check.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/button_stack/button_stack_configuration.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_view_controller.h"
 #import "ios/chrome/common/ui/util/ui_util.h"
@@ -58,8 +59,9 @@ constexpr CGFloat kCustomTopOffsetForRegularSizeClass = -24;
 
   alertScreen.titleString = _titleString;
   alertScreen.subtitleString = _subtitleString;
-  alertScreen.primaryActionString = _primaryActionString;
-  alertScreen.secondaryActionString = _secondaryActionString;
+  alertScreen.configuration.primaryActionString = _primaryActionString;
+  alertScreen.configuration.secondaryActionString = _secondaryActionString;
+  [alertScreen reloadConfiguration];
   // The `alertScreen` itself should not show its own dismiss button, as
   // `AnimatedPromoViewController` will manage one for the whole view.
   alertScreen.showDismissBarButton = NO;
@@ -165,7 +167,7 @@ constexpr CGFloat kCustomTopOffsetForRegularSizeClass = -24;
   LottieAnimationConfiguration* config =
       [[LottieAnimationConfiguration alloc] init];
   config.animationName = animationAssetName;
-  config.loopAnimationCount = 1000;
+  config.shouldLoop = YES;
   return ios::provider::GenerateLottieAnimation(config);
 }
 

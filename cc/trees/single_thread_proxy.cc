@@ -630,6 +630,14 @@ void SingleThreadProxy::DidReceiveCompositorFrameAckOnImplThread() {
                "SingleThreadProxy::DidReceiveCompositorFrameAckOnImplThread");
   if (scheduler_on_impl_thread_)
     scheduler_on_impl_thread_->DidReceiveCompositorFrameAck();
+
+  // We do a PostTask here because freeing resources in some cases (such as in
+  // TextureLayer) is PostTasked and we want to make sure ack is received
+  // after resources are returned.
+  task_runner_provider_->MainThreadTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&SingleThreadProxy::DidReceiveCompositorFrameAck,
+                     frame_sink_bound_weak_ptr_));
 }
 
 void SingleThreadProxy::OnDrawForLayerTreeFrameSink(
@@ -832,7 +840,7 @@ void SingleThreadProxy::CompositeImmediatelyForTest(
     host_impl_->Animate();
 
     if (raster) {
-      LayerTreeHostImpl::FrameData frame;
+      FrameData frame;
       frame.begin_frame_ack = viz::BeginFrameAck(begin_frame_args, true);
       frame.origin_begin_main_frame_args = begin_frame_args;
       DoComposite(&frame);
@@ -870,7 +878,7 @@ void SingleThreadProxy::ScheduleRequestNewLayerTreeFrameSink() {
   }
 }
 
-DrawResult SingleThreadProxy::DoComposite(LayerTreeHostImpl::FrameData* frame) {
+DrawResult SingleThreadProxy::DoComposite(FrameData* frame) {
   TRACE_EVENT0("cc", "SingleThreadProxy::DoComposite");
 
   DrawResult draw_result;
@@ -1213,7 +1221,7 @@ void SingleThreadProxy::BeginMainFrameAbortedOnImplThread(
 
 DrawResult SingleThreadProxy::ScheduledActionDrawIfPossible() {
   DebugScopedSetImplThread impl(task_runner_provider_);
-  LayerTreeHostImpl::FrameData frame;
+  FrameData frame;
   frame.begin_frame_ack =
       scheduler_on_impl_thread_->CurrentBeginFrameAckForActiveTree();
   frame.origin_begin_main_frame_args =
@@ -1309,6 +1317,11 @@ void SingleThreadProxy::DidNotProduceFrame(const viz::BeginFrameAck& ack,
 void SingleThreadProxy::WillNotReceiveBeginFrame() {
   DebugScopedSetImplThread impl(task_runner_provider_);
   host_impl_->DidNotNeedBeginFrame();
+}
+
+void SingleThreadProxy::DidReceiveCompositorFrameAck() {
+  DebugScopedSetMainThread main(task_runner_provider_);
+  layer_tree_host_->DidReceiveCompositorFrameAckDeprecatedForCompositor();
 }
 
 void SingleThreadProxy::SetShouldThrottleFrameRate(bool flag) {

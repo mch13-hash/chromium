@@ -76,27 +76,28 @@ class GlicTabUnderlineView::UnderlineViewUpdater
     auto* glic_service = GetGlicKeyedService();
     GlicSharingManager& sharing_manager = glic_service->sharing_manager();
 
-    // Subscribe to changes in the focused tab.
-    focus_change_subscription_ =
-        sharing_manager.AddFocusedTabChangedCallback(base::BindRepeating(
-            &GlicTabUnderlineView::UnderlineViewUpdater::OnFocusedTabChanged,
-            base::Unretained(this)));
+    if (!GlicEnabling::IsMultiInstanceEnabledByFlags()) {
+      // Subscribe to changes in the focused tab.
+      focus_change_subscription_ =
+          sharing_manager.AddFocusedTabChangedCallback(base::BindRepeating(
+              &GlicTabUnderlineView::UnderlineViewUpdater::OnFocusedTabChanged,
+              base::Unretained(this)));
+      // Subscribe to changes in the context access indicator status.
+      indicator_change_subscription_ =
+          glic_service->AddContextAccessIndicatorStatusChangedCallback(
+              base::BindRepeating(&GlicTabUnderlineView::UnderlineViewUpdater::
+                                      OnIndicatorStatusChanged,
+                                  base::Unretained(this)));
 
-    // Subscribe to changes in the context access indicator status.
-    indicator_change_subscription_ =
-        glic_service->AddContextAccessIndicatorStatusChangedCallback(
-            base::BindRepeating(&GlicTabUnderlineView::UnderlineViewUpdater::
-                                    OnIndicatorStatusChanged,
-                                base::Unretained(this)));
+      // Observe changes in the floaty state.
+      glic_service->GetSingleInstanceWindowController().AddStateObserver(this);
+    }
 
     // Subscribe to changes in the set of pinned tabs.
     pinned_tabs_change_subscription_ =
         sharing_manager.AddPinnedTabsChangedCallback(base::BindRepeating(
             &GlicTabUnderlineView::UnderlineViewUpdater::OnPinnedTabsChanged,
             base::Unretained(this)));
-
-    // Observe changes in the floaty state.
-    glic_service->window_controller().AddStateObserver(this);
 
     // Subscribe to when new requests are made by glic.
     user_input_submitted_subscription_ =
@@ -107,7 +108,11 @@ class GlicTabUnderlineView::UnderlineViewUpdater
   UnderlineViewUpdater(const UnderlineViewUpdater&) = delete;
   UnderlineViewUpdater& operator=(const UnderlineViewUpdater&) = delete;
   ~UnderlineViewUpdater() override {
-    GetGlicKeyedService()->window_controller().RemoveStateObserver(this);
+    if (!GlicEnabling::IsMultiInstanceEnabledByFlags()) {
+      GetGlicKeyedService()
+          ->GetSingleInstanceWindowController()
+          .RemoveStateObserver(this);
+    }
   }
 
   // Called when the focused tab changes with the focused tab data object.
@@ -200,11 +205,10 @@ class GlicTabUnderlineView::UnderlineViewUpdater
 
   // The glic panel state must be separately observed because underlines of
   // pinned tabs uniquely respond to showing/hiding of the glic panel.
-  void PanelStateChanged(
-      const glic::mojom::PanelState& panel_state,
-      const GlicWindowController::PanelStateContext& context) override {
+  void PanelStateChanged(const glic::mojom::PanelState& panel_state,
+                         const PanelStateContext& context) override {
     UpdateUnderlineView(
-        panel_state.kind == mojom::PanelState::Kind::kHidden
+        panel_state.kind == mojom::PanelStateKind::kHidden
             ? UpdateUnderlineReason::kPanelStateChanged_PanelHidden
             : UpdateUnderlineReason::kPanelStateChanged_PanelShowing);
   }
@@ -306,7 +310,9 @@ class GlicTabUnderlineView::UnderlineViewUpdater
       case UpdateUnderlineReason::kContextAccessIndicatorOff: {
         // Underline should be hidden, with exception to pinned tabs while the
         // glic panel remains open.
-        if (IsUnderlineTabPinned() && IsGlicWindowShowing()) {
+        if (IsUnderlineTabPinned() &&
+            (GlicEnabling::IsMultiInstanceEnabledByFlags() ||
+             IsGlicWindowShowing())) {
           break;
         }
         HideUnderline();
@@ -355,18 +361,23 @@ class GlicTabUnderlineView::UnderlineViewUpdater
         }
         break;
       case UpdateUnderlineReason::kPinnedTabsChanged_TabInPinnedSet:
-        // If `underline_view_` is not visible, then this tab was just added to
-        // the set of pinned tabs.
-        if (!underline_view_->IsShowing()) {
-          // Pinned tab underlines should only be visible while the glic panel
-          // is open.
-          if (IsGlicWindowShowing()) {
-            ShowAndAnimateUnderline();
-          }
+        if (GlicEnabling::IsMultiInstanceEnabledByFlags()) {
+          ShowAndAnimateUnderline();
         } else {
-          // This tab was already pinned - re-animate to reflect the change in
-          // the set of pinned tabs.
-          AnimateUnderline();
+          // If `underline_view_` is not visible, then this tab was just added
+          // to the set of pinned tabs.
+          if (!underline_view_->IsShowing()) {
+            // Pinned tab underlines should only be visible while the glic panel
+            // is open. For multi-instance this is controlled via the pinned
+            // tabs api.
+            if (IsGlicWindowShowing()) {
+              ShowAndAnimateUnderline();
+            }
+          } else {
+            // This tab was already pinned - re-animate to reflect the change in
+            // the set of pinned tabs.
+            AnimateUnderline();
+          }
         }
         break;
       case UpdateUnderlineReason::kPinnedTabsChanged_TabNotInPinnedSet:
@@ -417,9 +428,16 @@ class GlicTabUnderlineView::UnderlineViewUpdater
   void AnimateUnderline() { underline_view_->ResetAnimationCycle(); }
 
   void ShowOrAnimatePinnedUnderline() {
-    // Pinned underlines should never be visible if the glic window is closed.
-    if (!IsUnderlineTabPinned() || !IsGlicWindowShowing()) {
+    if (!IsUnderlineTabPinned()) {
       return;
+    }
+    // For multi-instance, we rely on the umbrella sharing manager behavior to
+    // determine when to show or not show underlines via the pinned tabs api.
+    if (!GlicEnabling::IsMultiInstanceEnabledByFlags()) {
+      // Pinned underlines should never be visible if the glic window is closed.
+      if (!IsGlicWindowShowing()) {
+        return;
+      }
     }
     if (underline_view_->IsShowing()) {
       AnimateUnderline();
@@ -429,7 +447,7 @@ class GlicTabUnderlineView::UnderlineViewUpdater
   }
 
   bool IsGlicWindowShowing() const {
-    return underline_view_->GetGlicService()->window_controller().IsShowing();
+    return underline_view_->GetGlicService()->IsWindowShowing();
   }
 
   bool IsTabInCurrentWindow(const content::WebContents* tab) const {
@@ -597,8 +615,11 @@ void GlicTabUnderlineView::DrawEffect(gfx::Canvas* canvas,
   gfx::Rect effect_bounds(origin, size);
 
   cc::PaintFlags new_flags(flags);
+  const int kNumDefaultColors = 3;
   // At small sizes, paint the underline as a solid color instead of a gradient.
-  if (underline_width < gfx::kFaviconSize) {
+  // We also draw a solid color if we've got no shader and fewer than 3 colors.
+  if (underline_width < gfx::kFaviconSize * 2 ||
+      (!new_flags.getShader() && colors_.size() < kNumDefaultColors)) {
     new_flags.setShader(nullptr);
     // `colors_` is not populated if the kGlicParameterizedShader feature is not
     // enabled.
@@ -609,6 +630,8 @@ void GlicTabUnderlineView::DrawEffect(gfx::Canvas* canvas,
       const SkColor fallback_color = SkColorSetARGB(255, 49, 134, 255);
       new_flags.setColor(fallback_color);
     }
+  } else if (!new_flags.getShader()) {
+    SetDefaultColors(new_flags, gfx::RectF(effect_bounds));
   }
 
   canvas->DrawRoundRect(gfx::RectF(effect_bounds), kCornerRadius, new_flags);

@@ -30,8 +30,6 @@
 #include "chrome/browser/apps/app_service/menu_util.h"
 #include "chrome/browser/apps/app_service/promise_apps/promise_app.h"
 #include "chrome/browser/apps/app_service/promise_apps/promise_app_registry_cache.h"
-#include "chrome/browser/apps/app_service/publishers/arc_apps_factory.h"
-#include "chrome/browser/apps/app_service/webapk/webapk_manager.h"
 #include "chrome/browser/ash/app_list/arc/arc_app_icon.h"
 #include "chrome/browser/ash/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ash/apps/apk_web_app_service.h"
@@ -42,7 +40,6 @@
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/system_features_disable_list_policy_handler.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/component_extension_resources.h"
 #include "chrome/grit/generated_resources.h"
@@ -86,6 +83,10 @@
 // overwritten icon... IIRC this applies to shelf items and ArcAppWindow icon".
 
 namespace {
+
+// NOTE: ArcApps is globally unique because it is only created for the primary
+// profile. CHECKs make sure this condition is met.
+apps::ArcApps* g_instance = nullptr;
 
 std::optional<int> g_test_arc_version_;
 
@@ -549,32 +550,38 @@ void ArcApps::SetArcVersionForTesting(int version) {
   g_test_arc_version_ = version;
 }
 
-// static
-ArcApps* ArcApps::Get(Profile* profile) {
-  return ArcAppsFactory::GetForProfile(profile);
-}
-
 ArcApps::ArcApps(AppServiceProxy* proxy)
     : AppPublisher(proxy), profile_(proxy->profile()) {
-  if (auto* arc_session_manager = arc::ArcSessionManager::Get()) {
-    arc_session_manager_observation_.Observe(arc_session_manager);
-  } else {
-    CHECK_IS_TEST();
-  }
-}
+  CHECK(!g_instance);
+  g_instance = this;
 
-ArcApps::~ArcApps() {
-  proxy()->UnregisterPublisher(AppType::kArc);
-}
-
-void ArcApps::Initialize() {
   if (!arc::IsArcAllowedForProfile(profile_) ||
       (arc::ArcServiceManager::Get() == nullptr)) {
     return;
   }
 
+  if (auto* arc_session_manager = arc::ArcSessionManager::Get()) {
+    arc_session_manager_observation_.Observe(arc_session_manager);
+  } else {
+    CHECK_IS_TEST();
+  }
+
   // Register this to AppService.
   RegisterPublisher(AppType::kArc);
+}
+
+ArcApps::~ArcApps() {
+  proxy()->UnregisterPublisher(AppType::kArc);
+
+  CHECK_EQ(g_instance, this);
+  g_instance = nullptr;
+}
+
+// static
+ArcApps* ArcApps::GetForTesting(Profile* profile) {
+  CHECK(g_instance);
+  CHECK_EQ(g_instance->profile_, profile);
+  return g_instance;
 }
 
 void ArcApps::OnInitialized() {
@@ -614,10 +621,6 @@ void ArcApps::OnInitialized() {
   auto* instance_registry = &proxy()->InstanceRegistry();
   if (instance_registry) {
     instance_registry_observation_.Observe(instance_registry);
-  }
-
-  if (web_app::AreWebAppsEnabled(profile_)) {
-    web_apk_manager_ = std::make_unique<apps::WebApkManager>(profile_);
   }
 
   std::vector<AppPtr> apps;
@@ -1334,15 +1337,11 @@ void ArcApps::OnArcSupportedLinksChanged(
   }
 }
 
-void ArcApps::OnSetArcNotificationsInstance(
+void ArcApps::OnArcNotificationManagerInitialized(
     ash::ArcNotificationManagerBase* arc_notification_manager) {
   DCHECK(arc_notification_manager);
   notification_observation_.Observe(arc_notification_manager);
 }
-
-// TODO(crbug.com/442761233): Remove this.
-void ArcApps::OnArcNotificationInitializerDestroyed(
-    ash::ArcNotificationsHostInitializer* initializer) {}
 
 void ArcApps::OnNotificationUpdated(const std::string& notification_id,
                                     const std::string& app_id) {
@@ -1544,7 +1543,8 @@ AppPtr ArcApps::CreateApp(ArcAppListPrefs* prefs,
   // Set hard-coded Play Store intent filters if not set. This is a stop-gap
   // solution to handle Play Store URLs before ARC gets ready.
   // TODO(b/259205050): Remove this once intent filters are properly cached.
-  if (app->intent_filters.empty() && app_id == arc::kPlayStoreAppId) {
+  if ((!app->intent_filters || app->intent_filters->empty()) &&
+      app_id == arc::kPlayStoreAppId) {
     app->intent_filters = GetHardcodedPlayStoreIntentFilters();
   }
 

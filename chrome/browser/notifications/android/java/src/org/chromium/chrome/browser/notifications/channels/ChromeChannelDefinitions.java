@@ -43,7 +43,7 @@ public class ChromeChannelDefinitions extends ChannelDefinitions {
      * set of channels returned by {@link #getStartupChannelIds()} or {@link #getLegacyChannelIds()}
      * changes.
      */
-    static final int CHANNELS_VERSION = 4;
+    static final int CHANNELS_VERSION = 6;
 
     private static class LazyHolder {
         private static final ChromeChannelDefinitions sInstance = new ChromeChannelDefinitions();
@@ -93,7 +93,8 @@ public class ChromeChannelDefinitions extends ChannelDefinitions {
         ChannelId.SECURITY_KEY,
         ChannelId.BLUETOOTH,
         ChannelId.USB,
-        ChannelId.SERIAL
+        ChannelId.SERIAL,
+        ChannelId.TIPS
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface ChannelId {
@@ -128,6 +129,7 @@ public class ChromeChannelDefinitions extends ChannelDefinitions {
         String BLUETOOTH = "bluetooth";
         String USB = "usb";
         String SERIAL = "serial";
+        String TIPS = "tips";
     }
 
     @StringDef({ChannelGroupId.GENERAL, ChannelGroupId.SITES})
@@ -360,6 +362,17 @@ public class ChromeChannelDefinitions extends ChannelDefinitions {
                             R.string.notification_category_serial,
                             NotificationManager.IMPORTANCE_LOW,
                             ChannelGroupId.GENERAL));
+
+            // The tips notification channel will appear for all users but will be defaulted off and
+            // include an opt in promo that directs users to turning it on.
+            map.put(
+                    ChannelId.TIPS,
+                    PredefinedChannel.create(
+                            ChannelId.TIPS,
+                            R.string.notification_category_tips,
+                            NotificationManager.IMPORTANCE_NONE,
+                            ChannelGroupId.GENERAL));
+            startup.add(ChannelId.TIPS);
 
             MAP = Collections.unmodifiableMap(map);
             STARTUP = Collections.unmodifiableSet(startup);

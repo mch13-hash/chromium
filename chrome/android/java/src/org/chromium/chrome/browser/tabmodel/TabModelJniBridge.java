@@ -277,13 +277,17 @@ public abstract class TabModelJniBridge implements TabModelInternal {
     @CalledByNative
     private boolean createTabWithWebContents(
             Tab parent, Profile profile, WebContents webContents, boolean select) {
+        @TabLaunchType
+        int type =
+                select ? TabLaunchType.FROM_RECENT_TABS_FOREGROUND : TabLaunchType.FROM_RECENT_TABS;
         return getTabCreator(profile.isOffTheRecord())
                         .createTabWithWebContents(
                                 parent,
+                                /* shouldPin= */ false,
                                 webContents,
-                                select
-                                        ? TabLaunchType.FROM_RECENT_TABS_FOREGROUND
-                                        : TabLaunchType.FROM_RECENT_TABS)
+                                type,
+                                webContents.getVisibleUrl(),
+                                /* addTabToModel= */ true)
                 != null;
     }
 
@@ -442,7 +446,7 @@ public abstract class TabModelJniBridge implements TabModelInternal {
                 return;
             }
         }
-        getTabCreator(false).launchNtp();
+        TabCreatorUtil.launchNtp(getTabCreator(/* isIncognito= */ false));
     }
 
     /** Returns whether or not a sync session is currently being restored. */
@@ -457,10 +461,10 @@ public abstract class TabModelJniBridge implements TabModelInternal {
      */
     @CalledByNative
     @VisibleForTesting
-    public void openTabProgrammatically(GURL url, int index) {
+    public @JniType("TabAndroid*") @Nullable Tab openTabProgrammatically(GURL url, int index) {
         LoadUrlParams loadParams = new LoadUrlParams(url);
 
-        getTabCreator(isIncognitoBranded())
+        return getTabCreator(isIncognitoBranded())
                 .createNewTab(
                         loadParams,
                         TabLaunchType.FROM_TAB_LIST_INTERFACE,
@@ -486,7 +490,9 @@ public abstract class TabModelJniBridge implements TabModelInternal {
                         parentTab,
                         parentTab.getIsPinned(),
                         webContents,
-                        TabLaunchType.FROM_TAB_LIST_INTERFACE);
+                        TabLaunchType.FROM_TAB_LIST_INTERFACE,
+                        webContents.getVisibleUrl(),
+                        /* addTabToModel= */ true);
     }
 
     /**
@@ -543,7 +549,7 @@ public abstract class TabModelJniBridge implements TabModelInternal {
         @TabId int tabId = tab.getId();
         if (tabId == Tab.INVALID_TAB_ID) return;
 
-        pinTab(tabId);
+        pinTab(tabId, /* showUngroupDialog= */ false);
     }
 
     @CalledByNative
@@ -612,6 +618,13 @@ public abstract class TabModelJniBridge implements TabModelInternal {
         return soundSetting == ContentSetting.BLOCK;
     }
 
+    @Override
+    public int getActivityTypeForTesting() {
+        return TabModelJniBridgeJni.get()
+                .getActivityTypeForTesting( // IN-TEST
+                        mNativeTabModelJniBridge);
+    }
+
     @NativeMethods
     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
     public interface Natives {
@@ -652,5 +665,9 @@ public abstract class TabModelJniBridge implements TabModelInternal {
                 int newIndex);
 
         int getSessionIdForTesting(long nativeTabModelJniBridge);
+
+        @JniType("chrome::android::ActivityType")
+        @ActivityType
+        int getActivityTypeForTesting(long nativeTabModelJniBridge);
     }
 }

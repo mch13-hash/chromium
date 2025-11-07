@@ -87,7 +87,7 @@ TabRendererData MakeTabRendererData() {
   TabRendererData new_tab_data = TabRendererData();
   new_tab_data.title = kTabTitle;
   new_tab_data.last_committed_url = GURL(kTabUrl);
-  new_tab_data.alert_state = {tabs::TabAlert::AUDIO_PLAYING};
+  new_tab_data.alert_state = {tabs::TabAlert::kAudioPlaying};
   return new_tab_data;
 }
 
@@ -117,14 +117,17 @@ class TabHoverCardInteractiveUiTest
           MemorySaverInteractiveTestMixin<InteractiveBrowserTest>>,
       public test::TabHoverCardTestUtil {
  public:
-  ~TabHoverCardInteractiveUiTest() override = default;
-
-  void SetUp() override {
-    set_open_about_blank_on_browser_launch(true);
+  TabHoverCardInteractiveUiTest() {
     scoped_feature_list_.InitWithFeatures(
         {features::kTabHoverCardImages,
          data_sharing::features::kDataSharingFeature},
         {});
+  }
+
+  ~TabHoverCardInteractiveUiTest() override = default;
+
+  void SetUp() override {
+    set_open_about_blank_on_browser_launch(true);
     MemorySaverInteractiveTestMixin::SetUp();
   }
 
@@ -526,8 +529,7 @@ class TabHoverCardFadeFooterWithDiscardInteractiveUiTest
     : public TabHoverCardFadeFooterInteractiveUiTest,
       public ::testing::WithParamInterface<bool> {
  public:
-  void SetUp() override {
-    TabHoverCardFadeFooterInteractiveUiTest::SetUp();
+  TabHoverCardFadeFooterWithDiscardInteractiveUiTest() {
     scoped_feature_list_.InitWithFeatureState(features::kWebContentsDiscard,
                                               GetParam());
   }
@@ -756,7 +758,7 @@ IN_PROC_BROWSER_TEST_F(TabHoverCardFadeFooterInteractiveUiTest,
   browser()->tab_strip_model()->ActivateTabAt(0);
   Tab* const tab = tab_strip->tab_at(1);
   TabRendererData data = tab->data();
-  data.alert_state = {tabs::TabAlert::AUDIO_PLAYING};
+  data.alert_state = {tabs::TabAlert::kAudioPlaying};
   tab->SetData(data);
   tab_strip->GetFocusManager()->SetFocusedView(tab);
   WaitForHoverCardVisible(tab_strip);

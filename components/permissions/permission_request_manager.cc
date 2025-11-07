@@ -27,6 +27,7 @@
 #include "base/time/clock.h"
 #include "base/time/time.h"
 #include "components/back_forward_cache/back_forward_cache_disable.h"
+#include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -53,6 +54,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/window_open_disposition_utils.h"
+#include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -117,20 +119,20 @@ bool ShouldShowQuietRequestAgainIfPreempted(
 }
 
 bool IsMediaRequest(RequestType type) {
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   if (type == RequestType::kCameraPanTiltZoom) {
     return true;
   }
-#endif
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   return type == RequestType::kMicStream || type == RequestType::kCameraStream;
 }
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 bool IsExclusiveAccessRequest(RequestType type) {
   return type == RequestType::kPointerLock ||
          type == RequestType::kKeyboardLock;
 }
-#endif
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 bool ShouldGroupRequests(PermissionRequest* a, PermissionRequest* b) {
   if (a->requesting_origin() != b->requesting_origin()) {
@@ -140,12 +142,12 @@ bool ShouldGroupRequests(PermissionRequest* a, PermissionRequest* b) {
   if (IsMediaRequest(a->request_type()) && IsMediaRequest(b->request_type())) {
     return true;
   }
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   if (IsExclusiveAccessRequest(a->request_type()) &&
       IsExclusiveAccessRequest(b->request_type())) {
     return true;
   }
-#endif
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   return false;
 }
 
@@ -186,6 +188,8 @@ PermissionRequestManager::~PermissionRequestManager() {
   DCHECK(duplicate_requests_.empty());
   DCHECK(pending_permission_requests_.IsEmpty());
 
+  RecordPostPromptSessionDuration();
+
   for (Observer& observer : observer_list_) {
     observer.OnPermissionRequestManagerDestructed();
   }
@@ -206,6 +210,11 @@ void PermissionRequestManager::AddRequest(
     return;
   }
 
+  if (display::Screen::Get()->IsHeadless()) {
+    request->PermissionDenied();
+    return;
+  }
+
   if (source_frame->IsInactiveAndDisallowActivation(
           content::DisallowActivationReasonId::kPermissionAddRequest)) {
     request->Cancelled();
@@ -218,7 +227,9 @@ void PermissionRequestManager::AddRequest(
   }
 
 #if BUILDFLAG(IS_ANDROID)
-  if (request->GetContentSettingsType() == ContentSettingsType::NOTIFICATIONS) {
+  if (!base::FeatureList::IsEnabled(
+          features::kReturnDeniedForNotificationsWhenNoAppLevelSettings) &&
+      request->GetContentSettingsType() == ContentSettingsType::NOTIFICATIONS) {
     bool app_level_settings_allow_site_notifications =
         enabled_app_level_notification_permission_for_testing_.has_value()
             ? enabled_app_level_notification_permission_for_testing_.value()
@@ -228,8 +239,8 @@ void PermissionRequestManager::AddRequest(
         app_level_settings_allow_site_notifications);
 
     if (!app_level_settings_allow_site_notifications) {
-      // Automatically cancel site Notification requests when Chrome is not able
-      // to send notifications in an app level.
+      // Automatically cancel site Notification requests when Chrome is not
+      // able to send notifications in an app level.
       request->Cancelled();
       return;
     }
@@ -265,12 +276,14 @@ void PermissionRequestManager::AddRequest(
   bool is_main_frame =
       url::IsSameOriginWith(main_frame_origin, request->requesting_origin());
 
-  std::optional<PermissionAction> should_auto_approve_request =
+  const std::optional<PermissionAction> should_auto_approve_request =
       PermissionsClient::Get()->GetAutoApprovalStatus(
           web_contents()->GetBrowserContext(), request->requesting_origin());
 
   if (should_auto_approve_request) {
     if (should_auto_approve_request == PermissionAction::GRANTED) {
+      request->PermissionGranted(/*is_one_time=*/false);
+    } else if (should_auto_approve_request == PermissionAction::GRANTED_ONCE) {
       request->PermissionGranted(/*is_one_time=*/true);
     }
     return;
@@ -464,6 +477,8 @@ void PermissionRequestManager::DidStartNavigation(
     return;
   }
 
+  RecordPostPromptSessionDuration();
+
   // Cooldown lasts until the next user-initiated navigation, which is defined
   // as either a renderer-initiated navigation with a user gesture, or a
   // browser-initiated navigation.
@@ -521,6 +536,8 @@ void PermissionRequestManager::DidFinishNavigation(
 }
 
 void PermissionRequestManager::DocumentOnLoadCompletedInPrimaryMainFrame() {
+  on_page_loaded_time_ = base::TimeTicks::Now();
+
   // This is scheduled because while all calls to the browser have been
   // issued at DOMContentLoaded, they may be bouncing around in scheduled
   // callbacks finding the UI thread still. This makes sure we allow those
@@ -590,30 +607,28 @@ void PermissionRequestManager::Accept() {
   }
   DCHECK(view_);
   base::AutoReset<bool> block_preempt(&can_preempt_current_request_, false);
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
+  PermissionAction action = PermissionAction::GRANTED;
 
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    StorePermissionActionForUMA((*requests_iter)->requesting_origin(),
-                                (*requests_iter)->request_type(),
-                                PermissionAction::GRANTED);
-    PermissionGrantedIncludingDuplicates(requests_iter->get(),
+  for (const auto& request : requests_) {
+    StorePermissionActionForUMA(request->requesting_origin(),
+                                request->request_type(), action);
+    PermissionGrantedIncludingDuplicates(request.get(),
                                          /*is_one_time=*/false);
 
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
     std::optional<ContentSettingsType> content_settings_type =
-        RequestTypeToContentSettingsType((*requests_iter)->request_type());
+        RequestTypeToContentSettingsType(request->request_type());
     if (content_settings_type.has_value()) {
       PermissionUmaUtil::RecordPermissionRegrantForUnusedSites(
-          (*requests_iter)->requesting_origin(), content_settings_type.value(),
+          request->requesting_origin(), content_settings_type.value(),
           PermissionSourceUI::PROMPT, web_contents()->GetBrowserContext(),
           base::Time::Now());
     }
-#endif
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   }
 
-  NotifyRequestDecided(PermissionAction::GRANTED);
-  CurrentRequestsDecided(PermissionAction::GRANTED);
+  NotifyRequestDecided(action);
+  CurrentRequestsDecided(action);
 }
 
 void PermissionRequestManager::AcceptThisTime() {
@@ -622,19 +637,17 @@ void PermissionRequestManager::AcceptThisTime() {
   }
   DCHECK(view_);
   base::AutoReset<bool> block_preempt(&can_preempt_current_request_, false);
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
 
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    StorePermissionActionForUMA((*requests_iter)->requesting_origin(),
-                                (*requests_iter)->request_type(),
-                                PermissionAction::GRANTED_ONCE);
-    PermissionGrantedIncludingDuplicates(requests_iter->get(),
+  PermissionAction action = PermissionAction::GRANTED_ONCE;
+  for (const auto& request : requests_) {
+    StorePermissionActionForUMA(request->requesting_origin(),
+                                request->request_type(), action);
+    PermissionGrantedIncludingDuplicates(request.get(),
                                          /*is_one_time=*/true);
   }
 
-  NotifyRequestDecided(PermissionAction::GRANTED_ONCE);
-  CurrentRequestsDecided(PermissionAction::GRANTED_ONCE);
+  NotifyRequestDecided(action);
+  CurrentRequestsDecided(action);
 }
 
 void PermissionRequestManager::Deny() {
@@ -653,18 +666,16 @@ void PermissionRequestManager::Deny() {
                      &PermissionRequest::GetContentSettingsType)) {
     is_notification_prompt_cooldown_active_ = true;
   }
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
 
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    StorePermissionActionForUMA((*requests_iter)->requesting_origin(),
-                                (*requests_iter)->request_type(),
-                                PermissionAction::DENIED);
-    PermissionDeniedIncludingDuplicates(requests_iter->get());
+  PermissionAction action = PermissionAction::DENIED;
+  for (const auto& request : requests_) {
+    StorePermissionActionForUMA(request->requesting_origin(),
+                                request->request_type(), action);
+    PermissionDeniedIncludingDuplicates(request.get());
   }
 
-  NotifyRequestDecided(PermissionAction::DENIED);
-  CurrentRequestsDecided(PermissionAction::DENIED);
+  NotifyRequestDecided(action);
+  CurrentRequestsDecided(action);
 }
 
 void PermissionRequestManager::Dismiss() {
@@ -673,18 +684,16 @@ void PermissionRequestManager::Dismiss() {
   }
   DCHECK(view_);
   base::AutoReset<bool> block_preempt(&can_preempt_current_request_, false);
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
 
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    StorePermissionActionForUMA((*requests_iter)->requesting_origin(),
-                                (*requests_iter)->request_type(),
-                                PermissionAction::DISMISSED);
-    CancelRequestIncludingDuplicates(requests_iter->get());
+  PermissionAction action = PermissionAction::DISMISSED;
+  for (const auto& request : requests_) {
+    StorePermissionActionForUMA(request->requesting_origin(),
+                                request->request_type(), action);
+    CancelRequestIncludingDuplicates(request.get());
   }
 
-  NotifyRequestDecided(PermissionAction::DISMISSED);
-  CurrentRequestsDecided(PermissionAction::DISMISSED);
+  NotifyRequestDecided(action);
+  CurrentRequestsDecided(action);
 }
 
 void PermissionRequestManager::Ignore() {
@@ -692,33 +701,29 @@ void PermissionRequestManager::Ignore() {
     return;
   }
   base::AutoReset<bool> block_preempt(&can_preempt_current_request_, false);
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
 
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    StorePermissionActionForUMA((*requests_iter)->requesting_origin(),
-                                (*requests_iter)->request_type(),
-                                PermissionAction::IGNORED);
-    CancelRequestIncludingDuplicates(requests_iter->get());
+  PermissionAction action = PermissionAction::IGNORED;
+  for (const auto& request : requests_) {
+    StorePermissionActionForUMA(request->requesting_origin(),
+                                request->request_type(), action);
+    CancelRequestIncludingDuplicates(request.get());
   }
 
-  NotifyRequestDecided(PermissionAction::IGNORED);
-  CurrentRequestsDecided(PermissionAction::IGNORED);
+  NotifyRequestDecided(action);
+  CurrentRequestsDecided(action);
 }
 
 void PermissionRequestManager::FinalizeCurrentRequests() {
   CHECK(IsRequestInProgress());
   ResetViewStateForCurrentRequest();
   base::AutoReset<bool> block_preempt(&can_preempt_current_request_, false);
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
 
   //  Erase the request from |validated_requests_| before its destruction
   //  during requests_.clear() at the end of this function.
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    EraseRequest(validated_requests_, requests_iter->get());
-    request_sources_map_.erase(requests_iter->get());
-    FinishRequestIncludingDuplicates(requests_iter->get());
+  for (const auto& request : requests_) {
+    EraseRequest(validated_requests_, request.get());
+    request_sources_map_.erase(request.get());
+    FinishRequestIncludingDuplicates(request.get());
   }
 
   // No need to execute the preignore logic as we canceling currently active
@@ -770,11 +775,8 @@ void PermissionRequestManager::PreIgnoreQuietPromptInternal() {
     return;
   }
 
-  std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
-
-  for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-       requests_iter++) {
-    CancelRequestIncludingDuplicates(requests_iter->get(),
+  for (const auto& request : requests_) {
+    CancelRequestIncludingDuplicates(request.get(),
                                      /*is_final_decision=*/false);
   }
 
@@ -1029,6 +1031,32 @@ void PermissionRequestManager::ShowPrompt() {
   if (!current_request_already_displayed_) {
     PermissionUmaUtil::PermissionPromptShown(requests_);
 
+    if (!requests_.empty()) {
+      // The session duration before a permission prompt is displayed is only
+      // recorded for geolocation and notifications requests because these two
+      // permission types are supported by the PermissionsAI and potentially can
+      // be impacted by prompt muting.
+      //
+      // `on_page_loaded_time_` is not reset because it is ok to record the
+      // session duration multiple times per permission type for the same page
+      // load.
+      if (requests_[0]->GetContentSettingsType() ==
+              ContentSettingsType::GEOLOCATION ||
+          requests_[0]->GetContentSettingsType() ==
+              ContentSettingsType::NOTIFICATIONS) {
+        PermissionUmaUtil::RecordPrePromptSessionDuration(
+            requests_[0]->GetContentSettingsType(), on_page_loaded_time_);
+      }
+
+      if (requests_[0]->GetContentSettingsType() ==
+          ContentSettingsType::NOTIFICATIONS) {
+        notification_request_first_display_time_ = base::TimeTicks::Now();
+      } else if (requests_[0]->GetContentSettingsType() ==
+                 ContentSettingsType::GEOLOCATION) {
+        geolocation_request_first_display_time_ = base::TimeTicks::Now();
+      }
+    }
+
     auto quiet_ui_reason = ReasonForUsingQuietUi();
     if (quiet_ui_reason) {
       switch (*quiet_ui_reason) {
@@ -1107,6 +1135,7 @@ void PermissionRequestManager::ResetViewStateForCurrentRequest() {
   current_request_prompt_disposition_.reset();
   prediction_grant_likelihood_.reset();
   permission_request_relevance_.reset();
+  permission_ai_relevance_model_.reset();
   current_request_ui_to_use_.reset();
   was_decision_held_back_.reset();
   selector_decisions_.clear();
@@ -1164,8 +1193,8 @@ void PermissionRequestManager::CurrentRequestsDecided(
         DetermineCurrentRequestUIDispositionReasonForUMA(),
         view_ ? std::optional(view_->GetPromptVariants()) : std::nullopt,
         prediction_grant_likelihood_, permission_request_relevance_,
-        was_decision_held_back_, ignore_reason, did_show_prompt_,
-        did_click_manage_, did_click_learn_more_);
+        permission_ai_relevance_model_, was_decision_held_back_, ignore_reason,
+        did_show_prompt_, did_click_manage_, did_click_learn_more_);
   }
 
   std::optional<QuietUiReason> quiet_ui_reason;
@@ -1194,12 +1223,11 @@ void PermissionRequestManager::CurrentRequestsDecided(
 
     PermissionUmaUtil::RecordEmbargoStatus(RecordActionAndGetEmbargoStatus(
         browser_context, request.get(), permission_action));
+    PermissionActionsHistory* actions_history =
+        PermissionsClient::Get()->GetPermissionActionsHistory(browser_context);
     if (request->IsEligibleForHeuristicAutoGrant()) {
-      PermissionActionsHistory* actions_history =
-          PermissionsClient::Get()->GetPermissionActionsHistory(
-              browser_context);
       if (permission_action == PermissionAction::GRANTED_ONCE) {
-        actions_history->RecordTemporaryGrantAndSetAutoGrantIfNecessary(
+        actions_history->RecordTemporaryGrant(
             request->requesting_origin(), request->GetContentSettingsType());
       } else if (permission_action == PermissionAction::DISMISSED) {
         actions_history->ResetHeuristicData(request->requesting_origin(),
@@ -1207,6 +1235,30 @@ void PermissionRequestManager::CurrentRequestsDecided(
       }
       // TODO(crbug.com/446603274): Record metrics of geolocation PEPC
       // request.
+    }
+
+    if (permission_action == PermissionAction::GRANTED_ONCE) {
+      ContentSettingsType content_settings_type =
+          request->GetContentSettingsType();
+
+      if (content_settings_type == ContentSettingsType::GEOLOCATION ||
+          content_settings_type == ContentSettingsType::MEDIASTREAM_CAMERA ||
+          content_settings_type == ContentSettingsType::MEDIASTREAM_MIC) {
+        actions_history->RecordOneTimeGrant(request->requesting_origin(),
+                                            content_settings_type);
+      }
+    } else if (permission_action == PermissionAction::GRANTED) {
+      ContentSettingsType content_settings_type =
+          request->GetContentSettingsType();
+
+      if (content_settings_type == ContentSettingsType::GEOLOCATION ||
+          content_settings_type == ContentSettingsType::MEDIASTREAM_CAMERA ||
+          content_settings_type == ContentSettingsType::MEDIASTREAM_MIC) {
+        actions_history->RecordOTPCountForGrant(
+            content_settings_type,
+            actions_history->GetOneTimeGrantCount(request->requesting_origin(),
+                                                  content_settings_type));
+      }
     }
   }
 
@@ -1230,11 +1282,8 @@ void PermissionRequestManager::CleanUpRequests() {
   }
 
   if (IsRequestInProgress()) {
-    std::vector<std::unique_ptr<PermissionRequest>>::iterator requests_iter;
-
-    for (requests_iter = requests_.begin(); requests_iter != requests_.end();
-         requests_iter++) {
-      CancelRequestIncludingDuplicates(requests_iter->get());
+    for (const auto& request : requests_) {
+      CancelRequestIncludingDuplicates(request.get());
     }
 
     CurrentRequestsDecided(should_dismiss_current_request_
@@ -1526,6 +1575,12 @@ void PermissionRequestManager::OnPermissionUiSelectorDone(
                 ->PermissionRequestRelevanceForUKM();
       }
 
+      if (!permission_ai_relevance_model_.has_value()) {
+        permission_ai_relevance_model_ =
+            permission_ui_selectors_[decision_index]
+                ->PermissionAiRelevanceModelForUKM();
+      }
+
       if (!was_decision_held_back_.has_value()) {
         was_decision_held_back_ = permission_ui_selectors_[decision_index]
                                       ->WasSelectorDecisionHeldback();
@@ -1586,6 +1641,7 @@ void PermissionRequestManager::LogWarningToConsole(const char* message) {
 }
 
 void PermissionRequestManager::DoAutoResponseForTesting() {
+  SetPromptOptions(auto_response_prompt_options_for_test_);
   // The macOS prompt has its own mechanism of auto responding.
   if (current_request_prompt_disposition_ ==
       PermissionPromptDisposition::MAC_OS_PROMPT) {
@@ -1610,12 +1666,12 @@ void PermissionRequestManager::DoAutoResponseForTesting() {
 }
 
 bool PermissionRequestManager::IsCurrentRequestExclusiveAccess() const {
-#if !BUILDFLAG(IS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   return IsRequestInProgress() &&
          IsExclusiveAccessRequest(requests_[0]->request_type());
 #else
   return false;
-#endif
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 }
 
 bool PermissionRequestManager::ShouldFinalizeRequestAfterDecided(
@@ -1791,6 +1847,19 @@ void PermissionRequestManager::OnTabActiveChanged() {
   } else if (current_request_ui_to_use_.has_value()) {
     ShowPrompt();
   }
+}
+
+void PermissionRequestManager::RecordPostPromptSessionDuration() {
+  PermissionUmaUtil::RecordPostPromptSessionDuration(
+      ContentSettingsType::NOTIFICATIONS,
+      notification_request_first_display_time_);
+
+  PermissionUmaUtil::RecordPostPromptSessionDuration(
+      ContentSettingsType::GEOLOCATION,
+      geolocation_request_first_display_time_);
+
+  notification_request_first_display_time_ = base::TimeTicks();
+  geolocation_request_first_display_time_ = base::TimeTicks();
 }
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(PermissionRequestManager);

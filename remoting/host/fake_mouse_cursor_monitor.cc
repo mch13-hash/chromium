@@ -18,29 +18,14 @@ FakeMouseCursorMonitor::FakeMouseCursorMonitor() : callback_(nullptr) {}
 
 FakeMouseCursorMonitor::~FakeMouseCursorMonitor() = default;
 
-void FakeMouseCursorMonitor::Init(MouseCursorMonitor::Callback* callback,
-                                  MouseCursorMonitor::Mode mode) {
+void FakeMouseCursorMonitor::Init(MouseCursorMonitor::Callback* callback) {
   DCHECK(!callback_);
   DCHECK(callback);
 
   callback_ = callback;
 }
 
-void FakeMouseCursorMonitor::Capture() {
-  DCHECK(callback_);
-
-  const int kWidth = 32;
-  const int kHeight = 32;
-
-  auto desktop_frame = std::make_unique<webrtc::BasicDesktopFrame>(
-      webrtc::DesktopSize(kWidth, kHeight), webrtc::FOURCC_ARGB);
-  UNSAFE_TODO(memset(desktop_frame->data(), 0xFF,
-                     webrtc::DesktopFrame::kBytesPerPixel * kWidth * kHeight));
-
-  std::unique_ptr<webrtc::MouseCursor> mouse_cursor(new webrtc::MouseCursor(
-      desktop_frame.release(), webrtc::DesktopVector()));
-
-  callback_->OnMouseCursor(mouse_cursor.release());
-}
+void FakeMouseCursorMonitor::SetPreferredCaptureInterval(
+    base::TimeDelta interval) {}
 
 }  // namespace remoting

@@ -9,7 +9,8 @@
 #include "base/strings/to_string.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/save_password_progress_logger.h"
-#include "components/password_manager/core/browser/actor_login/internal/actor_login_util.h"
+#include "components/password_manager/core/browser/actor_login/actor_login_types.h"
+#include "components/password_manager/core/browser/actor_login/internal/actor_login_form_finder.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/form_fetcher_impl.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -84,12 +85,32 @@ Credential PasswordFormToCredential(
            password_manager::PasswordForm::MatchType::kGrouped);
   Credential credential;
   credential.username = form.username_value;
-  credential.source_site_or_app = GetSourceSiteOrAppFromUrl(form.url);
+  credential.source_site_or_app =
+      ActorLoginFormFinder::GetSourceSiteOrAppFromUrl(form.url);
   credential.request_origin = request_origin;
   credential.immediatelyAvailableToLogin = immediately_available_to_login;
-  // TODO(crbug.com/443238776): Implement populating this field properly.
-  credential.has_persistent_permission = false;
+  credential.has_persistent_permission = form.actor_login_approved;
   return credential;
+}
+
+// Goes through all matches and either picks the first non-weak match with
+// permission or returns all matches as `Credential`.
+std::vector<Credential> ConstructCredentialsList(
+    base::span<const password_manager::PasswordForm> best_matches,
+    const url::Origin& request_origin,
+    bool immediately_available_to_login) {
+  std::vector<Credential> result;
+  for (const auto& form : best_matches) {
+    if (form.actor_login_approved &&
+        !password_manager_util::IsCredentialWeakMatch(form)) {
+      return {PasswordFormToCredential(request_origin,
+                                       immediately_available_to_login, form)};
+    }
+    result.push_back(PasswordFormToCredential(
+        request_origin, immediately_available_to_login, form));
+  }
+
+  return result;
 }
 
 }  // namespace
@@ -106,10 +127,20 @@ ActorLoginGetCredentialsHelper::ActorLoginGetCredentialsHelper(
   LogStatus(logger.get(),
             Logger::STRING_ACTOR_LOGIN_GET_CREDENTIALS_FETCHING_STARTED);
 
+  // The check is added separately in order to differentiate between having
+  // no signin form on the page and filling being disallowed.
+  if (!client->IsFillingEnabled(origin.GetURL())) {
+    LogStatus(logger.get(), Logger::STRING_ACTOR_LOGIN_FILLING_NOT_ALLOWED);
+    std::move(callback_).Run(
+        base::unexpected(ActorLoginError::kFillingNotAllowed));
+    return;
+  }
   password_manager::PasswordFormCache* form_cache =
       password_manager_->GetPasswordFormCache();
+  ActorLoginFormFinder login_form_finder(client);
   password_manager::PasswordFormManager* signin_form_manager =
-      form_cache ? GetSigninFormManager(request_origin_, form_cache) : nullptr;
+      form_cache ? login_form_finder.GetSigninFormManager(request_origin_)
+                 : nullptr;
 
   if (signin_form_manager) {
     immediately_available_to_login_ = true;
@@ -143,13 +174,9 @@ void ActorLoginGetCredentialsHelper::OnFetchCompleted() {
   std::unique_ptr<BrowserSavePasswordProgressLogger> logger =
       GetLogger(password_manager_->GetClient());
 
-  std::vector<Credential> result;
-  std::ranges::transform(
-      form_fetcher_->GetBestMatches(), std::back_inserter(result),
-      [&](const password_manager::PasswordForm& form) -> Credential {
-        return PasswordFormToCredential(request_origin_,
-                                        immediately_available_to_login_, form);
-      });
+  std::vector<Credential> result =
+      ConstructCredentialsList(form_fetcher_->GetBestMatches(), request_origin_,
+                               immediately_available_to_login_);
 
   CHECK(form_fetcher_);
   // Removing consumer here, as here we are sure `form_fetcher_` still exists.

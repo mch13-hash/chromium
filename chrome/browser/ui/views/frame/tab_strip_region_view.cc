@@ -93,8 +93,13 @@ END_METADATA
 bool ShouldShowNewTabButton(BrowserWindowInterface* browser) {
   // `browser` can be null in tests and `app_controller` will be null if
   // the browser is not for an app.
-  return !browser || !browser->GetAppBrowserController() ||
-         !browser->GetAppBrowserController()->ShouldHideNewTabButton();
+  if (browser) {
+    auto* const controller = web_app::AppBrowserController::From(browser);
+    if (controller && controller->ShouldHideNewTabButton()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Updates the border of `view` if the insets need to be updated.
@@ -301,13 +306,6 @@ TabStripRegionView::TabStripRegionView(std::unique_ptr<TabStrip> tab_strip)
         l10n_util::GetStringUTF16(IDS_TOOLTIP_NEW_TAB));
     new_tab_button_->GetViewAccessibility().SetName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_NEWTAB));
-
-#if BUILDFLAG(IS_LINUX)
-      // The New Tab Button can be middle-clicked on Linux.
-      new_tab_button_->SetTriggerableEventFlags(
-          new_tab_button_->GetTriggerableEventFlags() |
-          ui::EF_MIDDLE_MOUSE_BUTTON);
-#endif
   }
 
   reserved_grab_handle_space_ =

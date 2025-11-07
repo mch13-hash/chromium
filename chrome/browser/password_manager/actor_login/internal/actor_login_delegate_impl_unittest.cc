@@ -5,8 +5,14 @@
 #include "chrome/browser/password_manager/actor_login/internal/actor_login_delegate_impl.h"
 
 #include "base/memory/raw_ptr.h"
+#include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/test_future.h"
+#include "chrome/browser/ui/bookmarks/bookmark_bar_controller.h"
+#include "chrome/browser/ui/browser_window/test/mock_browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/test_tab_strip_model_delegate.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "components/password_manager/core/browser/actor_login/test/actor_login_test_util.h"
@@ -21,10 +27,15 @@
 #include "components/tabs/public/mock_tab_interface.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_task_environment.h"
+#include "content/public/test/navigation_simulator.h"
+#include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "content/public/test/web_contents_tester.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/unowned_user_data/unowned_user_data_host.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace actor_login {
 
@@ -43,6 +54,11 @@ constexpr char kTestUrl[] = "https://example.com/login";
 class FakePasswordManagerClient
     : public password_manager::StubPasswordManagerClient {
  public:
+  MOCK_METHOD(password_manager::PasswordManagerInterface*,
+              GetPasswordManager,
+              (),
+              (override, const));
+
   FakePasswordManagerClient() {
     profile_store_ = base::MakeRefCounted<password_manager::TestPasswordStore>(
         password_manager::IsAccountStore(false));
@@ -86,21 +102,21 @@ class MockPasswordManagerDriver
 
 }  // namespace
 
-class ActorLoginDelegateImplTest : public ::testing::Test {
+class ActorLoginDelegateImplTest : public ChromeRenderViewHostTestHarness {
  public:
-  ActorLoginDelegateImplTest() = default;
+  ActorLoginDelegateImplTest()
+      : ChromeRenderViewHostTestHarness(
+            base::test::TaskEnvironment::MainThreadType::UI) {}
 
   void SetUp() override {
-    profile_ = std::make_unique<TestingProfile>();
-
-    web_contents_ = web_contents_factory_.CreateWebContents(profile_.get());
-
-    content::WebContentsTester::For(web_contents_)
-        ->NavigateAndCommit(GURL(kTestUrl));
+    ChromeRenderViewHostTestHarness::SetUp();
+    std::unique_ptr<content::WebContents> contents = CreateTestWebContents();
+    content::NavigationSimulator::NavigateAndCommitFromBrowser(contents.get(),
+                                                               GURL(kTestUrl));
 
     delegate_ = static_cast<ActorLoginDelegateImpl*>(
         ActorLoginDelegateImpl::GetOrCreateForTesting(
-            web_contents_, &client_,
+            contents.get(), &client_,
             base::BindRepeating(
                 [](MockPasswordManagerDriver* driver, content::WebContents*)
                     -> PasswordManagerDriver* { return driver; },
@@ -108,17 +124,40 @@ class ActorLoginDelegateImplTest : public ::testing::Test {
 
     client_.profile_store()->Init(/*affiliated_match_helper=*/nullptr);
     client_.account_store()->Init(/*affiliated_match_helper=*/nullptr);
+
+    // Associate `contents` with a tab
+    test_tab_strip_model_delegate_.SetBrowserWindowInterface(
+        &mock_browser_window_interface_);
+    tab_strip_model_ = std::make_unique<TabStripModel>(
+        &test_tab_strip_model_delegate_, profile());
+    auto tab_model = std::make_unique<tabs::TabModel>(std::move(contents),
+                                                      tab_strip_model_.get());
+    tab_strip_model_->AppendTab(std::move(tab_model),
+                                /*foreground=*/true);
+    ON_CALL(mock_browser_window_interface_, GetTabStripModel())
+        .WillByDefault(Return(tab_strip_model_.get()));
+    ON_CALL(mock_browser_window_interface_, GetUnownedUserDataHost)
+        .WillByDefault(::testing::ReturnRef(user_data_host_));
   }
 
   void TearDown() override {
     client_.profile_store()->ShutdownOnUIThread();
     client_.account_store()->ShutdownOnUIThread();
+    base::RunLoop().RunUntilIdle();
+
+    // Reset the raw pointer before it becomes dangling in
+    // ChromeRenderViewHostTestHarness::TearDown()
+    delegate_ = nullptr;
+    tab_strip_model_.reset();
+    ChromeRenderViewHostTestHarness::TearDown();
   }
 
   void SetUpActorCredentialFillerDeps() {
     SetUpGetCredentialsDeps();
     ON_CALL(mock_password_manager_, GetClient())
         .WillByDefault(Return(&client_));
+    ON_CALL(client_, GetPasswordManager)
+        .WillByDefault(Return(&mock_password_manager_));
   }
 
   void SetUpGetCredentialsDeps() {
@@ -128,15 +167,11 @@ class ActorLoginDelegateImplTest : public ::testing::Test {
         .WillByDefault(Return(&mock_form_cache_));
     ON_CALL(mock_form_cache_, GetFormManagers())
         .WillByDefault(Return(base::span(form_managers_)));
+    ON_CALL(client_, GetPasswordManager)
+        .WillByDefault(Return(&mock_password_manager_));
   }
 
  protected:
-  // Declare TaskEnvironment as the FIRST member to ensure proper lifetime.
-  content::BrowserTaskEnvironment task_environment_;
-  std::unique_ptr<TestingProfile> profile_;
-  content::TestWebContentsFactory web_contents_factory_;
-  // `raw_ptr` because `TestWebContentsFactory` owns it
-  raw_ptr<content::WebContents> web_contents_ = nullptr;
   FakePasswordManagerClient client_;
   // `raw_ptr` because `WebContentsUserData` owns it
   raw_ptr<ActorLoginDelegateImpl> delegate_ = nullptr;
@@ -144,6 +179,14 @@ class ActorLoginDelegateImplTest : public ::testing::Test {
   NiceMock<MockPasswordFormCache> mock_form_cache_;
   std::vector<std::unique_ptr<PasswordFormManager>> form_managers_;
   MockPasswordManagerDriver mock_driver_;
+
+  // Tab setup
+  MockBrowserWindowInterface mock_browser_window_interface_;
+  TestTabStripModelDelegate test_tab_strip_model_delegate_;
+  std::unique_ptr<TabStripModel> tab_strip_model_;
+  ui::UnownedUserDataHost user_data_host_;
+  const tabs::TabModel::PreventFeatureInitializationForTesting
+      prevent_tab_features_;
 };
 
 TEST_F(ActorLoginDelegateImplTest, GetCredentialsSuccess_FeatureOn) {
@@ -193,10 +236,12 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLogin_FeatureOff) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndDisableFeature(
       password_manager::features::kActorLogin);
-  Credential credential = CreateTestCredential(u"username", GURL(kTestUrl));
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
 
   base::test::TestFuture<LoginStatusResultOrError> future;
-  delegate_->AttemptLogin(credential, future.GetCallback());
+  delegate_->AttemptLogin(credential, false, future.GetCallback());
 
   ASSERT_FALSE(future.Get().has_value());
   // When the ActorLogin features is disabled, the delegate returns
@@ -207,13 +252,15 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLogin_FeatureOff) {
 TEST_F(ActorLoginDelegateImplTest, AttemptLogin_FeatureOn) {
   base::test::ScopedFeatureList feature_list(
       password_manager::features::kActorLogin);
-  Credential credential = CreateTestCredential(u"username", GURL(kTestUrl));
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
 
   SetUpActorCredentialFillerDeps();
   EXPECT_CALL(mock_form_cache_, GetFormManagers()).Times(1);
 
   base::test::TestFuture<LoginStatusResultOrError> future;
-  delegate_->AttemptLogin(credential, future.GetCallback());
+  delegate_->AttemptLogin(credential, false, future.GetCallback());
 
   ASSERT_TRUE(future.Get().has_value());
   EXPECT_EQ(future.Get().value(), LoginStatusResult::kErrorNoSigninForm);
@@ -222,17 +269,19 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLogin_FeatureOn) {
 TEST_F(ActorLoginDelegateImplTest, AttemptLoginServiceBusy_FeatureOn) {
   base::test::ScopedFeatureList feature_list(
       password_manager::features::kActorLogin);
-  Credential credential = CreateTestCredential(u"username", GURL(kTestUrl));
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
 
   SetUpActorCredentialFillerDeps();
   EXPECT_CALL(mock_form_cache_, GetFormManagers()).Times(1);
 
   // Start the first request (`AttemptLogin`).
   base::test::TestFuture<LoginStatusResultOrError> first_future;
-  delegate_->AttemptLogin(credential, first_future.GetCallback());
+  delegate_->AttemptLogin(credential, false, first_future.GetCallback());
   // Immediately try to start a second request of the same type.
   base::test::TestFuture<LoginStatusResultOrError> second_future;
-  delegate_->AttemptLogin(credential, second_future.GetCallback());
+  delegate_->AttemptLogin(credential, false, second_future.GetCallback());
 
   // Immediately try to start a `GetCredentials` request (different type).
   base::test::TestFuture<CredentialsOrError> third_future;
@@ -267,23 +316,27 @@ TEST_F(ActorLoginDelegateImplTest, CallbacksAreResetAfterCompletion_FeatureOn) {
   delegate_->GetCredentials(future2.GetCallback());
   ASSERT_TRUE(future2.Get().has_value());
 
-  Credential credential = CreateTestCredential(u"username", GURL(kTestUrl));
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
 
   // First `AttemptLogin` call.
   base::test::TestFuture<LoginStatusResultOrError> future3;
-  delegate_->AttemptLogin(credential, future3.GetCallback());
+  delegate_->AttemptLogin(credential, false, future3.GetCallback());
   ASSERT_TRUE(future3.Get().has_value());
 
   // Second `AttemptLogin` call should now be possible.
   base::test::TestFuture<LoginStatusResultOrError> future4;
-  delegate_->AttemptLogin(credential, future4.GetCallback());
+  delegate_->AttemptLogin(credential, false, future4.GetCallback());
   ASSERT_TRUE(future4.Get().has_value());
 }
 
 TEST_F(ActorLoginDelegateImplTest, GetCredentialsAndAttemptLogin) {
   base::test::ScopedFeatureList feature_list(
       password_manager::features::kActorLogin);
-  Credential credential = CreateTestCredential(u"username", GURL(kTestUrl));
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
 
   SetUpActorCredentialFillerDeps();
 
@@ -291,7 +344,7 @@ TEST_F(ActorLoginDelegateImplTest, GetCredentialsAndAttemptLogin) {
   auto get_credentials_callback =
       base::BindLambdaForTesting([&](CredentialsOrError result) {
         ASSERT_TRUE(result.has_value());
-        delegate_->AttemptLogin(credential, future.GetCallback());
+        delegate_->AttemptLogin(credential, false, future.GetCallback());
       });
 
   delegate_->GetCredentials(get_credentials_callback);
@@ -304,18 +357,42 @@ TEST_F(ActorLoginDelegateImplTest,
        AttemptLoginLeavesServiceAvailableForSynchronousUse) {
   base::test::ScopedFeatureList feature_list(
       password_manager::features::kActorLogin);
-  Credential credential = CreateTestCredential(u"username", GURL(kTestUrl));
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
 
   SetUpActorCredentialFillerDeps();
 
   base::test::TestFuture<CredentialsOrError> future;
   delegate_->AttemptLogin(
-      credential,
+      credential, false,
       base::BindLambdaForTesting([&](LoginStatusResultOrError result) {
         ASSERT_TRUE(result.has_value());
         delegate_->GetCredentials(future.GetCallback());
       }));
   ASSERT_TRUE(future.Get().has_value());
+}
+
+TEST_F(ActorLoginDelegateImplTest, WebContentsDestroyedDuringAttemptLogin) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kActorLogin);
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
+
+  SetUpActorCredentialFillerDeps();
+  EXPECT_CALL(mock_form_cache_, GetFormManagers()).Times(1);
+
+  base::test::TestFuture<LoginStatusResultOrError> future;
+  delegate_->AttemptLogin(credential, false, future.GetCallback());
+
+  delegate_ = nullptr;
+  // This should invoke `WebContentsDestroyed`.
+  tab_strip_model_.reset();
+  task_environment()->RunUntilIdle();
+  // The callback should never be invoked because the
+  // delegate was destroyed.
+  EXPECT_FALSE(future.IsReady());
 }
 
 }  // namespace actor_login

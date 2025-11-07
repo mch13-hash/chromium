@@ -874,6 +874,7 @@ void DidActivatePrerender(const NavigationRequest& nav_request,
 void DidUpdatePrerenderStatus(
     FrameTreeNodeId initiator_frame_tree_node_id,
     const base::UnguessableToken& initiator_devtools_navigation_token,
+    blink::mojom::SpeculationAction action,
     const GURL& prerender_url,
     std::optional<blink::mojom::SpeculationTargetHint> target_hint,
     const base::UnguessableToken& preload_pipeline_id,
@@ -897,11 +898,11 @@ void DidUpdatePrerenderStatus(
   // We update DevToolsPreloadStorage, even if there are no active DevTools
   // sessions, to persist the latest status update.
   devtools_preload_storage->UpdatePrerenderStatus(
-      prerender_url, target_hint, preload_pipeline_id, status, prerender_status,
-      disallowed_mojo_interface, mismatched_headers);
+      action, prerender_url, target_hint, preload_pipeline_id, status,
+      prerender_status, disallowed_mojo_interface, mismatched_headers);
 
   DispatchToAgents(ftn, &protocol::PreloadHandler::DidUpdatePrerenderStatus,
-                   initiator_devtools_navigation_token, prerender_url,
+                   initiator_devtools_navigation_token, action, prerender_url,
                    target_hint, preload_pipeline_id, status, prerender_status,
                    disallowed_mojo_interface, mismatched_headers);
 }
@@ -1284,6 +1285,22 @@ bool ShouldWaitForDebuggerInWindowOpen() {
   return false;
 }
 
+DevtoolsOverriddenOutputParams ApplyEmulationOverrides(
+    DevToolsAgentHostImpl* agent_host,
+    net::HttpRequestHeaders* headers) {
+  DevtoolsOverriddenOutputParams output_params;
+  for (auto* emulation : protocol::EmulationHandler::ForAgentHost(agent_host)) {
+    bool ua_overridden = false;
+    bool accept_language_overridden = false;
+    emulation->ApplyOverrides(headers, &ua_overridden,
+                              &accept_language_overridden);
+
+    output_params.user_agent_overridden |= ua_overridden;
+    output_params.accept_language_overridden |= accept_language_overridden;
+  }
+  return output_params;
+}
+
 namespace {
 // This is a helper function used in ApplyNetworkRequestOverrides and
 // ApplyUserAgentMetadataOverrides to help correctly set network request header
@@ -1327,17 +1344,14 @@ void ApplyNetworkRequestOverrides(
                             devtools_accepted_stream_types, referrer_override);
   }
 
-  for (auto* emulation : protocol::EmulationHandler::ForAgentHost(agent_host)) {
-    bool ua_overridden = false;
-    bool accept_language_overridden = false;
-    emulation->ApplyOverrides(headers, &ua_overridden,
-                              &accept_language_overridden);
-    if (devtools_user_agent_overridden) {
-      *devtools_user_agent_overridden |= ua_overridden;
-    }
-    if (devtools_accept_language_overridden) {
-      *devtools_accept_language_overridden |= accept_language_overridden;
-    }
+  DevtoolsOverriddenOutputParams output_params =
+      ApplyEmulationOverrides(agent_host, headers);
+  if (devtools_user_agent_overridden) {
+    *devtools_user_agent_overridden = output_params.user_agent_overridden;
+  }
+  if (devtools_accept_language_overridden) {
+    *devtools_accept_language_overridden =
+        output_params.accept_language_overridden;
   }
 }
 
@@ -2622,8 +2636,10 @@ void DidCloseFedCmDialog(RenderFrameHost& render_frame_host) {
   DispatchToAgents(ftn, &protocol::FedCmHandler::DidCloseDialog);
 }
 
-void WillSendFedCmNetworkRequest(FrameTreeNodeId frame_tree_node_id,
-                                 const network::ResourceRequest& request) {
+void WillSendFedCmNetworkRequest(
+    FrameTreeNodeId frame_tree_node_id,
+    const network::ResourceRequest& request,
+    const std::optional<std::string>& request_body) {
   FrameTreeNode* ftn = FrameTreeNode::GloballyFindByID(frame_tree_node_id);
   if (!ftn) {
     return;
@@ -2645,15 +2661,11 @@ void WillSendFedCmNetworkRequest(FrameTreeNodeId frame_tree_node_id,
     initiator_url = request.request_initiator->GetURL();
   }
 
-  network::mojom::URLRequestDevToolsInfoPtr request_info =
-      network::ExtractDevToolsInfo(request);
-
-  DispatchToAgents(frame_tree_node_id, &protocol::NetworkHandler::RequestSent,
+  DispatchToAgents(frame_tree_node_id,
+                   &protocol::NetworkHandler::FedCmRequestWillBeSent,
                    request.devtools_request_id.value(),
-                   loader_id.value().ToString(), request.headers, *request_info,
-                   protocol::Network::ResourceTypeEnum::FedCM, initiator_url,
-                   /*initiator_devtools_request_id=*/"", frame_token,
-                   base::TimeTicks::Now());
+                   loader_id.value().ToString(), request, request_body,
+                   initiator_url, frame_token, base::TimeTicks::Now());
 }
 
 void DidReceiveFedCmNetworkResponse(

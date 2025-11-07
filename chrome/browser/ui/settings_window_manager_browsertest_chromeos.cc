@@ -22,6 +22,8 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/common/chrome_switches.h"
@@ -52,10 +54,16 @@ size_t GetNumberOfSettingsWindows() {
 
 class SettingsWindowManagerTest : public InProcessBrowserTest {
  public:
-  SettingsWindowManagerTest()
-      : settings_manager_(chrome::SettingsWindowManager::GetInstance()) {}
+  SettingsWindowManagerTest() = default;
+  SettingsWindowManagerTest(const SettingsWindowManagerTest&) = delete;
+  SettingsWindowManagerTest& operator=(const SettingsWindowManagerTest&) =
+      delete;
+
+  ~SettingsWindowManagerTest() override = default;
 
   void SetUpOnMainThread() override {
+    settings_manager_ = chrome::SettingsWindowManager::GetInstance();
+
     // Install the Settings App.
     ash::SystemWebAppManager::GetForTest(browser()->profile())
         ->InstallSystemAppsForTesting();
@@ -67,23 +75,16 @@ class SettingsWindowManagerTest : public InProcessBrowserTest {
     ASSERT_TRUE(synchronized.Wait());
   }
 
-  SettingsWindowManagerTest(const SettingsWindowManagerTest&) = delete;
-  SettingsWindowManagerTest& operator=(const SettingsWindowManagerTest&) =
-      delete;
-
-  ~SettingsWindowManagerTest() override = default;
+  void TearDownOnMainThread() override { settings_manager_ = nullptr; }
 
   void CloseNonDefaultBrowsers() {
-    std::list<Browser*> browsers_to_close;
-    for (Browser* b : *BrowserList::GetInstance()) {
-      if (b != browser()) {
-        browsers_to_close.push_back(b);
-      }
-    }
-    for (std::list<Browser*>::iterator iter = browsers_to_close.begin();
-         iter != browsers_to_close.end(); ++iter) {
-      CloseBrowserSynchronously(*iter);
-    }
+    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+        [&](BrowserWindowInterface* browser_window_interface) {
+          if (browser_window_interface != browser()) {
+            CloseBrowserSynchronously(browser_window_interface);
+          }
+          return true;
+        });
   }
 
   void ShowOSSettings() {
@@ -93,7 +94,7 @@ class SettingsWindowManagerTest : public InProcessBrowserTest {
   }
 
  protected:
-  raw_ptr<chrome::SettingsWindowManager> settings_manager_;
+  raw_ptr<chrome::SettingsWindowManager> settings_manager_ = nullptr;
 };
 
 IN_PROC_BROWSER_TEST_F(SettingsWindowManagerTest, OpenSettingsWindow) {

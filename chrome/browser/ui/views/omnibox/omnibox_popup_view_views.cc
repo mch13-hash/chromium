@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_header_view.h"
@@ -95,6 +96,7 @@ std::optional<gfx::Rect> GetDebugWidgetBounds(
 }
 
 }  // namespace
+
 class OmniboxPopupViewViews::PopupWidget final : public ThemeCopyingWidget {
  public:
   // TODO(tapted): Remove |role_model| when the omnibox is completely decoupled
@@ -230,13 +232,34 @@ class OmniboxPopupViewViews::PopupWidget final : public ThemeCopyingWidget {
   base::WeakPtrFactory<PopupWidget> weak_ptr_factory_{this};
 };
 
+OmniboxPopupViewViews::WidgetObserverHelper::WidgetObserverHelper(
+    OmniboxPopupViewViews* popup_view)
+    : popup_view_(popup_view) {}
+OmniboxPopupViewViews::WidgetObserverHelper::~WidgetObserverHelper() = default;
+
+void OmniboxPopupViewViews::WidgetObserverHelper::OnWidgetBoundsChanged(
+    views::Widget* widget,
+    const gfx::Rect& new_bounds) {
+  popup_view_->OnWidgetBoundsChanged(widget, new_bounds);
+}
+void OmniboxPopupViewViews::WidgetObserverHelper::OnWidgetVisibilityChanged(
+    views::Widget* widget,
+    bool visible) {
+  popup_view_->OnWidgetVisibilityChanged(widget, visible);
+}
+void OmniboxPopupViewViews::WidgetObserverHelper::OnWidgetDestroying(
+    views::Widget* widget) {
+  popup_view_->OnWidgetDestroying(widget);
+}
+
 OmniboxPopupViewViews::OmniboxPopupViewViews(OmniboxViewViews* omnibox_view,
                                              OmniboxController* controller,
                                              LocationBarView* location_bar_view)
     : OmniboxPopupView(controller),
       omnibox_view_(omnibox_view),
       location_bar_view_(location_bar_view) {
-  model()->set_popup_view(this);
+  controller->edit_model()->set_popup_view(this);
+  edit_model_observation_.Observe(controller->edit_model());
 
   if (omnibox_view_) {
     GetViewAccessibility().SetPopupForId(
@@ -259,10 +282,10 @@ OmniboxPopupViewViews::~OmniboxPopupViewViews() {
   // We don't need to close or delete `widget_` here. The OS either has already
   // closed the window, in which case it's been deleted, or it will soon.
   if (widget_) {
-    widget_->RemoveObserver(this);
+    widget_->RemoveObserver(&widget_observer_helper_);
   }
-  CHECK(!IsInObserverList());
-  model()->set_popup_view(nullptr);
+  CHECK(!widget_observer_helper_.IsInObserverList());
+  controller()->edit_model()->set_popup_view(nullptr);
   UpdateAccessibleControlIds();
 }
 
@@ -273,15 +296,17 @@ gfx::Image OmniboxPopupViewViews::GetMatchIcon(
   bool dark_mode =
       color_provider && color_utils::IsDark(color_provider->GetColor(
                             kColorOmniboxResultsBackground));
-  return model()->GetMatchIcon(match, vector_icon_color, dark_mode);
+  return controller()->edit_model()->GetMatchIcon(match, vector_icon_color,
+                                                  dark_mode);
 }
 
 void OmniboxPopupViewViews::SetSelectedIndex(size_t index) {
   DCHECK(HasMatchAt(index));
-  if (index != model()->GetPopupSelection().line) {
+  if (index != controller()->edit_model()->GetPopupSelection().line) {
     OmniboxPopupSelection::LineState line_state = OmniboxPopupSelection::NORMAL;
-    model()->SetPopupSelection(OmniboxPopupSelection(index, line_state));
-    OnPropertyChanged(model(), views::kPropertyEffectsNone);
+    controller()->edit_model()->SetPopupSelection(
+        OmniboxPopupSelection(index, line_state));
+    OnPropertyChanged(controller()->edit_model(), views::kPropertyEffectsNone);
   }
 }
 
@@ -290,7 +315,7 @@ size_t OmniboxPopupViewViews::GetSelectedIndex() const {
 }
 
 OmniboxPopupSelection OmniboxPopupViewViews::GetSelection() const {
-  return model()->GetPopupSelection();
+  return controller()->edit_model()->GetPopupSelection();
 }
 
 void OmniboxPopupViewViews::UpdatePopupBounds() {
@@ -313,22 +338,6 @@ void OmniboxPopupViewViews::InvalidateLine(size_t line) {
   row_views_[line]->OnSelectionStateChanged();
 }
 
-void OmniboxPopupViewViews::OnSelectionChanged(
-    OmniboxPopupSelection old_selection,
-    OmniboxPopupSelection new_selection) {
-  // Do not invalidate the same line twice, in order to avoid redundant
-  // accessibility events.
-  if (old_selection.line != OmniboxPopupSelection::kNoMatch &&
-      old_selection.line != new_selection.line) {
-    InvalidateLine(old_selection.line);
-  }
-
-  if (new_selection.line != OmniboxPopupSelection::kNoMatch) {
-    InvalidateLine(new_selection.line);
-  }
-  UpdateAccessibleActiveDescendantForInvokingView();
-}
-
 void OmniboxPopupViewViews::UpdatePopupAppearance() {
   const auto* autocomplete_controller = controller()->autocomplete_controller();
   if (autocomplete_controller->result().empty() ||
@@ -342,7 +351,7 @@ void OmniboxPopupViewViews::UpdatePopupAppearance() {
         return;
       }
       widget_->CloseAnimated();  // This will eventually delete the popup.
-      widget_->RemoveObserver(this);
+      widget_->RemoveObserver(&widget_observer_helper_);
       widget_.reset();
       if (contextual_group_view_) {
         contextual_group_view_->OnPopupHide();
@@ -378,7 +387,7 @@ void OmniboxPopupViewViews::UpdatePopupAppearance() {
 
     widget_->SetVisibilityAnimationTransition(views::Widget::ANIMATE_NONE);
     widget_->SetPopupContentsView(this);
-    widget_->AddObserver(this);
+    widget_->AddObserver(&widget_observer_helper_);
 
     popup_created = true;
   }
@@ -470,12 +479,6 @@ void OmniboxPopupViewViews::ProvideButtonFocusHint(size_t line) {
   }
 }
 
-void OmniboxPopupViewViews::OnMatchIconUpdated(size_t match_index) {
-  if (OmniboxResultView* result_view = result_view_at(match_index)) {
-    result_view->OnMatchIconUpdated();
-  }
-}
-
 void OmniboxPopupViewViews::OnDragCanceled() {
   SetMouseAndGestureHandler(nullptr);
 }
@@ -527,20 +530,14 @@ void OmniboxPopupViewViews::OnGestureEvent(ui::GestureEvent* event) {
     case ui::EventType::kGestureTap:
     case ui::EventType::kGestureScrollEnd: {
       DCHECK(HasMatchAt(index));
-      model()->OpenSelection(OmniboxPopupSelection(index), event->time_stamp());
+      controller()->edit_model()->OpenSelection(OmniboxPopupSelection(index),
+                                                event->time_stamp());
       break;
     }
     default:
       return;
   }
   event->SetHandled();
-}
-
-void OmniboxPopupViewViews::FireAXEventsForNewActiveDescendant(
-    View* descendant_view) {
-  // Selected children changed is fired on the popup.
-  NotifyAccessibilityEventDeprecated(ax::mojom::Event::kSelectedChildrenChanged,
-                                     true);
 }
 
 void OmniboxPopupViewViews::OnWidgetBoundsChanged(views::Widget* widget,
@@ -590,10 +587,43 @@ void OmniboxPopupViewViews::OnWidgetVisibilityChanged(views::Widget* widget,
 void OmniboxPopupViewViews::OnWidgetDestroying(views::Widget* widget) {
   CHECK_EQ(widget, widget_.get());
   if (widget_) {
-    widget_->RemoveObserver(this);
+    widget_->RemoveObserver(&widget_observer_helper_);
     widget_ = nullptr;
   }
   UpdateAccessibleStates();
+}
+
+void OmniboxPopupViewViews::OnSelectionChanged(
+    OmniboxPopupSelection old_selection,
+    OmniboxPopupSelection new_selection) {
+  // Do not invalidate the same line twice, in order to avoid redundant
+  // accessibility events.
+  if (old_selection.line != OmniboxPopupSelection::kNoMatch &&
+      old_selection.line != new_selection.line) {
+    InvalidateLine(old_selection.line);
+  }
+
+  if (new_selection.line != OmniboxPopupSelection::kNoMatch) {
+    InvalidateLine(new_selection.line);
+  }
+  UpdateAccessibleActiveDescendantForInvokingView();
+}
+
+void OmniboxPopupViewViews::OnMatchIconUpdated(size_t match_index) {
+  if (OmniboxResultView* result_view = result_view_at(match_index)) {
+    result_view->OnMatchIconUpdated();
+  }
+}
+
+void OmniboxPopupViewViews::OnContentsChanged() {
+  UpdatePopupAppearance();
+}
+
+void OmniboxPopupViewViews::FireAXEventsForNewActiveDescendant(
+    View* descendant_view) {
+  // Selected children changed is fired on the popup.
+  NotifyAccessibilityEventDeprecated(ax::mojom::Event::kSelectedChildrenChanged,
+                                     true);
 }
 
 gfx::Rect OmniboxPopupViewViews::GetTargetBounds() const {
@@ -637,7 +667,10 @@ gfx::Rect OmniboxPopupViewViews::GetTargetBounds() const {
       -RoundedOmniboxResultsFrame::GetLocationBarAlignmentInsets());
   content_rect.set_height(popup_height);
 
-  if (base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxPopupDebug) &&
+  if (base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxPopup) &&
+      !base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxFullPopup) &&
+      !base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxAimPopup) &&
+      base::FeatureList::IsEnabled(omnibox::kWebUIOmniboxPopupDebug) &&
       omnibox::kWebUIOmniboxPopupDebugSxSParam.Get()) {
     if (auto bounds = GetDebugWidgetBounds(location_bar_view_, popup_height)) {
       content_rect = *bounds;
@@ -750,7 +783,8 @@ std::u16string OmniboxPopupViewViews::UpdateRowView(
     const AutocompleteMatch& match,
     const std::u16string& previous_row_header) {
   std::u16string current_row_header =
-      model()->GetSuggestionGroupHeaderText(match.suggestion_group_id);
+      controller()->edit_model()->GetSuggestionGroupHeaderText(
+          match.suggestion_group_id);
   // Show the header if it's distinct from the previous match's header.
   if (!current_row_header.empty() &&
       current_row_header != previous_row_header) {
@@ -765,7 +799,8 @@ std::u16string OmniboxPopupViewViews::UpdateRowView(
   result_view->SetVisible(!controller()->IsSuggestionHidden(match));
 
   const SkBitmap* bitmap =
-      model()->GetPopupRichSuggestionBitmap(row_view->line());
+      controller()->edit_model()->GetPopupRichSuggestionBitmap(
+          row_view->line());
   if (bitmap) {
     result_view->SetRichSuggestionImage(
         gfx::ImageSkia::CreateFrom1xBitmap(*bitmap));

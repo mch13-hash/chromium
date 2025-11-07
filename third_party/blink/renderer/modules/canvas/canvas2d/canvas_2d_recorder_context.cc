@@ -1922,10 +1922,11 @@ static void StrokeRectOnCanvas(const gfx::RectF& rect,
   DCHECK_EQ(flags->getStyle(), cc::PaintFlags::kStroke_Style);
   if ((rect.width() > 0) != (rect.height() > 0)) {
     // When stroking, we must skip the zero-dimension segments
-    SkPath path;
-    path.moveTo(rect.x(), rect.y());
-    path.lineTo(rect.right(), rect.bottom());
-    path.close();
+    const SkPath path = SkPathBuilder()
+                            .moveTo(rect.x(), rect.y())
+                            .lineTo(rect.right(), rect.bottom())
+                            .close()
+                            .detach();
     canvas->drawPath(path, *flags);
     return;
   }
@@ -2755,8 +2756,7 @@ void Canvas2DRecorderContext::drawMesh(
 
   SourceImageStatus source_image_status = kInvalidSourceImageStatus;
   scoped_refptr<Image> image = image_source->GetSourceImageForCanvas(
-      FlushReason::kDrawMesh, &source_image_status,
-      gfx::SizeF(Width(), Height()));
+      FlushReason::kOther, &source_image_status, gfx::SizeF(Width(), Height()));
   switch (source_image_status) {
     case kUndecodableSourceImageStatus:
       exception_state.ThrowDOMException(

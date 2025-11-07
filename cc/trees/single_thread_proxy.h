@@ -202,7 +202,7 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   void DoPainting();
   void DoCommit(const viz::BeginFrameArgs& commit_args);
   void DoPostCommit();
-  DrawResult DoComposite(LayerTreeHostImpl::FrameData* frame);
+  DrawResult DoComposite(FrameData* frame);
   void DoSwap();
   void DidCommitAndDrawFrame(int source_frame_number);
   void CommitComplete();
@@ -210,6 +210,8 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   bool ShouldComposite() const;
   void ScheduleRequestNewLayerTreeFrameSink();
   void IssueImageDecodeFinishedCallbacks();
+
+  void DidReceiveCompositorFrameAck();
 
   // Accessed on main thread only.
   raw_ptr<LayerTreeHost> layer_tree_host_;

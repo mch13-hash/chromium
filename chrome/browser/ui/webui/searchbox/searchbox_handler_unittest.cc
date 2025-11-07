@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/test_tab_strip_model_delegate.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
+#include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_ui.h"
 #include "chrome/browser/ui/webui/searchbox/lens_searchbox_client.h"
 #include "chrome/browser/ui/webui/searchbox/searchbox_test_utils.h"
 #include "chrome/browser/ui/webui/searchbox/webui_omnibox_handler.h"
@@ -31,6 +32,7 @@
 #include "components/variations/variations_ids_provider.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_renderer_host.h"
+#include "content/public/test/test_web_ui.h"
 #include "content/public/test/test_web_ui_data_source.h"
 #include "content/public/test/web_contents_tester.h"
 #include "lens_searchbox_handler.h"
@@ -40,23 +42,6 @@
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_focus_type.pb.h"
 #include "ui/base/webui/web_ui_util.h"
-
-namespace {
-
-class MockTabContextualizationController
-    : public lens::TabContextualizationController {
- public:
-  explicit MockTabContextualizationController(tabs::TabInterface* tab)
-      : lens::TabContextualizationController(tab) {}
-
-  MOCK_METHOD(void,
-              CaptureScreenshot,
-              (std::optional<lens::ImageEncodingOptions> image_options,
-               CaptureScreenshotCallback callback),
-              (override));
-};
-
-}  // namespace
 
 class SearchboxHandlerTest : public ::testing::Test {
  public:
@@ -119,9 +104,8 @@ class RealboxHandlerTest : public SearchboxHandlerTest {
     web_contents_ =
         content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
     handler_ = std::make_unique<RealboxHandler>(
-        mojo::PendingReceiver<searchbox::mojom::PageHandler>(),
-        /*query_controller=*/nullptr, /*composebox_metrics_recorder=*/nullptr,
-        profile(), web_contents_.get(), /*metrics_reporter=*/nullptr);
+        mojo::PendingReceiver<searchbox::mojom::PageHandler>(), profile(),
+        web_contents_.get());
     handler_->SetPage(page_.BindAndGetRemote());
   }
 
@@ -132,8 +116,8 @@ class RealboxHandlerTest : public SearchboxHandlerTest {
 };
 
 TEST_F(RealboxHandlerTest, RealboxLensVariationsContainsVariations) {
-  RealboxHandler::SetupWebUIDataSource(source()->GetWebUIDataSource(),
-                                       profile());
+  SearchboxHandler::SetupWebUIDataSource(source()->GetWebUIDataSource(),
+                                         profile());
 
   EXPECT_EQ("CGQ", *source()->GetLocalizedStrings()->FindString(
                        "searchboxLensVariations"));
@@ -152,8 +136,7 @@ TEST_F(RealboxHandlerTest, AutocompleteController_Start) {
   // Set a mock OmniboxEditModel.
   auto omnibox_edit_model =
       std::make_unique<testing::NiceMock<MockOmniboxEditModel>>(
-          handler_->omnibox_controller(),
-          /*view=*/nullptr);
+          handler_->omnibox_controller());
   omnibox_edit_model_ = omnibox_edit_model.get();
   handler_->omnibox_controller()->SetEditModelForTesting(
       std::move(omnibox_edit_model));
@@ -218,212 +201,39 @@ TEST_F(RealboxHandlerTest, GetPlaceholderConfig) {
   handler_->GetPlaceholderConfig(future.GetCallback());
   auto config = future.Take();
 
-  ASSERT_TRUE(config->texts.size() > 0);
+  ASSERT_GT(config->texts.size(), 0u);
   ASSERT_EQ(config->change_text_animation_interval.InMilliseconds(), 4000u);
   ASSERT_EQ(config->fade_text_animation_duration.InMilliseconds(), 250u);
 }
 
-class RealboxHandlerTabsTest : public RealboxHandlerTest {
- public:
-  RealboxHandlerTabsTest() = default;
-  ~RealboxHandlerTabsTest() override = default;
+TEST_F(RealboxHandlerTest, AddFileContext) {
+  const auto token = base::UnguessableToken::Create();
+  const std::string image_data_url = "data:image/png;base64,sometestdata";
+  const bool is_deletable = true;
 
-  void SetUp() override {
-    RealboxHandlerTest::SetUp();
-    ON_CALL(browser_window_interface_, GetTabStripModel())
-        .WillByDefault(::testing::Return(&tab_strip_model_));
-    ON_CALL(browser_window_interface_, GetUnownedUserDataHost)
-        .WillByDefault(::testing::ReturnRef(user_data_host_));
-    delegate_.SetBrowserWindowInterface(&browser_window_interface_);
-    webui::SetBrowserWindowInterface(web_contents_.get(),
-                                     &browser_window_interface_);
-  }
+  // SelectedFileInfoPtr is a move-only type, so capture it in the lambda.
+  searchbox::mojom::SelectedFileInfoPtr captured_file_info;
+  EXPECT_CALL(page_, AddFileContext(token, testing::_))
+      .Times(1)
+      .WillOnce([&](const base::UnguessableToken&,
+                    searchbox::mojom::SelectedFileInfoPtr info) {
+        captured_file_info = std::move(info);
+      });
 
-  void TearDown() override {
-    tab_interface_to_alert_controller_.clear();
-    tab_strip_model()->CloseAllTabs();
-    delegate_.SetBrowserWindowInterface(nullptr);
-    RealboxHandlerTest::TearDown();
-  }
+  searchbox::mojom::SelectedFileInfoPtr file_info =
+      searchbox::mojom::SelectedFileInfo::New();
+  file_info->file_name = "Visual Selection";
+  file_info->mime_type = "image/png";
+  file_info->image_data_url = image_data_url;
+  file_info->is_deletable = is_deletable;
+  handler_->AddFileContextFromBrowser(token, file_info.Clone());
+  page_.FlushForTesting();
 
-  TabStripModel* tab_strip_model() { return &tab_strip_model_; }
-  RealboxHandler* handler() { return handler_.get(); }
-  base::HistogramTester& histogram_tester() { return histogram_tester_; }
-  base::TimeTicks IncrementTimeTicksAndGet() {
-    last_active_time_ticks_ += base::Seconds(1);
-    return last_active_time_ticks_;
-  }
-
-  tabs::TabInterface* AddTab(GURL url) {
-    std::unique_ptr<content::WebContents> contents_unique_ptr =
-        content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
-    content::WebContentsTester::For(contents_unique_ptr.get())
-        ->NavigateAndCommit(url);
-    content::WebContents* content_ptr = contents_unique_ptr.get();
-    content::WebContentsTester::For(content_ptr)
-        ->SetLastActiveTimeTicks(IncrementTimeTicksAndGet());
-    tab_strip_model()->AppendWebContents(std::move(contents_unique_ptr), true);
-    tabs::TabInterface* tab_interface =
-        tab_strip_model()->GetTabForWebContents(content_ptr);
-    tabs::TabFeatures* const tab_features = tab_interface->GetTabFeatures();
-    tab_features->SetTabUIHelperForTesting(
-        std::make_unique<TabUIHelper>(*tab_interface));
-    auto tab_contextualization_controller =
-        std::make_unique<MockTabContextualizationController>(tab_interface);
-    tab_features->SetTabContextualizationControllerForTesting(
-        std::move(tab_contextualization_controller));
-    std::unique_ptr<tabs::TabAlertController> tab_alert_controller =
-        tabs::TabFeatures::GetUserDataFactoryForTesting()
-            .CreateInstance<tabs::TabAlertController>(*tab_interface,
-                                                      *tab_interface);
-    tab_interface_to_alert_controller_.insert(
-        {tab_interface, std::move(tab_alert_controller)});
-
-    return tab_interface;
-  }
-
- private:
-  base::TimeTicks last_active_time_ticks_;
-  TestTabStripModelDelegate delegate_;
-  TabStripModel tab_strip_model_{&delegate_, profile()};
-  ui::UnownedUserDataHost user_data_host_;
-  MockBrowserWindowInterface browser_window_interface_;
-  base::HistogramTester histogram_tester_;
-  std::map<tabs::TabInterface* const, std::unique_ptr<tabs::TabAlertController>>
-      tab_interface_to_alert_controller_;
-  const tabs::TabModel::PreventFeatureInitializationForTesting prevent_;
-};
-
-TEST_F(RealboxHandlerTabsTest, GetRecentTabs) {
-  base::FieldTrialParams params;
-  params[ntp_composebox::kContextMenuMaxTabSuggestions.name] = "2";
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeatureWithParameters(
-      ntp_composebox::kNtpComposebox, params);
-
-  // Add only 1 valid tab, and ensure it is the only one returned.
-  auto* about_blank_tab = AddTab(GURL("about:blank"));
-  AddTab(GURL("chrome://webui-is-ignored"));
-
-  base::test::TestFuture<std::vector<searchbox::mojom::TabInfoPtr>> future1;
-  handler()->GetRecentTabs(future1.GetCallback());
-  auto tabs = future1.Take();
-  ASSERT_EQ(tabs.size(), 1u);
-  EXPECT_EQ(tabs[0]->tab_id, about_blank_tab->GetHandle().raw_value());
-
-  // Add more tabs, and ensure no more than the max allowed tabs are returned.
-  AddTab(GURL("https://www.google.com"));
-  auto* youtube_tab = AddTab(GURL("https://www.youtube.com"));
-  auto* gmail_tab = AddTab(GURL("https://www.gmail.com"));
-
-  base::test::TestFuture<std::vector<searchbox::mojom::TabInfoPtr>> future2;
-  handler()->GetRecentTabs(future2.GetCallback());
-  tabs = future2.Take();
-  ASSERT_EQ(tabs.size(), 2u);
-  EXPECT_EQ(tabs[0]->tab_id, gmail_tab->GetHandle().raw_value());
-  EXPECT_EQ(tabs[1]->tab_id, youtube_tab->GetHandle().raw_value());
-
-  // Activate an older tab, and ensure it is returned first.
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(0))
-      ->SetLastActiveTimeTicks(IncrementTimeTicksAndGet());
-  base::test::TestFuture<std::vector<searchbox::mojom::TabInfoPtr>> future3;
-  handler()->GetRecentTabs(future3.GetCallback());
-  tabs = future3.Take();
-  EXPECT_EQ(tabs[0]->tab_id, about_blank_tab->GetHandle().raw_value());
-  EXPECT_EQ(tabs[1]->tab_id, gmail_tab->GetHandle().raw_value());
-}
-
-TEST_F(RealboxHandlerTabsTest, DuplicateTabsShownMetric) {
-  // Add tabs with duplicate titles.
-  AddTab(GURL("https://a1.com"));
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(0))
-      ->SetTitle(u"Title A");
-  AddTab(GURL("https://b1.com"));
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(1))
-      ->SetTitle(u"Title B");
-  AddTab(GURL("https://a2.com"));
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(2))
-      ->SetTitle(u"Title A");
-  AddTab(GURL("https://c1.com"));
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(3))
-      ->SetTitle(u"Title C");
-  AddTab(GURL("https://a3.com"));
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(4))
-      ->SetTitle(u"Title A");
-  AddTab(GURL("https://b2.com"));
-  content::WebContentsTester::For(tab_strip_model()->GetWebContentsAt(5))
-      ->SetTitle(u"Title B");
-
-  base::test::TestFuture<std::vector<searchbox::mojom::TabInfoPtr>>
-      tab_info_future;
-  handler()->GetRecentTabs(tab_info_future.GetCallback());
-  auto tabs = tab_info_future.Take();
-
-  histogram_tester().ExpectUniqueSample(
-      "NewTabPage.Composebox.DuplicateTabTitlesShownCount", 2, 1);
-}
-
-TEST_F(RealboxHandlerTabsTest, ActiveTabsCountMetric) {
-  AddTab(GURL("https://a1.com"));
-  AddTab(GURL("https://b1.com"));
-  AddTab(GURL("https://a2.com"));
-
-  base::test::TestFuture<std::vector<searchbox::mojom::TabInfoPtr>>
-      tab_info_future;
-  handler()->GetRecentTabs(tab_info_future.GetCallback());
-  auto tabs = tab_info_future.Take();
-
-  histogram_tester().ExpectUniqueSample(
-      "NewTabPage.Composebox.ActiveTabsCountOnContextMenuOpen", 3, 1);
-}
-
-TEST_F(RealboxHandlerTabsTest, GetTabPreview_InvalidTab) {
-  base::test::TestFuture<const std::optional<std::string>&> future;
-  handler()->GetTabPreview(12345, future.GetCallback());
-  std::optional<std::string> preview = future.Get();
-  ASSERT_FALSE(preview.has_value());
-}
-
-TEST_F(RealboxHandlerTabsTest, GetTabPreview_CaptureFails) {
-  tabs::TabInterface* tab = AddTab(GURL("https://a1.com"));
-
-  MockTabContextualizationController* controller =
-      static_cast<MockTabContextualizationController*>(
-          tab->GetTabFeatures()->tab_contextualization_controller());
-  EXPECT_CALL(*controller, CaptureScreenshot(testing::_, testing::_))
-      .WillOnce(
-          [](std::optional<lens::ImageEncodingOptions> image_options,
-             lens::TabContextualizationController::CaptureScreenshotCallback
-                 callback) { std::move(callback).Run(SkBitmap()); });
-
-  base::test::TestFuture<const std::optional<std::string>&> future;
-  handler()->GetTabPreview(tab->GetHandle().raw_value(), future.GetCallback());
-  std::optional<std::string> preview = future.Get();
-  ASSERT_FALSE(preview.has_value());
-}
-
-TEST_F(RealboxHandlerTabsTest, GetTabPreview_Success) {
-  tabs::TabInterface* tab = AddTab(GURL("https://a1.com"));
-
-  SkBitmap bitmap;
-  bitmap.allocN32Pixels(1, 1);
-  bitmap.eraseColor(SK_ColorRED);
-
-  MockTabContextualizationController* controller =
-      static_cast<MockTabContextualizationController*>(
-          tab->GetTabFeatures()->tab_contextualization_controller());
-  EXPECT_CALL(*controller, CaptureScreenshot(testing::_, testing::_))
-      .WillOnce(
-          [&bitmap](
-              std::optional<lens::ImageEncodingOptions> image_options,
-              lens::TabContextualizationController::CaptureScreenshotCallback
-                  callback) { std::move(callback).Run(bitmap); });
-
-  base::test::TestFuture<const std::optional<std::string>&> future;
-  handler()->GetTabPreview(tab->GetHandle().raw_value(), future.GetCallback());
-  std::optional<std::string> preview = future.Get();
-  ASSERT_TRUE(preview.has_value());
-  EXPECT_EQ(preview.value(), webui::GetBitmapDataUrl(bitmap));
+  ASSERT_TRUE(captured_file_info);
+  ASSERT_EQ(captured_file_info->file_name, file_info->file_name);
+  ASSERT_EQ(captured_file_info->mime_type, file_info->mime_type);
+  ASSERT_EQ(captured_file_info->image_data_url, file_info->image_data_url);
+  ASSERT_EQ(captured_file_info->is_deletable, file_info->is_deletable);
 }
 
 class LensSearchboxHandlerTest : public SearchboxHandlerTest {
@@ -449,8 +259,7 @@ class LensSearchboxHandlerTest : public SearchboxHandlerTest {
 
     handler_ = std::make_unique<LensSearchboxHandler>(
         mojo::PendingReceiver<searchbox::mojom::PageHandler>(), profile(),
-        /*web_contents=*/nullptr, /*metrics_reporter=*/nullptr,
-        lens_searchbox_client_.get());
+        /*web_contents=*/nullptr, lens_searchbox_client_.get());
 
     handler_->SetPage(page_.BindAndGetRemote());
   }
@@ -469,8 +278,7 @@ TEST_F(LensSearchboxHandlerTest, Lens_AutocompleteController_Start) {
   // Set a mock OmniboxEditModel.
   auto omnibox_edit_model =
       std::make_unique<testing::NiceMock<MockOmniboxEditModel>>(
-          handler_->omnibox_controller(),
-          /*view=*/nullptr);
+          handler_->omnibox_controller());
   omnibox_edit_model_ = omnibox_edit_model.get();
   handler_->omnibox_controller()->SetEditModelForTesting(
       std::move(omnibox_edit_model));
@@ -600,23 +408,21 @@ class WebuiOmniboxHandlerTest : public SearchboxHandlerTest {
   ~WebuiOmniboxHandlerTest() override = default;
 
  protected:
-  content::RenderViewHostTestEnabler test_render_host_factories_;
-  std::unique_ptr<content::WebContents> web_contents_;
-  std::unique_ptr<WebuiOmniboxHandler> handler_;
-
   void SetUp() override {
     SearchboxHandlerTest::SetUp();
 
     omnibox_controller_ = std::make_unique<OmniboxController>(
-        /*view=*/nullptr, std::make_unique<TestOmniboxClient>(),
-        kAutocompleteDefaultStopTimerDuration);
+        std::make_unique<TestOmniboxClient>());
 
     web_contents_ =
         content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
+    web_ui_.set_web_contents(web_contents_.get());
+
+    omnibox_popup_ui_ = std::make_unique<OmniboxPopupUI>(&web_ui_);
     handler_ = std::make_unique<WebuiOmniboxHandler>(
-        mojo::PendingReceiver<searchbox::mojom::PageHandler>(), profile(),
-        web_contents_.get(), /*metrics_reporter=*/nullptr,
-        omnibox_controller_.get());
+        mojo::PendingReceiver<searchbox::mojom::PageHandler>(),
+        /*metrics_reporter=*/nullptr, omnibox_controller_.get(),
+        omnibox_popup_ui_.get(), &web_ui_);
     handler_->SetPage(page_.BindAndGetRemote());
   }
 
@@ -625,7 +431,12 @@ class WebuiOmniboxHandlerTest : public SearchboxHandlerTest {
     SearchboxHandlerTest::TearDown();
   }
 
+  content::RenderViewHostTestEnabler test_render_host_factories_;
+  std::unique_ptr<content::WebContents> web_contents_;
+  content::TestWebUI web_ui_;
+  std::unique_ptr<OmniboxPopupUI> omnibox_popup_ui_;
   std::unique_ptr<OmniboxController> omnibox_controller_;
+  std::unique_ptr<WebuiOmniboxHandler> handler_;
 };
 
 TEST_F(WebuiOmniboxHandlerTest, WebuiOmniboxUpdatesSelection) {

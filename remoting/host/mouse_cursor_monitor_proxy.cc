@@ -17,9 +17,9 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
-#include "remoting/protocol/mouse_cursor_monitor.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "third_party/webrtc/modules/desktop_capture/mouse_cursor.h"
+#include "third_party/webrtc/modules/desktop_capture/mouse_cursor_monitor.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "remoting/host/chromeos/mouse_cursor_monitor_aura.h"
@@ -27,7 +27,8 @@
 
 namespace remoting {
 
-class MouseCursorMonitorProxy::Core : public MouseCursorMonitor::Callback {
+class MouseCursorMonitorProxy::Core
+    : public webrtc::MouseCursorMonitor::Callback {
  public:
   explicit Core(base::WeakPtr<MouseCursorMonitorProxy> proxy);
 
@@ -37,24 +38,22 @@ class MouseCursorMonitorProxy::Core : public MouseCursorMonitor::Callback {
   ~Core() override;
 
   void CreateMouseCursorMonitor(
-      base::OnceCallback<std::unique_ptr<MouseCursorMonitor>()> creator);
+      base::OnceCallback<std::unique_ptr<webrtc::MouseCursorMonitor>()>
+          creator);
 
-  void Init(MouseCursorMonitor::Mode mode);
+  void Init(webrtc::MouseCursorMonitor::Mode mode);
   void Capture();
 
  private:
-  // MouseCursorMonitor::Callback implementation.
+  // webrtc::MouseCursorMonitor::Callback implementation.
   void OnMouseCursor(webrtc::MouseCursor* mouse_cursor) override;
   void OnMouseCursorPosition(const webrtc::DesktopVector& position) override;
-  void OnMouseCursorFractionalPosition(webrtc::ScreenId screen_id,
-                                       float fractional_x,
-                                       float fractional_y) override;
 
   base::ThreadChecker thread_checker_;
 
   base::WeakPtr<MouseCursorMonitorProxy> proxy_;
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
-  std::unique_ptr<MouseCursorMonitor> mouse_cursor_monitor_;
+  std::unique_ptr<webrtc::MouseCursorMonitor> mouse_cursor_monitor_;
 };
 
 MouseCursorMonitorProxy::Core::Core(
@@ -69,7 +68,7 @@ MouseCursorMonitorProxy::Core::~Core() {
 }
 
 void MouseCursorMonitorProxy::Core::CreateMouseCursorMonitor(
-    base::OnceCallback<std::unique_ptr<MouseCursorMonitor>()> creator) {
+    base::OnceCallback<std::unique_ptr<webrtc::MouseCursorMonitor>()> creator) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   mouse_cursor_monitor_ = std::move(creator).Run();
@@ -79,7 +78,8 @@ void MouseCursorMonitorProxy::Core::CreateMouseCursorMonitor(
   }
 }
 
-void MouseCursorMonitorProxy::Core::Init(MouseCursorMonitor::Mode mode) {
+void MouseCursorMonitorProxy::Core::Init(
+    webrtc::MouseCursorMonitor::Mode mode) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (mouse_cursor_monitor_) {
@@ -113,21 +113,9 @@ void MouseCursorMonitorProxy::Core::OnMouseCursorPosition(
                                 proxy_, position));
 }
 
-void MouseCursorMonitorProxy::Core::OnMouseCursorFractionalPosition(
-    webrtc::ScreenId screen_id,
-    float fractional_x,
-    float fractional_y) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  caller_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(&MouseCursorMonitorProxy::OnMouseCursorFractionalPosition,
-                     proxy_, screen_id, fractional_x, fractional_y));
-}
-
 MouseCursorMonitorProxy::MouseCursorMonitorProxy(
     scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-    base::OnceCallback<std::unique_ptr<MouseCursorMonitor>()> creator)
+    base::OnceCallback<std::unique_ptr<webrtc::MouseCursorMonitor>()> creator)
     : capture_task_runner_(capture_task_runner) {
   core_ = std::make_unique<Core>(weak_factory_.GetWeakPtr());
   capture_task_runner_->PostTask(
@@ -164,15 +152,6 @@ void MouseCursorMonitorProxy::OnMouseCursorPosition(
     const webrtc::DesktopVector& position) {
   DCHECK(thread_checker_.CalledOnValidThread());
   callback_->OnMouseCursorPosition(position);
-}
-
-void MouseCursorMonitorProxy::OnMouseCursorFractionalPosition(
-    webrtc::ScreenId screen_id,
-    float fractional_x,
-    float fractional_y) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  callback_->OnMouseCursorFractionalPosition(screen_id, fractional_x,
-                                             fractional_y);
 }
 
 }  // namespace remoting

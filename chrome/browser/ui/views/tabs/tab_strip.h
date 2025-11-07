@@ -97,9 +97,6 @@ class TabStrip : public views::View,
   // Sets the observer to be notified of changes within this TabStrip.
   void SetTabStripObserver(TabStripObserver* observer);
 
-  // Sets `background_offset_` and schedules a paint.
-  void SetBackgroundOffset(int background_offset);
-
   // Scroll the tabstrip towards the trailing tabs by an offset
   void ScrollTowardsTrailingTabs(int offset);
 
@@ -252,6 +249,7 @@ class TabStrip : public views::View,
   std::optional<int> GetActiveIndex() const override;
   int NumPinnedTabsInModel() const override;
   void OnDropIndexUpdate(std::optional<int> index, bool drop_before) override;
+  bool IsBrowserClosing() const override;
   std::optional<int> GetFirstTabInGroup(
       const tab_groups::TabGroupId& group) const override;
   gfx::Range ListTabsInGroup(
@@ -311,7 +309,6 @@ class TabStrip : public views::View,
   bool HoverCardIsShowingForTab(Tab* tab) override;
   void ShowHover(Tab* tab, TabStyle::ShowHoverStyle style) override;
   void HideHover(Tab* tab, TabStyle::HideHoverStyle style) override;
-  int GetBackgroundOffset() const override;
   int GetStrokeThickness() const override;
   bool CanPaintThrobberToLayer() const override;
   bool HasVisibleBackgroundTabShapes() const override;
@@ -448,9 +445,6 @@ class TabStrip : public views::View,
 
   // The View parent for the tabs and the various group views.
   raw_ref<TabContainer, AcrossTasksDanglingUntriaged> tab_container_;
-
-  // The background offset used by inactive tabs to match the frame image.
-  int background_offset_ = 0;
 
   // Location of the mouse at the time of the last move.
   gfx::Point last_mouse_move_location_;

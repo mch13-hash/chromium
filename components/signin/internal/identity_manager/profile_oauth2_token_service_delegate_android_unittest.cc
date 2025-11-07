@@ -8,13 +8,16 @@
 
 #include "base/functional/callback_helpers.h"
 #include "base/scoped_observation.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/mock_profile_oauth2_token_service_observer.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service_delegate.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service_observer.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "google_apis/gaia/core_account_id.h"
 #include "google_apis/gaia/gaia_id.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -56,6 +59,8 @@ class OAuth2TokenServiceDelegateAndroidTest : public testing::Test {
  protected:
   void SetUp() override {
     testing::Test::SetUp();
+    scoped_feature_list_.InitAndDisableFeature(
+        switches::kMakeAccountsAvailableInIdentityManager);
     AccountTrackerService::RegisterPrefs(pref_service_.registry());
     account_tracker_service_.Initialize(&pref_service_, base::FilePath());
     SetUpFakeAccountManagerFacade();
@@ -69,6 +74,11 @@ class OAuth2TokenServiceDelegateAndroidTest : public testing::Test {
     // verify them.
     EXPECT_CALL(*observer_, OnEndBatchChanges).Times(testing::AnyNumber());
     CreateAndSeedAccounts();
+
+    // `LoadCredentials` should happen before
+    // `SeedAccountsThenReloadAllAccountsWithPrimaryAccount` is invoked.
+    EXPECT_CALL(*observer_, OnRefreshTokensLoaded());
+    delegate_->LoadCredentials(CoreAccountId());
   }
 
   AccountTrackerService CreateAccountTrackerService() {
@@ -112,6 +122,7 @@ class OAuth2TokenServiceDelegateAndroidTest : public testing::Test {
         /*should_remove_stale_accounts=*/false);
   }
 
+  base::test::ScopedFeatureList scoped_feature_list_;
   AccountTrackerService account_tracker_service_;
   sync_preferences::TestingPrefServiceSyncable pref_service_;
   std::unique_ptr<OAuth2TokenServiceDelegateAndroidForTest> delegate_;

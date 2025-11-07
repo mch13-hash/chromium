@@ -4,9 +4,12 @@
 
 #include "chrome/browser/actor/ui/actor_ui_window_controller.h"
 
+#include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/ui/actor_overlay_web_view.h"
+#include "chrome/browser/actor/ui/actor_ui_metrics.h"
 #include "chrome/browser/actor/ui/actor_ui_tab_controller_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_features.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/browser_thread.h"
@@ -37,6 +40,28 @@ ActorUiContentsContainerController::ActorUiContentsContainerController(
 ActorUiContentsContainerController::~ActorUiContentsContainerController() =
     default;
 
+void ActorUiContentsContainerController::OnViewBoundsChanged(
+    views::View* observed_view) {
+  CHECK(observed_view == contents_container_view_);
+  content::WebContents* contents = contents_container_view_->web_contents();
+  if (!contents) {
+    return;
+  }
+
+  tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(
+      contents_container_view_->web_contents());
+
+  // There are some cases where a webcontents may no longer be associated with
+  // a tab.
+  if (!tab) {
+    return;
+  }
+
+  if (auto* tab_controller = ActorUiTabControllerInterface::From(tab)) {
+    tab_controller->OnViewBoundsChanged();
+  }
+}
+
 void ActorUiContentsContainerController::OnWebContentsAttached(
     views::WebView* web_view) {
   if (!web_view->web_contents()) {
@@ -45,22 +70,35 @@ void ActorUiContentsContainerController::OnWebContentsAttached(
 
   // Start observing on the new web contents.
   Observe(web_view->web_contents());
+  view_observation_.Observe(web_view);
 
   // Start observing on tab scoped actor ui state changes.
   if (auto* tab =
           tabs::TabInterface::GetFromContents(web_view->web_contents())) {
     if (auto* tab_controller = ActorUiTabControllerInterface::From(tab)) {
       if (features::kGlicActorUiOverlay.Get()) {
-        actor_ui_tab_controller_callback_subscriptions_.push_back(
+        actor_ui_tab_controller_callback_runners_.push_back(
             tab_controller->RegisterActorOverlayStateChange(base::BindRepeating(
                 &ActorUiContentsContainerController::UpdateOverlayState,
                 weak_ptr_factory_.GetWeakPtr())));
+        actor_ui_tab_controller_callback_runners_.push_back(
+            tab_controller->RegisterActorOverlayBackgroundChange(
+                base::BindRepeating(&ActorUiContentsContainerController::
+                                        OnActorOverlayBackgroundChange,
+                                    weak_ptr_factory_.GetWeakPtr())));
       }
-      actor_ui_tab_controller_callback_subscriptions_.push_back(
-          tab_controller->RegisterActorOverlayBackgroundChange(
-              base::BindRepeating(&ActorUiContentsContainerController::
-                                      OnActorOverlayBackgroundChange,
-                                  weak_ptr_factory_.GetWeakPtr())));
+
+      // Record user action if associated task isn't paused or stopped
+      actor::ActorKeyedService* actor_service =
+          actor::ActorKeyedService::Get(web_contents()->GetBrowserContext());
+      if (!actor_service) {
+        return;
+      }
+
+      // Log user action if associated task isn't paused or stopped
+      if (actor_service->IsActiveOnTab(*tab)) {
+        actor::ui::RecordActuatingTabWebContentsAttached();
+      }
 
       // Asynchronous post needed for the window to completely open and
       // activate before trying to show the UI components.
@@ -101,7 +139,8 @@ void ActorUiContentsContainerController::OnWebContentsDetached(
   // Stop observing on web contents and clear all subscriptions related to a
   // tab.
   Observe(nullptr);
-  actor_ui_tab_controller_callback_subscriptions_.clear();
+  view_observation_.Reset();
+  actor_ui_tab_controller_callback_runners_.clear();
 
   if (overlay_) {
     overlay_->CloseUI();
@@ -118,8 +157,10 @@ void ActorUiContentsContainerController::OnActorOverlayBackgroundChange(
 
 void ActorUiContentsContainerController::UpdateOverlayState(
     bool is_visible,
-    ActorOverlayState state) {
+    ActorOverlayState state,
+    base::OnceClosure callback) {
   if (!overlay_) {
+    std::move(callback).Run();
     return;
   }
 
@@ -129,6 +170,9 @@ void ActorUiContentsContainerController::UpdateOverlayState(
   } else {
     overlay_->CloseUI();
   }
+
+  overlay_->SetBorderGlowVisibility(state.border_glow_visible);
+  std::move(callback).Run();
 }
 
 }  // namespace actor::ui

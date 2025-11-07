@@ -461,15 +461,6 @@ class PerTableSeed {
   const uint16_t seed_;
 };
 
-// Returns next per-table seed.
-inline uint16_t NextSeed() {
-  static_assert(PerTableSeed::kBitCount == 16);
-  thread_local uint16_t seed =
-      static_cast<uint16_t>(reinterpret_cast<uintptr_t>(&seed));
-  seed += uint16_t{0xad53};
-  return seed;
-}
-
 // The size and also has additionally
 // 1) one bit that stores whether we have infoz.
 // 2) PerTableSeed::kBitCount bits for the seed.
@@ -516,6 +507,9 @@ class HashtableSize {
   void set_has_infoz() { data_ |= kHasInfozMask; }
 
   void set_no_seed_for_testing() { data_ &= ~kSeedMask; }
+
+  // Returns next per-table seed.
+  static uint16_t NextSeed();
 
  private:
   void set_seed(uint16_t seed) {
@@ -2445,17 +2439,17 @@ class raw_hash_set {
 
   template <class InputIt>
   void insert(InputIt first, InputIt last) {
-    for (; first != last; ++first) emplace(*first);
+    insert_range(first, last);
   }
 
   template <class T, RequiresNotInit<T> = 0,
             std::enable_if_t<Insertable<const T&>::value, int> = 0>
   void insert(std::initializer_list<T> ilist) {
-    insert(ilist.begin(), ilist.end());
+    insert_range(ilist.begin(), ilist.end());
   }
 
   void insert(std::initializer_list<init_type> ilist) {
-    insert(ilist.begin(), ilist.end());
+    insert_range(ilist.begin(), ilist.end());
   }
 
   insert_return_type insert(node_type&& node) ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -3226,6 +3220,11 @@ class raw_hash_set {
       }
     }();
     return {iterator_at(index), inserted};
+  }
+
+  template <class InputIt>
+  void insert_range(InputIt first, InputIt last) {
+    for (; first != last; ++first) emplace(*first);
   }
 
  protected:

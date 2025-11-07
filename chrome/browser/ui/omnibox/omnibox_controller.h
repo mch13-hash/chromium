@@ -6,8 +6,11 @@
 #define CHROME_BROWSER_UI_OMNIBOX_OMNIBOX_CONTROLLER_H_
 
 #include <memory>
+#include <optional>
 
 #include "base/compiler_specific.h"
+#include "base/memory/safety_checks.h"
+#include "base/time/time.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -19,14 +22,20 @@ class OmniboxView;
 // This class controls the various services that can modify the content of the
 // omnibox, including `AutocompleteController` and `OmniboxEditModel`.
 class OmniboxController : public AutocompleteController::Observer {
+  // TODO(crbug.com/392015004): Remove this macro once it gets fixed.
+  ADVANCED_MEMORY_SAFETY_CHECKS();
+
  public:
-  OmniboxController(OmniboxView* view,
-                    std::unique_ptr<OmniboxClient> client,
-                    base::TimeDelta autocomplete_stop_timer_duration =
-                        kAutocompleteDefaultStopTimerDuration);
+  explicit OmniboxController(
+      std::unique_ptr<OmniboxClient> client,
+      std::optional<base::TimeDelta> autocomplete_stop_timer_duration =
+          std::nullopt);
   ~OmniboxController() override;
   OmniboxController(const OmniboxController&) = delete;
   OmniboxController& operator=(const OmniboxController&) = delete;
+
+  // Sets the view and enables autocomplete controller observation.
+  void SetView(OmniboxView* view);
 
   // The |current_url| field of input is only set for mobile ports.
   void StartAutocomplete(const AutocompleteInput& input) const;
@@ -45,8 +54,10 @@ class OmniboxController : public AutocompleteController::Observer {
                        bool default_match_changed) override;
 
   OmniboxClient* client() { return client_.get(); }
+  const OmniboxClient* client() const { return client_.get(); }
 
   OmniboxEditModel* edit_model() { return edit_model_.get(); }
+  const OmniboxEditModel* edit_model() const { return edit_model_.get(); }
 
   void SetEditModelForTesting(std::unique_ptr<OmniboxEditModel> edit_model) {
     edit_model_ = std::move(edit_model);

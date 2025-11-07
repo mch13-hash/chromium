@@ -38,12 +38,15 @@ import org.chromium.android_webview.DualTraceEvent;
 import org.chromium.android_webview.HttpAuthDatabase;
 import org.chromium.android_webview.R;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
+import org.chromium.android_webview.common.AwFeatures;
 import org.chromium.android_webview.common.AwResource;
 import org.chromium.android_webview.common.Lifetime;
+import org.chromium.android_webview.common.WebViewCachedFlags;
 import org.chromium.android_webview.gfx.AwDrawFnImpl;
 import org.chromium.android_webview.metrics.TrackExitReasons;
 import org.chromium.android_webview.variations.FastVariationsSeedSafeModeAction;
 import org.chromium.android_webview.variations.VariationsSeedLoader;
+import org.chromium.base.AconfigFlaggedApiDelegate;
 import org.chromium.base.ApkInfo;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.EarlyTraceEvent;
@@ -65,7 +68,9 @@ import java.util.ArrayDeque;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Class controlling the Chromium initialization for WebView. We hold on to most static objects used
@@ -222,6 +227,12 @@ public class WebViewChromiumAwInit {
 
     private final AtomicInteger mInitState = new AtomicInteger(INIT_NOT_STARTED);
 
+    // Looper on which `getDefaultCookieManager` is called for the first time.
+    private final AtomicReference<Looper> mFirstGetDefaultCookieManagerLooper =
+            new AtomicReference<Looper>();
+    // Set to true if/when `getDefaultCookieManager` is called.
+    private final AtomicBoolean mGetDefaultCookieManagerCalled = new AtomicBoolean(false);
+
     private final WebViewChromiumFactoryProvider mFactory;
     private final WebViewStartUpDiagnostics mWebViewStartUpDiagnostics =
             new WebViewStartUpDiagnostics();
@@ -357,6 +368,7 @@ public class WebViewChromiumAwInit {
         CallSite.STATIC_SET_DEFAULT_TRAFFIC_STATS_UID,
         CallSite.STATIC_SET_RENDERER_LIBRARY_PREFETCH_MODE,
         CallSite.STATIC_GET_RENDERER_LIBRARY_PREFETCH_MODE,
+        CallSite.GET_DEFAULT_COOKIE_MANAGER,
         CallSite.COUNT,
     })
     public @interface CallSite {
@@ -468,11 +480,44 @@ public class WebViewChromiumAwInit {
         int STATIC_SET_DEFAULT_TRAFFIC_STATS_UID = 104;
         int STATIC_SET_RENDERER_LIBRARY_PREFETCH_MODE = 105;
         int STATIC_GET_RENDERER_LIBRARY_PREFETCH_MODE = 106;
+        int GET_DEFAULT_COOKIE_MANAGER = 107;
         // Remember to update WebViewStartupCallSite in enums.xml when adding new values here.
-        int COUNT = 107;
+        int COUNT = 108;
     };
 
     // LINT.ThenChange(//tools/metrics/histograms/metadata/android/enums.xml:WebViewStartupCallSite)
+
+    // These values are persisted to logs. Entries should not be renumbered and
+    // numeric values should never be reused.
+    @IntDef({
+        CookieManagerThreadingCondition.NOT_CALLED_BEFORE_UI_THREAD_SET,
+        CookieManagerThreadingCondition.CALLED_ON_NON_LOOPER_THREAD,
+        CookieManagerThreadingCondition.CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER,
+        CookieManagerThreadingCondition
+                .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_SAME_BACKGROUND_LOOPER,
+        CookieManagerThreadingCondition
+                .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_DIFFERENT_BACKGROUND_LOOPER,
+        CookieManagerThreadingCondition.CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER,
+        CookieManagerThreadingCondition.CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_BACKGROUND_LOOPER,
+    })
+    private @interface CookieManagerThreadingCondition {
+        int NOT_CALLED_BEFORE_UI_THREAD_SET = 0;
+        int CALLED_ON_NON_LOOPER_THREAD = 1;
+        int CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER = 2;
+        int CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_SAME_BACKGROUND_LOOPER = 3;
+        int CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_DIFFERENT_BACKGROUND_LOOPER = 4;
+        int CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER = 5;
+        int CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_BACKGROUND_LOOPER = 6;
+        int COUNT = 7;
+    };
+
+    private static void logCookieManagerThreadingCondition(
+            @CookieManagerThreadingCondition int condition) {
+        RecordHistogram.recordEnumeratedHistogram(
+                "Android.WebView.Startup.CookieManagerThreadingCondition",
+                condition,
+                CookieManagerThreadingCondition.COUNT);
+    }
 
     WebViewChromiumAwInit(WebViewChromiumFactoryProvider factory) {
         mFactory = factory;
@@ -528,6 +573,26 @@ public class WebViewChromiumAwInit {
         mIsStartupTasksYieldToNativeExperimentEnabled = enabled;
     }
 
+    // These are startup tasks that can either run during provider init or during `startChromium`.
+    // This is extracted out so that we can experiment with calling this in either of these
+    // locations.
+    public void runNonUiThreadCapableStartupTasks() {
+        ResourceBundle.setAvailablePakLocales(AwLocaleConfig.getWebViewSupportedPakLocales());
+
+        try (DualTraceEvent ignored2 = DualTraceEvent.scoped("LibraryLoader.ensureInitialized")) {
+            LibraryLoader.getInstance().ensureInitialized();
+        }
+
+        // TODO(crbug.com/400414092): PathService overrides should be obsolete now.
+        PathService.override(PathService.DIR_MODULE, "/system/lib/");
+        PathService.override(DIR_RESOURCE_PAKS_ANDROID, "/system/framework/webview/paks");
+
+        initPlatSupportLibrary();
+        AwContentsStatics.setCheckClearTextPermitted(
+                ContextUtils.getApplicationContext().getApplicationInfo().targetSdkVersion
+                        >= Build.VERSION_CODES.O);
+    }
+
     // Initializes a new StartupTaskRunner with a list of tasks to run for chromium startup.
     // Postcondition of calling `.run` on the returned StartupTasksRunner is that Chromium startup
     // is finished.
@@ -550,25 +615,11 @@ public class WebViewChromiumAwInit {
                         TrackExitReasons.startTrackingStartup();
                     }
 
-                    final Context context = ContextUtils.getApplicationContext();
-
-                    ResourceBundle.setAvailablePakLocales(
-                            AwLocaleConfig.getWebViewSupportedPakLocales());
-
-                    try (DualTraceEvent ignored2 =
-                            DualTraceEvent.scoped("WebViewChromiumAwInit.LibraryLoader")) {
-                        LibraryLoader.getInstance().ensureInitialized();
+                    if (!WebViewCachedFlags.get()
+                            .isCachedFeatureEnabled(
+                                    AwFeatures.WEBVIEW_MOVE_WORK_TO_PROVIDER_INIT)) {
+                        runNonUiThreadCapableStartupTasks();
                     }
-
-                    // TODO(crbug.com/400414092): These should be obsolete now.
-                    PathService.override(PathService.DIR_MODULE, "/system/lib/");
-                    PathService.override(
-                            DIR_RESOURCE_PAKS_ANDROID, "/system/framework/webview/paks");
-
-                    initPlatSupportLibrary();
-                    AwContentsStatics.setCheckClearTextPermitted(
-                            context.getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.O);
-
                     waitUntilSetUpResources();
                     // NOTE: Finished writing Java resources. From this point on, it's safe
                     // to use them.
@@ -612,7 +663,7 @@ public class WebViewChromiumAwInit {
                     } catch (Resources.NotFoundException e) {
                         RecordHistogram.recordBooleanHistogram(
                                 ASSET_PATH_WORKAROUND_HISTOGRAM_NAME, true);
-                        mFactory.addWebViewAssetPath(context);
+                        mFactory.addWebViewAssetPath(ContextUtils.getApplicationContext());
                     }
 
                     AwBrowserProcess.configureChildProcessLauncher();
@@ -668,17 +719,20 @@ public class WebViewChromiumAwInit {
                     AwBrowserProcess.postBackgroundTasks(
                             mFactory.isSafeModeEnabled(), mFactory.getWebViewPrefs());
 
+                    AconfigFlaggedApiDelegate delegate = AconfigFlaggedApiDelegate.getInstance();
+                    if (delegate != null) {
+                        AwContentsStatics.setSelectionActionMenuClient(
+                                delegate.getSelectionActionMenuClient(
+                                        mFactory.getWebViewDelegate()));
+                    }
+
                     AwCrashyClassUtils.maybeCrashIfEnabled();
                     // Must happen right after Chromium initialization is complete.
                     mInitState.set(INIT_FINISHED);
                     mStartupFinished.countDown();
                     // This runs all the pending tasks queued for after Chromium init is
                     // finished, so should run after `mInitState` is `INIT_FINISHED`.
-                    long startTime = SystemClock.uptimeMillis();
                     mFactory.getRunQueue().notifyChromiumStarted();
-                    RecordHistogram.recordTimesHistogram(
-                            "Android.WebView.Startup.ChromiumInitTime.DrainRunQueueDuration",
-                            SystemClock.uptimeMillis() - startTime);
                     if (anyStartupTaskExperimentIsEnabled()) {
                         // Re-enables the taskrunners
                         PostTask.disablePreNativeUiTasks(false);
@@ -980,7 +1034,8 @@ public class WebViewChromiumAwInit {
             if (mThreadIsSet) {
                 return;
             }
-            boolean isUiThreadMainLooper = Looper.getMainLooper().equals(looper);
+            Looper mainLooper = Looper.getMainLooper();
+            boolean isUiThreadMainLooper = mainLooper.equals(looper);
             Log.v(
                     TAG,
                     "Binding Chromium to "
@@ -989,6 +1044,45 @@ public class WebViewChromiumAwInit {
                             + looper);
             RecordHistogram.recordBooleanHistogram(
                     "Android.WebView.Startup.IsUiThreadMainLooper", isUiThreadMainLooper);
+
+            // Temporary metric collection for different threading conditions related to
+            // CookieManager.
+            boolean cookieManagerCalled = mGetDefaultCookieManagerCalled.get();
+            if (cookieManagerCalled) {
+                Looper cookieManagerLooper = mFirstGetDefaultCookieManagerLooper.get();
+                if (cookieManagerLooper == null) {
+                    logCookieManagerThreadingCondition(
+                            CookieManagerThreadingCondition.CALLED_ON_NON_LOOPER_THREAD);
+                } else if (!mainLooper.equals(cookieManagerLooper)) {
+                    if (isUiThreadMainLooper) {
+                        logCookieManagerThreadingCondition(
+                                CookieManagerThreadingCondition
+                                        .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER);
+                    } else if (looper.equals(cookieManagerLooper)) {
+                        logCookieManagerThreadingCondition(
+                                CookieManagerThreadingCondition
+                                        .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_SAME_BACKGROUND_LOOPER);
+                    } else {
+                        logCookieManagerThreadingCondition(
+                                CookieManagerThreadingCondition
+                                        .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_DIFFERENT_BACKGROUND_LOOPER);
+                    }
+                } else if (mainLooper.equals(cookieManagerLooper)) {
+                    if (isUiThreadMainLooper) {
+                        logCookieManagerThreadingCondition(
+                                CookieManagerThreadingCondition
+                                        .CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER);
+                    } else {
+                        logCookieManagerThreadingCondition(
+                                CookieManagerThreadingCondition
+                                        .CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_BACKGROUND_LOOPER);
+                    }
+                }
+            } else {
+                logCookieManagerThreadingCondition(
+                        CookieManagerThreadingCondition.NOT_CALLED_BEFORE_UI_THREAD_SET);
+            }
+
             ThreadUtils.setUiThread(looper);
             mThreadIsSet = true;
         }
@@ -1006,6 +1100,14 @@ public class WebViewChromiumAwInit {
         return mFactory.getSharedStatics();
     }
 
+    boolean isMultiProcessEnabled() {
+        return mFactory.isMultiProcessEnabled();
+    }
+
+    boolean isAsyncStartupWithMultiProcessExperimentEnabled() {
+        return mFactory.isAsyncStartupWithMultiProcessExperimentEnabled();
+    }
+
     public AwTracingController getAwTracingController() {
         triggerAndWaitForChromiumStarted(CallSite.GET_AW_TRACING_CONTROLLER);
         return mChromiumStartedGlobals.mAwTracingController;
@@ -1017,12 +1119,21 @@ public class WebViewChromiumAwInit {
     }
 
     public CookieManager getDefaultCookieManager() {
-        synchronized (mLazyInitLock) {
-            if (mDefaultCookieManager == null) {
-                mDefaultCookieManager =
-                        new CookieManagerAdapter(AwCookieManager.getDefaultCookieManager());
+        if (!mGetDefaultCookieManagerCalled.get()) {
+            mFirstGetDefaultCookieManagerLooper.compareAndSet(null, Looper.myLooper());
+            mGetDefaultCookieManagerCalled.set(true);
+        }
+        if (WebViewCachedFlags.get()
+                .isCachedFeatureEnabled(AwFeatures.WEBVIEW_BYPASS_PROVISIONAL_COOKIE_MANAGER)) {
+            return getDefaultProfile(CallSite.GET_DEFAULT_COOKIE_MANAGER).getCookieManager();
+        } else {
+            synchronized (mLazyInitLock) {
+                if (mDefaultCookieManager == null) {
+                    mDefaultCookieManager =
+                            new CookieManagerAdapter(AwCookieManager.getDefaultCookieManager());
+                }
+                return mDefaultCookieManager;
             }
-            return mDefaultCookieManager;
         }
     }
 

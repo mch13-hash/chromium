@@ -60,13 +60,11 @@ gfx::BufferUsage GetBufferUsage(SharedImageUsageSet usage) {
 
 constexpr SharedImageUsageSet kSupportedUsage =
     SHARED_IMAGE_USAGE_GLES2_READ | SHARED_IMAGE_USAGE_GLES2_WRITE |
-    SHARED_IMAGE_USAGE_GLES2_FOR_RASTER_ONLY |
     SHARED_IMAGE_USAGE_DISPLAY_WRITE | SHARED_IMAGE_USAGE_DISPLAY_READ |
     SHARED_IMAGE_USAGE_RASTER_READ | SHARED_IMAGE_USAGE_RASTER_WRITE |
-    SHARED_IMAGE_USAGE_RASTER_OVER_GLES2_ONLY |
-    SHARED_IMAGE_USAGE_OOP_RASTERIZATION | SHARED_IMAGE_USAGE_SCANOUT |
-    SHARED_IMAGE_USAGE_WEBGPU_READ | SHARED_IMAGE_USAGE_WEBGPU_WRITE |
-    SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE | SHARED_IMAGE_USAGE_VIDEO_DECODE |
+    SHARED_IMAGE_USAGE_SCANOUT | SHARED_IMAGE_USAGE_WEBGPU_READ |
+    SHARED_IMAGE_USAGE_WEBGPU_WRITE | SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE |
+    SHARED_IMAGE_USAGE_VIDEO_DECODE |
     SHARED_IMAGE_USAGE_WEBGPU_SWAP_CHAIN_TEXTURE |
     SHARED_IMAGE_USAGE_HIGH_PERFORMANCE_GPU | SHARED_IMAGE_USAGE_CPU_UPLOAD |
     SHARED_IMAGE_USAGE_CPU_WRITE_ONLY |
@@ -94,7 +92,6 @@ OzoneImageBackingFactory::CreateGpuMemoryBufferHandle(
     viz::SharedImageFormat format,
     gfx::BufferUsage usage) {
   CHECK(viz::HasEquivalentBufferFormat(format));
-  gfx::BufferFormat buffer_format = ToBufferFormat(format);
   scoped_refptr<gfx::NativePixmap> pixmap =
       ui::OzonePlatform::GetInstance()
           ->GetSurfaceFactoryOzone()
@@ -102,7 +99,7 @@ OzoneImageBackingFactory::CreateGpuMemoryBufferHandle(
                                vulkan_context_provider
                                    ? vulkan_context_provider->GetDeviceQueue()
                                    : nullptr,
-                               size, buffer_format, usage, size);
+                               size, format, usage, size);
 
   if (!pixmap.get()) {
     DLOG(ERROR) << "Failed to create pixmap " << size.ToString() << ",  "
@@ -131,7 +128,6 @@ OzoneImageBackingFactory::CreateSharedImageInternal(
     SharedImageUsageSet usage,
     std::string debug_label,
     std::optional<gfx::BufferUsage> buffer_usage) {
-  gfx::BufferFormat buffer_format = ToBufferFormat(format);
   VulkanDeviceQueue* device_queue = nullptr;
 #if BUILDFLAG(ENABLE_VULKAN)
   DCHECK(shared_context_state_);
@@ -146,13 +142,12 @@ OzoneImageBackingFactory::CreateSharedImageInternal(
   // Note that when |buffer_usage| is passed as a parameter and is not null, it
   // should be used instead of converting |usage| to it via GetBufferUsage().
   scoped_refptr<gfx::NativePixmap> pixmap = surface_factory->CreateNativePixmap(
-      surface_handle, device_queue, size, buffer_format,
+      surface_handle, device_queue, size, format,
       buffer_usage.value_or(GetBufferUsage(usage)));
   // Fallback to GPU_READ if cannot create pixmap with SCANOUT
   if (!pixmap) {
-    pixmap = surface_factory->CreateNativePixmap(surface_handle, device_queue,
-                                                 size, buffer_format,
-                                                 gfx::BufferUsage::GPU_READ);
+    pixmap = surface_factory->CreateNativePixmap(
+        surface_handle, device_queue, size, format, gfx::BufferUsage::GPU_READ);
   }
   if (!pixmap) {
     DLOG(ERROR) << "Failed to create native pixmap";
@@ -241,7 +236,7 @@ std::unique_ptr<SharedImageBacking> OzoneImageBackingFactory::CreateSharedImage(
     ui::SurfaceFactoryOzone* surface_factory =
         ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
     pixmap = surface_factory->CreateNativePixmapFromHandle(
-        kNullSurfaceHandle, size, ToBufferFormat(format),
+        kNullSurfaceHandle, size, format,
         std::move(handle).native_pixmap_handle());
     if (!pixmap) {
       return nullptr;
@@ -310,13 +305,12 @@ bool OzoneImageBackingFactory::IsSupported(
   }
   auto* factory = ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
   if (viz::HasEquivalentBufferFormat(format) &&
-      !factory->CanCreateNativePixmapForFormat(ToBufferFormat(format))) {
+      !factory->CanCreateNativePixmapForFormat(format)) {
     return false;
   }
 
   ui::GLOzone* gl_ozone = factory->GetCurrentGLOzone();
-  if (used_by_gl &&
-      (!gl_ozone || !gl_ozone->CanImportNativePixmap(ToBufferFormat(format)))) {
+  if (used_by_gl && (!gl_ozone || !gl_ozone->CanImportNativePixmap(format))) {
     return false;
   }
 
@@ -361,9 +355,9 @@ bool OzoneImageBackingFactory::IsSupported(
   // For now just use OzoneImageBacking for primary plane buffers.
   // TODO(crbug.com/40219694): When Vulkan/GL interop is supported on Fuchsia
   // OzoneImageBacking should be used for all scanout buffers.
-  constexpr uint32_t kPrimaryPlaneUsageFlags =
-      SHARED_IMAGE_USAGE_DISPLAY_READ | SHARED_IMAGE_USAGE_DISPLAY_WRITE |
-      SHARED_IMAGE_USAGE_SCANOUT;
+  constexpr auto kPrimaryPlaneUsageFlags = SHARED_IMAGE_USAGE_DISPLAY_READ |
+                                           SHARED_IMAGE_USAGE_DISPLAY_WRITE |
+                                           SHARED_IMAGE_USAGE_SCANOUT;
   if (usage != kPrimaryPlaneUsageFlags || gmb_type != gfx::EMPTY_BUFFER) {
     return false;
   }

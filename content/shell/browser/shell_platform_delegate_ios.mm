@@ -146,7 +146,8 @@ std::unique_ptr<content::ScopedAccessibilityMode> _scopedAccessibilityMode;
            withEvent:(UIPressesEvent*)event {
   for (UIPress* press in presses) {
     if (press.type == UIPressTypeMenu) {
-      if (_shell->web_contents()->GetContentNativeView().Get().focused) {
+      if (!content::Shell::ShouldHideToolbar() &&
+          _shell->web_contents()->GetContentNativeView().Get().focused) {
         _toolbarContentView.userInteractionEnabled = YES;
         [self setNeedsFocusUpdate];
         return;
@@ -622,7 +623,10 @@ void ShellPlatformDelegate::CreatePlatformWindow(
   UIWindow* window =
       [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
   window.backgroundColor = [UIColor whiteColor];
+#if !BUILDFLAG(IS_IOS_TVOS)
+  // Leaves `tintColor` by default on tvOS. Refer to crbug.com/454180134.
   window.tintColor = [UIColor darkGrayColor];
+#endif
 
   ContentShellWindowDelegate* controller =
       [[ContentShellWindowDelegate alloc] initWithShell:shell];

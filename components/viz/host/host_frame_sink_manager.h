@@ -19,7 +19,7 @@
 #include "base/functional/callback_helpers.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
@@ -47,6 +47,7 @@ class SingleThreadTaskRunner;
 
 namespace viz {
 
+class CopyOutputResult;
 class SurfaceInfo;
 
 enum class ReportFirstSurfaceActivation { kYes, kNo };
@@ -242,7 +243,8 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
   void RequestInputBack();
 
   using ScreenshotDestinationReadyCallback =
-      base::OnceCallback<void(const SkBitmap& copy_output)>;
+      base::OnceCallback<void(std::unique_ptr<CopyOutputResult>)>;
+
   // Sets the callback which is invoked when a `CopyOutputResult` associated
   // with `destination_token` is received by the host/browser process from the
   // Viz process. Must be called once per `destination_token`.

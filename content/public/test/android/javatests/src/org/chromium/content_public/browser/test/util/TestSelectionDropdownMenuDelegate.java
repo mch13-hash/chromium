@@ -12,7 +12,9 @@ import android.view.View;
 import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
 
+import org.chromium.content_public.browser.SelectionMenuItem;
 import org.chromium.content_public.browser.selection.SelectionDropdownMenuDelegate;
+import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController;
 import org.chromium.ui.modelutil.MVCListAdapter;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -34,6 +36,7 @@ public class TestSelectionDropdownMenuDelegate implements SelectionDropdownMenuD
             View rootView,
             MVCListAdapter.ModelList items,
             ItemClickListener clickListener,
+            HierarchicalMenuController hierarchicalMenuController,
             int x,
             int y) {}
 
@@ -41,25 +44,8 @@ public class TestSelectionDropdownMenuDelegate implements SelectionDropdownMenuD
     public void dismiss() {}
 
     @Override
-    public int getGroupId(PropertyModel itemModel) {
-        return 0;
-    }
-
-    @Override
-    public int getItemId(PropertyModel itemModel) {
-        return 0;
-    }
-
-    @Nullable
-    @Override
-    public Intent getItemIntent(PropertyModel itemModel) {
-        return null;
-    }
-
-    @Nullable
-    @Override
-    public View.OnClickListener getClickListener(PropertyModel itemModel) {
-        return null;
+    public SelectionMenuItem getMinimalMenuItem(PropertyModel itemModel) {
+        return new SelectionMenuItem.Builder("").build();
     }
 
     @Override
@@ -77,8 +63,8 @@ public class TestSelectionDropdownMenuDelegate implements SelectionDropdownMenuD
             boolean isIconTintable,
             boolean groupContainsIcon,
             boolean enabled,
-            @Nullable View.OnClickListener clickListener,
-            @Nullable Intent intent) {
+            @Nullable Intent intent,
+            int order) {
         return new MVCListAdapter.ListItem(ListMenuItemType.MENU_ITEM, new PropertyModel());
     }
 }

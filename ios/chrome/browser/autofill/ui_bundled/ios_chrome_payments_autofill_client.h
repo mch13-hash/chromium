@@ -8,6 +8,7 @@
 #import <memory>
 #include <optional>
 
+#import "base/containers/span.h"
 #import "base/functional/callback.h"
 #import "base/memory/raw_ref.h"
 #import "base/memory/weak_ptr.h"
@@ -31,6 +32,8 @@ namespace autofill {
 struct AutofillErrorDialogContext;
 class AutofillProgressDialogController;
 class AutofillProgressDialogControllerImpl;
+class BnplIssuer;
+struct BnplTosModel;
 struct CardUnmaskChallengeOption;
 class CardUnmaskAuthenticationSelectionDialogControllerImpl;
 class CardUnmaskOtpInputDialogController;
@@ -51,6 +54,7 @@ class VirtualCardEnrollUiModel;
 
 namespace payments {
 
+struct BnplIssuerContext;
 class MandatoryReauthManager;
 
 // Chrome iOS implementation of PaymentsAutofillClient. Owned by the
@@ -150,6 +154,7 @@ class IOSChromePaymentsAutofillClient : public PaymentsAutofillClient {
   CreditCardOtpAuthenticator* GetOtpAuthenticator() override;
   CreditCardRiskBasedAuthenticator* GetRiskBasedAuthenticator() override;
   bool IsRiskBasedAuthEffectivelyAvailable() const override;
+  bool IsMandatoryReauthEnabled() override;
   void ShowMandatoryReauthOptInPrompt(
       base::OnceClosure accept_mandatory_reauth_callback,
       base::OnceClosure cancel_mandatory_reauth_callback,
@@ -174,16 +179,20 @@ class IOSChromePaymentsAutofillClient : public PaymentsAutofillClient {
       base::WeakPtr<TouchToFillDelegate> delegate,
       std::vector<autofill::LoyaltyCard> loyalty_cards_to_suggest) override;
   bool UpdateTouchToFillBnplPaymentMethod(
-      std::optional<uint64_t> extracted_amount,
+      std::optional<int64_t> extracted_amount,
       bool is_amount_supported_by_any_issuer) override;
-  bool ShowTouchToFillProgress(
-      base::WeakPtr<TouchToFillDelegate> delegate) override;
+  bool ShowTouchToFillProgress(base::OnceClosure cancel_callback) override;
   bool ShowTouchToFillBnplIssuers(
-      base::WeakPtr<TouchToFillDelegate> delegate,
-      base::span<const autofill::BnplIssuer> bnpl_issurs_to_suggest) override;
-  bool ShowTouchToFillError(base::WeakPtr<TouchToFillDelegate> delegate,
-                            const AutofillErrorDialogContext& context) override;
+      base::span<const payments::BnplIssuerContext> bnpl_issuer_contexts,
+      const std::string& app_locale,
+      base::OnceCallback<void(autofill::BnplIssuer)> selected_issuer_callback,
+      base::OnceClosure cancel_callback) override;
+  bool ShowTouchToFillError(const AutofillErrorDialogContext& context) override;
+  bool ShowTouchToFillBnplTos(BnplTosModel model,
+                              base::OnceClosure accept_callback,
+                              base::OnceClosure cancel_callback) override;
   void HideTouchToFillPaymentMethod() override;
+  void SetTouchToFillVisible(bool visible) override;
   PaymentsDataManager& GetPaymentsDataManager() final;
   payments::MandatoryReauthManager* GetOrCreatePaymentsMandatoryReauthManager()
       override;

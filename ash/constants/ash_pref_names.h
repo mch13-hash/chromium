@@ -1729,6 +1729,16 @@ inline constexpr char kQuickUnlockPinFailedAttempts[] =
 // 3 - week. Users will have to enter their password every week.
 inline constexpr char kQuickUnlockTimeout[] = "quick_unlock_timeout";
 
+// Enum that specifies the minimum complexity requirements for local
+// authentication factors (PINs and local passwords) set by users. The values
+// are:
+// 1 - None: No complexity requirements apart from the PIN/Password being set.
+// 2 - Low: Basic complexity requirements.
+// 3 - Medium: Stricter length and character-type requirements.
+// 4 - High: Strongest complexity requirements, multiple character types.
+inline constexpr char kLocalAuthFactorsComplexity[] =
+    "ash.local_auth_factors.complexity";
+
 // Dictionary prefs in local state that keeps information about detachable
 // bases - for example the last used base per user.
 inline constexpr char kDetachableBaseDevices[] = "ash.detachable_base.devices";
@@ -1743,10 +1753,6 @@ inline constexpr char kAssistantTimeOfLastInteraction[] =
 
 // Whether the user is allowed to disconnect and configure VPN connections.
 inline constexpr char kVpnConfigAllowed[] = "vpn_config_allowed";
-
-// A boolean pref that indicates whether silent printing is enabled.
-inline constexpr char kSilentPrintingEnabled[] =
-    "ash.printing.silent_printing_enabled";
 
 // A boolean pref that indicates whether power peak shift is enabled.
 // Ignored unless powerd is configured to honor charging-related prefs.

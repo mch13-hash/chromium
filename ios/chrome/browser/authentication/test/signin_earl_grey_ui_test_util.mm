@@ -13,7 +13,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/cells/signin_promo_view_constants.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/authentication/ui_bundled/views/views_constants.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_constants.h"
+#import "ios/chrome/browser/recent_tabs/public/recent_tabs_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/google_services_settings_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/manage_accounts/manage_accounts_table_view_controller_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/manage_sync_settings_constants.h"
@@ -139,14 +139,14 @@ id<GREYMatcher> SignOutSnackbarLabelMatcher() {
   if (!enableHistorySync) {
     [SigninEarlGrey signinWithFakeIdentity:fakeIdentity];
     ConditionBlock condition = ^bool {
-      return [[SigninEarlGrey primaryAccountGaiaID]
-          isEqualToString:fakeIdentity.gaiaID];
+      return [SigninEarlGrey primaryAccountGaiaID] == fakeIdentity.gaiaId;
     };
     BOOL isSigned = base::test::ios::WaitUntilConditionOrTimeout(
         base::test::ios::kWaitForActionTimeout, condition);
     GREYAssert(isSigned,
                @"Signed in failed. Expected: %@, Currently signed: %@",
-               fakeIdentity.gaiaID, [SigninEarlGrey primaryAccountGaiaID]);
+               fakeIdentity.gaiaId.ToNSString(),
+               [SigninEarlGrey primaryAccountGaiaID].ToNSString());
     return;
   }
 
@@ -408,6 +408,26 @@ id<GREYMatcher> SignOutSnackbarLabelMatcher() {
           performAction:grey_tap()];
     }
   }
+}
+
++ (void)openAccountsListFromSettings {
+  [ChromeEarlGreyUI openSettingsMenu];
+  [ChromeEarlGreyUI tapSettingsMenuButton:SettingsAccountButton()];
+
+  // Tap "Manage accounts on this device" to get to the accounts view.
+  // First scroll down so that the button is visible.
+  id<GREYMatcher> scrollViewMatcher =
+      grey_accessibilityID(kManageSyncTableViewAccessibilityIdentifier);
+  [[EarlGrey selectElementWithMatcher:scrollViewMatcher]
+      performAction:grey_scrollToContentEdge(kGREYContentEdgeBottom)];
+
+  // Now tap the "Manage accounts on this device" button.
+  id<GREYMatcher> manageAccountsButtonMatcher =
+      grey_allOf(grey_text(l10n_util::GetNSString(
+                     IDS_IOS_GOOGLE_ACCOUNT_SETTINGS_MANAGE_ACCOUNTS_ITEM)),
+                 grey_sufficientlyVisible(), nil);
+  [[EarlGrey selectElementWithMatcher:manageAccountsButtonMatcher]
+      performAction:grey_tap()];
 }
 
 @end

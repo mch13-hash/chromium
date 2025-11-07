@@ -45,6 +45,7 @@ import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManagerFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.ActionBarItem;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.AutofillBarItem;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.BarItem;
 import org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryProperties.DismissBarItem;
@@ -230,11 +231,47 @@ public class KeyboardAccessoryChipViewRenderTest {
                         .setSuggestionType(SuggestionType.AUTOCOMPLETE_ENTRY)
                         .build();
 
+        AutofillSuggestion creditCardSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("Homer Simpson")
+                        .setSubLabel("** 1234")
+                        .setSuggestionType(SuggestionType.CREDIT_CARD_ENTRY)
+                        .setIconId(R.drawable.mc_card)
+                        .build();
+
+        AutofillSuggestion offerSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("Offer suggestion")
+                        .setSubLabel("")
+                        .setSuggestionType(SuggestionType.CREDIT_CARD_ENTRY)
+                        .setIconId(R.drawable.ic_offer_tag)
+                        .build();
+
+        AutofillSuggestion otpSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("Otp code")
+                        .setSubLabel("")
+                        .setSuggestionType(SuggestionType.ONE_TIME_PASSWORD_ENTRY)
+                        .setIconId(R.drawable.ic_android_messages_icon)
+                        .build();
+
+        AutofillSuggestion passwordHistorySuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("email.address@gmail.com")
+                        .setSubLabel("Recover password *********")
+                        .setSuggestionType(SuggestionType.BACKUP_PASSWORD_ENTRY)
+                        .setIconId(R.drawable.ic_history_24dp)
+                        .build();
+
         return List.of(
                 addressSuggestion,
                 loyaltyCardSuggestion,
                 homeAndWorkSuggestion,
-                autocompleteSuggestion);
+                autocompleteSuggestion,
+                creditCardSuggestion,
+                offerSuggestion,
+                otpSuggestion,
+                passwordHistorySuggestion);
     }
 
     private ChipView createChipViewFromSuggestion(AutofillSuggestion suggestion) {
@@ -263,7 +300,7 @@ public class KeyboardAccessoryChipViewRenderTest {
                         BarItem.Type.ACTION_CHIP);
         ChipView chipView = (ChipView) viewHolder.itemView;
         viewHolder.bind(
-                new BarItem(
+                new ActionBarItem(
                         BarItem.Type.ACTION_CHIP,
                         credmanAction,
                         org.chromium.chrome.browser.keyboard_accessory.R.string.select_passkey),
@@ -285,7 +322,7 @@ public class KeyboardAccessoryChipViewRenderTest {
                         BarItem.Type.ACTION_BUTTON);
         View view = viewHolder.itemView;
         viewHolder.bind(
-                new BarItem(
+                new ActionBarItem(
                         BarItem.Type.ACTION_BUTTON,
                         generatePasswordAction,
                         org.chromium.chrome.browser.keyboard_accessory.R.string

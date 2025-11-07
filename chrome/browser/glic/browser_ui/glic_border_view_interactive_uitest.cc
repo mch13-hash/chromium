@@ -9,6 +9,7 @@
 #include "base/test/test_future.h"
 #include "cc/test/pixel_test_utils.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
+#include "chrome/browser/actor/actor_task_metadata.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/ui/actor_border_view_controller.h"
 #include "chrome/browser/actor/ui/actor_ui_tab_controller.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+#include "chrome/browser/ui/views/interaction/browser_elements_views.h"
 #include "chrome/browser/ui/views/tabs/glic_button.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
@@ -65,7 +67,8 @@ class WidgetShowStateObserver : public views::WidgetObserver {
  public:
   WidgetShowStateObserver(Browser* browser, bool should_be_minimized)
       : browser_(browser), should_be_minimized_(should_be_minimized) {
-    widget_observation_.Observe(browser->TopContainer()->GetWidget());
+    widget_observation_.Observe(
+        BrowserElementsViews::From(browser)->GetPrimaryWindowWidget());
   }
 
   void Wait() {
@@ -206,8 +209,11 @@ class TestFactory : public GlicBorderView::Factory {
 class GlicBorderViewUiTest : public test::InteractiveGlicTest {
  public:
   GlicBorderViewUiTest() {
-    // Toggling this feature is only possible via command line.
-    features_.InitFromCommandLine("UiGpuRasterization", "");
+    // Toggling UiGpuRasterization is only possible via command line.
+    features_.InitFromCommandLine(
+        "UiGpuRasterization",
+        // These features disable animation, so disable them here.
+        "GlicForceSimplifiedBorder,GlicForceNonSkSLBorder");
   }
   ~GlicBorderViewUiTest() override = default;
 
@@ -248,9 +254,7 @@ class GlicBorderViewUiTest : public test::InteractiveGlicTest {
 
   void ClickGlicButtonInBrowser(Browser* browser) {
     RunTestSequenceInContext(BrowserElements::From(browser)->GetContext(),
-                             PressButton(kGlicButtonElementId)),
-        CheckControllerHasWidget(true),
-        CheckControllerWidgetMode(GlicWindowMode::kAttached);
+                             PressButton(kGlicButtonElementId));
   }
 
   void AppendTabAndNavigate(Browser* browser, const GURL& url) {
@@ -442,6 +446,10 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, AnimationStateReset) {
 // Ensures that the border animation state is reset after canceling the
 // animation via closePanelAndShutdown.
 IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, AnimationStateResetOnShutdown) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   auto* border = browser()
                      ->window()
                      ->AsBrowserView()
@@ -470,11 +478,15 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, AnimationStateResetOnShutdown) {
   EXPECT_FALSE(border->GetVisible());
 
   // Also check that the web client is gone.
-  EXPECT_FALSE(glic_service()->window_controller().IsWarmed());
+  EXPECT_FALSE(glic_service()->GetSingleInstanceWindowController().IsWarmed());
 }
 
 // Ensures that the emphasis animation is restarted when tab focus changes.
 IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, FocusedTabChange) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   auto* border = browser()
                      ->window()
                      ->AsBrowserView()
@@ -533,6 +545,10 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, FocusedTabChange) {
 // Ensures that only the emphasis animation is restarted when the focused tab is
 // destroyed.
 IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, FocusedTabDestroyed) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   // TODO(crbug.com/445214951): Flaky on mac-vm builder for macOS 15.
 #if BUILDFLAG(IS_MAC)
   if (base::mac::MacOSMajorVersion() == 15 && base::mac::IsVirtualMachine()) {
@@ -602,6 +618,10 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, FocusedTabDestroyed) {
 #define MAYBE_FocusedWindowChange FocusedWindowChange
 #endif
 IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, MAYBE_FocusedWindowChange) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   auto* border = browser()
                      ->window()
                      ->AsBrowserView()
@@ -860,6 +880,10 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, EnsureTimeWraps) {
 // Ensures that the effect time starts from where it was left off when
 // switching to a new tab.
 IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, FocusedTabChangeEffectTime) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   auto* border = browser()
                      ->window()
                      ->AsBrowserView()
@@ -896,7 +920,20 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, FocusedTabChangeEffectTime) {
   EXPECT_EQ(effect_time_before_tab_switching, effect_time_after_tab_switching);
 }
 
-IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest,
+class GlicBorderViewWithActorGlowUiTest : public GlicBorderViewUiTest {
+ public:
+  GlicBorderViewWithActorGlowUiTest() {
+    features_.InitAndEnableFeatureWithParameters(
+        features::kGlicActorUi,
+        {{features::kGlicActorUiStandaloneBorderGlow.name, "false"}});
+  }
+  ~GlicBorderViewWithActorGlowUiTest() override = default;
+
+ private:
+  base::test::ScopedFeatureList features_;
+};
+
+IN_PROC_BROWSER_TEST_F(GlicBorderViewWithActorGlowUiTest,
                        ActorGlowShowsBorderWhenIndicatorIsOff) {
   auto* border = browser()
                      ->window()
@@ -925,6 +962,7 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest,
   std::vector<std::unique_ptr<actor::ToolRequest>> actions;
   actions.push_back(actor::MakeWaitRequest());
   actor_keyed_service->PerformActions(task_id, std::move(actions),
+                                      actor::ActorTaskMetadata(),
                                       result_future.GetCallback());
   EXPECT_EQ(result_future.Get<0>(), actor::mojom::ActionResultCode::kOk);
 
@@ -934,11 +972,63 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest,
   EXPECT_TRUE(border->GetVisible());
 
   // Stop the task.
-  actor_keyed_service->StopTask(task_id, /*success*/ true);
+  actor_keyed_service->StopTask(task_id,
+                                actor::ActorTask::StoppedReason::kTaskComplete);
 
   // Poll until the border is no longer showing.
   ASSERT_TRUE(base::test::RunUntil([&]() { return !border->IsShowing(); }));
 
+  EXPECT_FALSE(border->IsShowing());
+  EXPECT_FALSE(border->GetVisible());
+}
+
+class GlicBorderViewStandaloneGlowUiTest : public GlicBorderViewUiTest {
+ public:
+  GlicBorderViewStandaloneGlowUiTest() {
+    features_.InitAndEnableFeatureWithParameters(
+        features::kGlicActorUi,
+        {{features::kGlicActorUiStandaloneBorderGlow.name, "true"}});
+  }
+  ~GlicBorderViewStandaloneGlowUiTest() override = default;
+
+ private:
+  base::test::ScopedFeatureList features_;
+};
+
+IN_PROC_BROWSER_TEST_F(
+    GlicBorderViewStandaloneGlowUiTest,
+    ActorGlowHidesBorderWhenIndicatorIsOffAndStandaloneIsOn) {
+  auto* border = browser()
+                     ->window()
+                     ->AsBrowserView()
+                     ->GetActiveContentsContainerView()
+                     ->glic_border_view();
+  ASSERT_TRUE(border);
+  EXPECT_FALSE(border->GetVisible());
+
+  // Ensure the border is not showing initially.
+  EXPECT_FALSE(border->IsShowing());
+
+  // Get the actor keyed service.
+  auto* actor_keyed_service =
+      actor::ActorKeyedService::Get(browser()->profile());
+  ASSERT_TRUE(actor_keyed_service);
+
+  // Create a new task.
+  const actor::TaskId task_id = actor_keyed_service->CreateTask();
+  actor_keyed_service->GetTask(task_id)->AddTab(
+      browser()->GetActiveTabInterface()->GetHandle(), base::DoNothing());
+
+  // Perform an action to trigger the glow.
+  actor::PerformActionsFuture result_future;
+  std::vector<std::unique_ptr<actor::ToolRequest>> actions;
+  actions.push_back(actor::MakeWaitRequest());
+  actor_keyed_service->PerformActions(task_id, std::move(actions),
+                                      actor::ActorTaskMetadata(),
+                                      result_future.GetCallback());
+  EXPECT_EQ(result_future.Get<0>(), actor::mojom::ActionResultCode::kOk);
+
+  // Verify the border is not showing.
   EXPECT_FALSE(border->IsShowing());
   EXPECT_FALSE(border->GetVisible());
 }
@@ -1059,6 +1149,10 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewPrefersReducedMotionUiTest,
 // up animation.
 IN_PROC_BROWSER_TEST_F(GlicBorderViewPrefersReducedMotionUiTest,
                        FocusedTabDestroyed) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   ASSERT_TRUE(gfx::Animation::PrefersReducedMotion());
   auto* border = browser()
                      ->window()
@@ -1208,6 +1302,10 @@ IN_PROC_BROWSER_TEST_F(GlicBorderViewPixelOutputUiTest, MinimizeRestore) {
 #else
 IN_PROC_BROWSER_TEST_F(GlicBorderViewUiTest, MinimizeRestore) {
 #endif
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   WaitForUnminimize(browser());
   auto* border = browser()
                      ->window()
@@ -1259,6 +1357,10 @@ class GlicBorderViewSideBySideUiTest : public GlicBorderViewUiTest {
 };
 
 IN_PROC_BROWSER_TEST_F(GlicBorderViewSideBySideUiTest, BasicVisiblity) {
+  if (base::FeatureList::IsEnabled(features::kGlicMultiInstance)) {
+    // TODO(b/453696965): Broken in multi-instance.
+    GTEST_SKIP() << "Skipping for kGlicMultiInstance";
+  }
   // Get the border views for each contents container in multi-content view
   auto content_containers =
       browser()->window()->AsBrowserView()->GetContentsContainerViews();

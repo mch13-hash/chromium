@@ -35,6 +35,10 @@
 #include "ui/webui/tracked_element/tracked_element_handler.h"
 #include "ui/webui/webui_util.h"
 
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/mac_util.h"
+#endif
+
 namespace {
 
 std::string SidePanelEntryIdToTitle(SidePanelEntryId id) {
@@ -102,6 +106,13 @@ WebUIBrowserUI::WebUIBrowserUI(content::WebUI* web_ui)
   source->AddLocalizedStrings(kStrings);
 
   SearchboxHandler::SetupWebUIDataSource(source, Profile::FromWebUI(web_ui));
+  // TODO(crbug.com/445510209): Uncomment after installing WebUIOmniboxHandler.
+  // source->AddBoolean("reportMetrics", true);
+  // source->AddString("charTypedToPaintMetricName",
+  //                   "Omnibox.WebUI.CharTypedToRepaintLatency.ToPaint");
+  // source->AddString(
+  //     "resultChangedToPaintMetricName",
+  //     "Omnibox.Popup.WebUI.ResultChangedToRepaintLatency.ToPaint");
 }
 
 WebUIBrowserUI::~WebUIBrowserUI() = default;
@@ -128,15 +139,11 @@ void WebUIBrowserUI::BindInterface(
     mojo::PendingReceiver<searchbox::mojom::PageHandler> pending_page_handler) {
   content::WebUI* webui = web_ui();
   content::WebContents* web_contents = webui->GetWebContents();
-  realbox_handler_ = std::make_unique<RealboxHandler>(
-      std::move(pending_page_handler), /*query_controller=*/nullptr,
-      /*composebox_metrics_recorder=*/nullptr, Profile::FromWebUI(webui),
-      web_contents, &metrics_reporter_);
-}
-
-void WebUIBrowserUI::BindInterface(
-    mojo::PendingReceiver<metrics_reporter::mojom::PageMetricsHost> receiver) {
-  metrics_reporter_.BindInterface(std::move(receiver));
+  // TODO(crbug.com/445510209): Pass `metrics_reporter_` after installing a
+  // WebUIOmniboxHandler.
+  realbox_handler_ =
+      std::make_unique<RealboxHandler>(std::move(pending_page_handler),
+                                       Profile::FromWebUI(webui), web_contents);
 }
 
 void WebUIBrowserUI::BindInterface(
@@ -183,6 +190,17 @@ void WebUIBrowserUI::CreatePageHandler(
   auto* render_frame_host = web_ui()->GetRenderFrameHost();
   WebUIBrowserPageHandler::CreateForRenderFrameHost(*render_frame_host,
                                                     std::move(receiver), this);
+}
+
+void WebUIBrowserUI::GetTabStripInset(GetTabStripInsetCallback callback) {
+  std::move(callback).Run(
+#if BUILDFLAG(IS_MAC)
+      // Values from BrowserFrameViewMac::GetCaptionButtonBounds()
+      (base::mac::MacOSVersion() >= 26'00'00) ? 76 : 82
+#else
+      0
+#endif
+  );
 }
 
 void WebUIBrowserUI::CreatePageHandler(

@@ -13,7 +13,10 @@
 #import "ios/chrome/browser/net/model/crurl.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_detail_icon_item.h"
+#import "ios/chrome/browser/shared/ui/table_view/content_configuration/image_content_configuration.h"
+#import "ios/chrome/browser/shared/ui/table_view/content_configuration/table_view_cell_content_configuration.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
+#import "ios/chrome/common/ui/button_stack/button_stack_configuration.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/confirmation_alert/confirmation_alert_action_handler.h"
 #import "ios/chrome/common/ui/util/text_view_util.h"
@@ -65,7 +68,7 @@ CGFloat const kCreditCardCellHeight = 64;
   self.customSpacing = kVerticalSpacingMedium;
 
   // Remove extra space between the scroll view bottom and last legal message.
-  self.customScrollViewBottomInsets = 0;
+  self.customContentBottomInset = 0;
 
   // Hide the "Done" button in the navigation bar.
   self.showDismissBarButton = NO;
@@ -85,20 +88,19 @@ CGFloat const kCreditCardCellHeight = 64;
 
 - (void)setCardData:(VirtualCardEnrollmentBottomSheetData*)data {
   _bottomSheetData = data;
-  self.primaryActionString = data.acceptActionText;
-  self.secondaryActionString = data.cancelActionText;
+  self.configuration.primaryActionString = data.acceptActionText;
+  self.configuration.secondaryActionString = data.cancelActionText;
+  [self reloadConfiguration];
 }
 
 - (void)showLoadingState {
   self.primaryActionButton.accessibilityLabel = l10n_util::GetNSString(
       IDS_AUTOFILL_VIRTUAL_CARD_ENROLL_LOADING_THROBBER_ACCESSIBLE_NAME);
-  self.isLoading = YES;
-  self.isConfirmed = NO;
+  [self setLoading:YES];
 }
 
 - (void)showConfirmationState {
-  self.isLoading = NO;
-  self.isConfirmed = YES;
+  [self setConfirmed:YES];
   UIAccessibilityPostNotification(
       UIAccessibilityAnnouncementNotification,
       l10n_util::GetNSString(
@@ -130,22 +132,27 @@ CGFloat const kCreditCardCellHeight = 64;
 
 - (UITableViewCell*)tableView:(UITableView*)tableView
         cellForRowAtIndexPath:(NSIndexPath*)indexPath {
-  TableViewDetailIconCell* cell =
-      [tableView dequeueReusableCellWithIdentifier:kDetailIconCellIdentifier];
+  TableViewCellContentConfiguration* configuration =
+      [[TableViewCellContentConfiguration alloc] init];
+  configuration.title = _bottomSheetData.creditCard.cardNameAndLastFourDigits;
+  configuration.subtitle = _bottomSheetData.creditCard.cardDetails;
+
+  ImageContentConfiguration* imageConfiguration =
+      [[ImageContentConfiguration alloc] init];
+  imageConfiguration.image = _bottomSheetData.creditCard.icon;
+
+  configuration.leadingConfiguration = imageConfiguration;
+
+  UITableViewCell* cell =
+      [TableViewCellContentConfiguration dequeueTableViewCell:tableView];
+
+  cell.contentConfiguration = configuration;
 
   cell.selectionStyle = UITableViewCellSelectionStyleNone;
   cell.backgroundColor = [UIColor colorNamed:kSecondaryBackgroundColor];
   cell.userInteractionEnabled = NO;
   cell.accessibilityIdentifier =
       _bottomSheetData.creditCard.cardNameAndLastFourDigits;
-  [cell.textLabel
-      setText:_bottomSheetData.creditCard.cardNameAndLastFourDigits];
-  [cell setDetailText:_bottomSheetData.creditCard.cardDetails];
-  [cell setIconImage:_bottomSheetData.creditCard.icon
-            tintColor:nil
-      backgroundColor:cell.backgroundColor
-         cornerRadius:kCreditCardCellCornerRadius];
-  [cell setTextLayoutConstraintAxis:UILayoutConstraintAxisVertical];
 
   return cell;
 }
@@ -280,8 +287,8 @@ CGFloat const kCreditCardCellHeight = 64;
   cardContainerTable.rowHeight = kCreditCardCellHeight;
   cardContainerTable.separatorStyle = UITableViewCellSeparatorStyleNone;
   cardContainerTable.layer.cornerRadius = kCreditCardCellCornerRadius;
-  [cardContainerTable registerClass:[TableViewDetailIconCell class]
-             forCellReuseIdentifier:kDetailIconCellIdentifier];
+  [TableViewCellContentConfiguration
+      registerCellForTableView:cardContainerTable];
   cardContainerTable.dataSource = self;
   cardContainerTable.delegate = self;
   [cardContainerTable.heightAnchor

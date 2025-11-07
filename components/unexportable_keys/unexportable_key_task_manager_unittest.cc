@@ -26,8 +26,10 @@
 
 namespace unexportable_keys {
 
-using testing::ElementsAreArray;
-using testing::Return;
+using ::testing::ElementsAre;
+using ::testing::ElementsAreArray;
+using ::testing::Invoke;
+using ::testing::Return;
 
 namespace {
 // Result histograms:
@@ -69,15 +71,13 @@ class UnexportableKeyTaskManagerTest : public testing::Test {
 
  private:
   base::test::TaskEnvironment task_environment_{
-      base::test::TaskEnvironment::ThreadPoolExecutionMode::
-          QUEUED};  // QUEUED - tasks don't run until `RunUntilIdle()` is
-                    // called.
+      // QUEUED - tasks don't run until `RunUntilIdle()` is called.
+      base::test::TaskEnvironment::ThreadPoolExecutionMode::QUEUED};
   // Provides a fake key provider by default.
   std::variant<crypto::ScopedFakeUnexportableKeyProvider,
                crypto::ScopedNullUnexportableKeyProvider>
       scoped_key_provider_;
-  UnexportableKeyTaskManager task_manager_{
-      crypto::UnexportableKeyProvider::Config()};
+  UnexportableKeyTaskManager task_manager_;
 };
 
 TEST_F(UnexportableKeyTaskManagerTest, GenerateKeyAsync) {
@@ -88,8 +88,8 @@ TEST_F(UnexportableKeyTaskManagerTest, GenerateKeyAsync) {
   auto supported_algorithm = {crypto::SignatureVerifier::ECDSA_SHA256};
 
   task_manager().GenerateSigningKeySlowlyAsync(
-      supported_algorithm, BackgroundTaskPriority::kBestEffort,
-      future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), supported_algorithm,
+      BackgroundTaskPriority::kBestEffort, future.GetCallback());
   EXPECT_FALSE(future.IsReady());
   RunBackgroundTasks();
 
@@ -97,10 +97,10 @@ TEST_F(UnexportableKeyTaskManagerTest, GenerateKeyAsync) {
   EXPECT_THAT(future.Get(), base::test::ValueIs(::testing::NotNull()));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kGenerateKeyTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
+      ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   kGenerateKeyTaskRetriesSuccessHistogramName),
-              testing::ElementsAre(base::Bucket(0, 1)));
+              ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest,
@@ -114,19 +114,18 @@ TEST_F(UnexportableKeyTaskManagerTest,
   auto unsupported_algorithm = {crypto::SignatureVerifier::RSA_PKCS1_SHA1};
 
   task_manager().GenerateSigningKeySlowlyAsync(
-      unsupported_algorithm, BackgroundTaskPriority::kBestEffort,
-      future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), unsupported_algorithm,
+      BackgroundTaskPriority::kBestEffort, future.GetCallback());
   RunBackgroundTasks();
 
   EXPECT_EQ(future.Get(),
             base::unexpected(ServiceError::kAlgorithmNotSupported));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kGenerateKeyTaskResultHistogramName),
-      testing::ElementsAre(
-          base::Bucket(ServiceError::kAlgorithmNotSupported, 1)));
+      ElementsAre(base::Bucket(ServiceError::kAlgorithmNotSupported, 1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   kGenerateKeyTaskRetriesFailureHistogramName),
-              testing::ElementsAre(base::Bucket(0, 1)));
+              ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest, GenerateKeyAsyncFailureNoKeyProvider) {
@@ -138,17 +137,17 @@ TEST_F(UnexportableKeyTaskManagerTest, GenerateKeyAsyncFailureNoKeyProvider) {
 
   DisableKeyProvider();
   task_manager().GenerateSigningKeySlowlyAsync(
-      supported_algorithm, BackgroundTaskPriority::kBestEffort,
-      future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), supported_algorithm,
+      BackgroundTaskPriority::kBestEffort, future.GetCallback());
   RunBackgroundTasks();
 
   EXPECT_EQ(future.Get(), base::unexpected(ServiceError::kNoKeyProvider));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kGenerateKeyTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(ServiceError::kNoKeyProvider, 1)));
+      ElementsAre(base::Bucket(ServiceError::kNoKeyProvider, 1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   kGenerateKeyTaskRetriesFailureHistogramName),
-              testing::ElementsAre(base::Bucket(0, 1)));
+              ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest, FromWrappedKeyAsync) {
@@ -158,8 +157,8 @@ TEST_F(UnexportableKeyTaskManagerTest, FromWrappedKeyAsync) {
       generate_key_future;
   auto supported_algorithm = {crypto::SignatureVerifier::ECDSA_SHA256};
   task_manager().GenerateSigningKeySlowlyAsync(
-      supported_algorithm, BackgroundTaskPriority::kBestEffort,
-      generate_key_future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), supported_algorithm,
+      BackgroundTaskPriority::kBestEffort, generate_key_future.GetCallback());
   RunBackgroundTasks();
   ASSERT_OK_AND_ASSIGN(scoped_refptr<RefCountedUnexportableSigningKey> key,
                        generate_key_future.Get());
@@ -172,8 +171,8 @@ TEST_F(UnexportableKeyTaskManagerTest, FromWrappedKeyAsync) {
       unwrap_key_future;
 
   task_manager().FromWrappedSigningKeySlowlyAsync(
-      wrapped_key, BackgroundTaskPriority::kBestEffort,
-      unwrap_key_future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), wrapped_key,
+      BackgroundTaskPriority::kBestEffort, unwrap_key_future.GetCallback());
   EXPECT_FALSE(unwrap_key_future.IsReady());
   RunBackgroundTasks();
 
@@ -187,10 +186,10 @@ TEST_F(UnexportableKeyTaskManagerTest, FromWrappedKeyAsync) {
             unwrapped_key->key().GetSubjectPublicKeyInfo());
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kFromWrappedKeyTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
+      ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   kFromWrappedKeyTaskRetriesSuccessHistogramName),
-              testing::ElementsAre(base::Bucket(0, 1)));
+              ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest, FromWrappedKeyAsyncFailureEmptyKey) {
@@ -201,17 +200,17 @@ TEST_F(UnexportableKeyTaskManagerTest, FromWrappedKeyAsyncFailureEmptyKey) {
   std::vector<uint8_t> empty_wrapped_key;
 
   task_manager().FromWrappedSigningKeySlowlyAsync(
-      empty_wrapped_key, BackgroundTaskPriority::kBestEffort,
-      future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), empty_wrapped_key,
+      BackgroundTaskPriority::kBestEffort, future.GetCallback());
   RunBackgroundTasks();
 
   EXPECT_EQ(future.Get(), base::unexpected(ServiceError::kCryptoApiFailed));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kFromWrappedKeyTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(ServiceError::kCryptoApiFailed, 1)));
+      ElementsAre(base::Bucket(ServiceError::kCryptoApiFailed, 1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   kFromWrappedKeyTaskRetriesFailureHistogramName),
-              testing::ElementsAre(base::Bucket(0, 1)));
+              ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest,
@@ -222,8 +221,8 @@ TEST_F(UnexportableKeyTaskManagerTest,
       generate_key_future;
   auto supported_algorithm = {crypto::SignatureVerifier::ECDSA_SHA256};
   task_manager().GenerateSigningKeySlowlyAsync(
-      supported_algorithm, BackgroundTaskPriority::kBestEffort,
-      generate_key_future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), supported_algorithm,
+      BackgroundTaskPriority::kBestEffort, generate_key_future.GetCallback());
   RunBackgroundTasks();
   ASSERT_OK_AND_ASSIGN(scoped_refptr<RefCountedUnexportableSigningKey> key,
                        generate_key_future.Get());
@@ -238,16 +237,17 @@ TEST_F(UnexportableKeyTaskManagerTest,
 
   DisableKeyProvider();
   task_manager().FromWrappedSigningKeySlowlyAsync(
-      wrapped_key, BackgroundTaskPriority::kBestEffort, future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), wrapped_key,
+      BackgroundTaskPriority::kBestEffort, future.GetCallback());
   RunBackgroundTasks();
 
   EXPECT_EQ(future.Get(), base::unexpected(ServiceError::kNoKeyProvider));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kFromWrappedKeyTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(ServiceError::kNoKeyProvider, 1)));
+      ElementsAre(base::Bucket(ServiceError::kNoKeyProvider, 1)));
   EXPECT_THAT(histogram_tester.GetAllSamples(
                   kFromWrappedKeyTaskRetriesFailureHistogramName),
-              testing::ElementsAre(base::Bucket(0, 1)));
+              ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest, SignAsync) {
@@ -257,8 +257,8 @@ TEST_F(UnexportableKeyTaskManagerTest, SignAsync) {
       generate_key_future;
   auto supported_algorithm = {crypto::SignatureVerifier::ECDSA_SHA256};
   task_manager().GenerateSigningKeySlowlyAsync(
-      supported_algorithm, BackgroundTaskPriority::kBestEffort,
-      generate_key_future.GetCallback());
+      crypto::UnexportableKeyProvider::Config(), supported_algorithm,
+      BackgroundTaskPriority::kBestEffort, generate_key_future.GetCallback());
   RunBackgroundTasks();
   ASSERT_OK_AND_ASSIGN(auto key, generate_key_future.Get());
 
@@ -267,16 +267,16 @@ TEST_F(UnexportableKeyTaskManagerTest, SignAsync) {
   base::test::TestFuture<ServiceErrorOr<std::vector<uint8_t>>> sign_future;
   std::vector<uint8_t> data = {4, 8, 15, 16, 23, 42};
   task_manager().SignSlowlyAsync(key, data, BackgroundTaskPriority::kBestEffort,
-                                 /*max_retries=*/0, sign_future.GetCallback());
+                                 sign_future.GetCallback());
   EXPECT_FALSE(sign_future.IsReady());
   RunBackgroundTasks();
   EXPECT_TRUE(sign_future.IsReady());
   ASSERT_OK_AND_ASSIGN(const auto signed_data, sign_future.Get());
   EXPECT_THAT(histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
-              testing::ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
+              ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kSignTaskRetriesSuccessHistogramName),
-      testing::ElementsAre(base::Bucket(0, 1)));
+      ElementsAre(base::Bucket(0, 1)));
 
   // Also verify that the signature was generated correctly.
   crypto::SignatureVerifier verifier;
@@ -293,47 +293,67 @@ TEST_F(UnexportableKeyTaskManagerTest, SignAsyncNullKey) {
 
   task_manager().SignSlowlyAsync(nullptr, data,
                                  BackgroundTaskPriority::kBestEffort,
-                                 /*max_retries=*/0, sign_future.GetCallback());
+                                 sign_future.GetCallback());
   RunBackgroundTasks();
 
   EXPECT_EQ(sign_future.Get(), base::unexpected(ServiceError::kKeyNotFound));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(ServiceError::kKeyNotFound, 1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
+              ElementsAre(base::Bucket(ServiceError::kKeyNotFound, 1)));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kSignTaskRetriesFailureHistogramName),
-      testing::ElementsAre(base::Bucket(0, 1)));
+      ElementsAre(base::Bucket(0, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest, RetrySignAsyncWithSuccess) {
-  auto key = std::make_unique<MockUnexportableKey>();
-  std::vector<uint8_t> data = {4, 8, 15, 16, 23, 42};
-  EXPECT_CALL(*key, SignSlowly(ElementsAreArray(data)))
+  // Generate and (eventually) use a valid key to make sure the signature
+  // verifies correctly.
+  base::test::TestFuture<
+      ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>>
+      generate_key_future;
+  task_manager().GenerateSigningKeySlowlyAsync(
+      crypto::UnexportableKeyProvider::Config(),
+      /*acceptable_algorithms=*/{crypto::SignatureVerifier::ECDSA_SHA256},
+      BackgroundTaskPriority::kBestEffort, generate_key_future.GetCallback());
+  RunBackgroundTasks();
+  ASSERT_OK_AND_ASSIGN(auto key, generate_key_future.Get());
+
+  auto mocked_key = std::make_unique<MockUnexportableKey>();
+  ON_CALL(*mocked_key, Algorithm())
+      .WillByDefault(
+          Invoke(&key->key(), &crypto::UnexportableSigningKey::Algorithm));
+  ON_CALL(*mocked_key, GetSubjectPublicKeyInfo())
+      .WillByDefault(
+          Invoke(&key->key(),
+                 &crypto::UnexportableSigningKey::GetSubjectPublicKeyInfo));
+  const std::vector<uint8_t> data = {4, 8, 15, 16, 23, 42};
+  EXPECT_CALL(*mocked_key, SignSlowly(ElementsAreArray(data)))
       .WillOnce(Return(std::nullopt))
       .WillOnce(Return(std::nullopt))
-      .WillOnce(Return(std::vector<uint8_t>{1, 2, 3}));
+      .WillOnce(Return(std::nullopt))
+      .WillOnce(
+          Invoke(&key->key(), &crypto::UnexportableSigningKey::SignSlowly));
   auto ref_counted_key = base::MakeRefCounted<RefCountedUnexportableSigningKey>(
-      std::move(key), UnexportableKeyId());
+      std::move(mocked_key), UnexportableKeyId());
 
   base::HistogramTester histogram_tester;
   base::test::TestFuture<ServiceErrorOr<std::vector<uint8_t>>> sign_future;
   task_manager().SignSlowlyAsync(ref_counted_key, data,
                                  BackgroundTaskPriority::kBestEffort,
-                                 /*max_retries=*/2, sign_future.GetCallback());
+                                 sign_future.GetCallback());
   RunBackgroundTasks();
   EXPECT_THAT(sign_future.Get(), base::test::HasValue());
   EXPECT_THAT(histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
-              testing::ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
+              ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kSignTaskRetriesSuccessHistogramName),
-      testing::ElementsAre(base::Bucket(2, 1)));
+      ElementsAre(base::Bucket(3, 1)));
 }
 
 TEST_F(UnexportableKeyTaskManagerTest, RetrySignAsyncWithFailure) {
   auto key = std::make_unique<MockUnexportableKey>();
   std::vector<uint8_t> data = {0, 1, 1, 2, 3, 5, 8};
   EXPECT_CALL(*key, SignSlowly(ElementsAreArray(data)))
-      .Times(3)
+      .Times(4)
       .WillRepeatedly(Return(std::nullopt));
   auto ref_counted_key = base::MakeRefCounted<RefCountedUnexportableSigningKey>(
       std::move(key), UnexportableKeyId());
@@ -342,16 +362,92 @@ TEST_F(UnexportableKeyTaskManagerTest, RetrySignAsyncWithFailure) {
   base::test::TestFuture<ServiceErrorOr<std::vector<uint8_t>>> sign_future;
   task_manager().SignSlowlyAsync(ref_counted_key, data,
                                  BackgroundTaskPriority::kBestEffort,
-                                 /*max_retries=*/2, sign_future.GetCallback());
+                                 sign_future.GetCallback());
   RunBackgroundTasks();
   EXPECT_EQ(sign_future.Get(),
             base::unexpected(ServiceError::kCryptoApiFailed));
-  EXPECT_THAT(
-      histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
-      testing::ElementsAre(base::Bucket(ServiceError::kCryptoApiFailed, 1)));
+  EXPECT_THAT(histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
+              ElementsAre(base::Bucket(ServiceError::kCryptoApiFailed, 1)));
   EXPECT_THAT(
       histogram_tester.GetAllSamples(kSignTaskRetriesFailureHistogramName),
-      testing::ElementsAre(base::Bucket(2, 1)));
+      ElementsAre(base::Bucket(3, 1)));
+}
+
+TEST_F(UnexportableKeyTaskManagerTest,
+       RetrySignAsyncIfSignatureVerificationFailsWithSuccess) {
+  base::test::TestFuture<
+      ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>>
+      generate_key_future;
+  task_manager().GenerateSigningKeySlowlyAsync(
+      crypto::UnexportableKeyProvider::Config(),
+      /*acceptable_algorithms=*/{crypto::SignatureVerifier::ECDSA_SHA256},
+      BackgroundTaskPriority::kBestEffort, generate_key_future.GetCallback());
+  RunBackgroundTasks();
+  ASSERT_OK_AND_ASSIGN(auto key, generate_key_future.Get());
+
+  auto mocked_key = std::make_unique<MockUnexportableKey>();
+  ON_CALL(*mocked_key, Algorithm())
+      .WillByDefault(
+          Invoke(&key->key(), &crypto::UnexportableSigningKey::Algorithm));
+  ON_CALL(*mocked_key, GetSubjectPublicKeyInfo())
+      .WillByDefault(
+          Invoke(&key->key(),
+                 &crypto::UnexportableSigningKey::GetSubjectPublicKeyInfo));
+  const std::vector<uint8_t> data = {4, 8, 15, 16, 23, 42};
+  EXPECT_CALL(*mocked_key, SignSlowly(ElementsAreArray(data)))
+      // Return invalid signature the first time.
+      .WillOnce(Return(std::vector<uint8_t>{1, 2, 3}))
+      .WillOnce(
+          Invoke(&key->key(), &crypto::UnexportableSigningKey::SignSlowly));
+
+  base::HistogramTester histogram_tester;
+
+  auto ref_counted_key = base::MakeRefCounted<RefCountedUnexportableSigningKey>(
+      std::move(mocked_key), UnexportableKeyId());
+  base::test::TestFuture<ServiceErrorOr<std::vector<uint8_t>>> sign_future;
+  task_manager().SignSlowlyAsync(ref_counted_key, data,
+                                 BackgroundTaskPriority::kBestEffort,
+                                 sign_future.GetCallback());
+  RunBackgroundTasks();
+
+  EXPECT_THAT(sign_future.Get(), base::test::HasValue());
+  EXPECT_THAT(histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
+              ElementsAre(base::Bucket(kNoServiceErrorForMetrics, 1)));
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples(kSignTaskRetriesSuccessHistogramName),
+      ElementsAre(base::Bucket(1, 1)));
+}
+
+TEST_F(UnexportableKeyTaskManagerTest,
+       RetrySignAsyncIfSignatureVerificationFailsWithFailure) {
+  auto mocked_key = std::make_unique<MockUnexportableKey>();
+  ON_CALL(*mocked_key, Algorithm())
+      .WillByDefault(Return(crypto::SignatureVerifier::ECDSA_SHA256));
+  ON_CALL(*mocked_key, GetSubjectPublicKeyInfo())
+      .WillByDefault(Return(std::vector<uint8_t>{7, 7, 7}));
+  const std::vector<uint8_t> data = {4, 8, 15, 16, 23, 42};
+  EXPECT_CALL(*mocked_key, SignSlowly(ElementsAreArray(data)))
+      .Times(4)
+      .WillRepeatedly(Return(std::vector<uint8_t>{1, 2, 3}));
+
+  base::HistogramTester histogram_tester;
+
+  auto ref_counted_key = base::MakeRefCounted<RefCountedUnexportableSigningKey>(
+      std::move(mocked_key), UnexportableKeyId());
+  base::test::TestFuture<ServiceErrorOr<std::vector<uint8_t>>> sign_future;
+  task_manager().SignSlowlyAsync(ref_counted_key, data,
+                                 BackgroundTaskPriority::kBestEffort,
+                                 sign_future.GetCallback());
+  RunBackgroundTasks();
+
+  EXPECT_EQ(sign_future.Get(),
+            base::unexpected(ServiceError::kVerifySignatureFailed));
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples(kSignTaskResultHistogramName),
+      ElementsAre(base::Bucket(ServiceError::kVerifySignatureFailed, 1)));
+  EXPECT_THAT(
+      histogram_tester.GetAllSamples(kSignTaskRetriesFailureHistogramName),
+      ElementsAre(base::Bucket(3, 1)));
 }
 
 }  // namespace unexportable_keys

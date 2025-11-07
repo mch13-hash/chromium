@@ -12,34 +12,55 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/android/token_android.h"
 #include "base/functional/callback_forward.h"
+#include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
+#include "chrome/browser/tab/storage_id_mapping.h"
+#include "chrome/browser/tab/storage_loaded_data.h"
+#include "chrome/browser/tab/tab_group_collection_data.h"
 #include "chrome/browser/tab/tab_state_storage_backend.h"
 #include "chrome/browser/tab/tab_state_storage_database.h"
 #include "chrome/browser/tab/tab_storage_packager.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/tabs/public/tab_collection.h"
 #include "components/tabs/public/tab_interface.h"
-
-namespace tabs_pb {
-class TabState;
-}  // namespace tabs_pb
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 
 namespace tabs {
 
+// Standardizes the underlying types backing the TabInterface to ensure
+// consistent handles.
+using TabCanonicalizer =
+    base::RepeatingCallback<const TabInterface*(const TabInterface*)>;
+
 class TabStateStorageService : public KeyedService,
-                               public base::SupportsUserData {
+                               public base::SupportsUserData,
+                               public StorageIdMapping {
  public:
-  using LoadAllTabsCallback =
-      base::OnceCallback<void(std::vector<tabs_pb::TabState>)>;
+  using LoadDataCallback =
+      base::OnceCallback<void(std::unique_ptr<StorageLoadedData>)>;
 
   explicit TabStateStorageService(
       std::unique_ptr<TabStateStorageBackend> tab_backend,
-      std::unique_ptr<TabStoragePackager>);
+      std::unique_ptr<TabStoragePackager> packager,
+      TabCanonicalizer tab_canonicalizer);
   ~TabStateStorageService() override;
+
+  // StorageIdMapping:
+  int GetStorageId(const TabCollection* collection) override;
+  int GetStorageId(const TabInterface* tab) override;
 
   void Save(const TabInterface* tab);
   void Save(const TabCollection* collection);
 
-  void LoadAllTabs(LoadAllTabsCallback callback);
+  void Move(const TabInterface* tab, const TabCollection* prev_parent);
+  void Move(const TabCollection* collection, const TabCollection* prev_parent);
+
+  void Remove(const TabInterface* tab);
+  void Remove(const TabCollection* collection);
+
+  void LoadAllNodes(LoadDataCallback callback);
+
+  void ClearState();
 
   // Returns a Java object of the type TabStateStorageService. This is
   // implemented in tab_state_storage_service_android.cc
@@ -47,10 +68,23 @@ class TabStateStorageService : public KeyedService,
       TabStateStorageService* tab_state_storage_service);
 
  private:
-  void OnAllTabsLoaded(LoadAllTabsCallback callback,
-                       std::vector<NodeState> entries);
+  void OnAllNodesLoaded(LoadDataCallback callback,
+                        std::vector<NodeState> entries);
+
+  void OnTabCreated(int storage_id, const TabInterface* tab);
+
   std::unique_ptr<TabStateStorageBackend> tab_backend_;
   std::unique_ptr<TabStoragePackager> packager_;
+
+  TabCanonicalizer tab_canonicalizer_;
+
+  // Storage ids need to be unique across tabs and collections, but the handles
+  // do not have this guarantee. Track them separately.
+  int next_storage_id_ = 1;
+  absl::flat_hash_map<int32_t, int> tab_handle_to_storage_id_;
+  absl::flat_hash_map<int32_t, int> collection_handle_to_storage_id_;
+
+  base::WeakPtrFactory<TabStateStorageService> weak_ptr_factory_{this};
 };
 
 }  // namespace tabs

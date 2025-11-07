@@ -270,8 +270,7 @@ class AutofillManager
   virtual void OnCaretMovedInFormField(const FormData& form,
                                        const FieldGlobalId& field_id,
                                        const gfx::Rect& caret_bounds);
-  virtual void OnDidAutofillForm(const FormData& form,
-                                 const base::TimeTicks timestamp);
+  virtual void OnDidAutofillForm(const FormData& form);
   virtual void OnJavaScriptChangedAutofilledValue(
       const FormData& form,
       const FieldGlobalId& field_id,
@@ -334,7 +333,7 @@ class AutofillManager
   // Returns predictions from a heuristic source for fields identified by
   // `field_ids` in a form identified by `form_id`. Returns an empty map if the
   // manager has no data about the form.
-  base::flat_map<FieldGlobalId, FieldType> GetHeursticPredictionForForm(
+  base::flat_map<FieldGlobalId, FieldType> GetHeuristicPredictionForForm(
       HeuristicSource source,
       FormGlobalId form_id,
       const std::vector<FieldGlobalId>& field_ids) const;
@@ -406,8 +405,7 @@ class AutofillManager
       const gfx::Rect& caret_bounds,
       AutofillSuggestionTriggerSource trigger_source,
       std::optional<PasswordSuggestionRequest> password_request) = 0;
-  virtual void OnDidAutofillFormImpl(const FormData& form,
-                                     const base::TimeTicks timestamp) = 0;
+  virtual void OnDidAutofillFormImpl(const FormData& form) = 0;
   virtual void OnHidePopupImpl() = 0;
   virtual void OnJavaScriptChangedAutofilledValueImpl(
       const FormData& form,

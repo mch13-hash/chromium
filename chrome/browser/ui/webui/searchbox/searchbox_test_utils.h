@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/test_omnibox_edit_model.h"
 #include "chrome/browser/ui/webui/searchbox/lens_searchbox_client.h"
+#include "components/lens/tab_contextualization_controller.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
@@ -18,6 +19,24 @@
 #include "searchbox_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+class MockTabContextualizationController
+    : public lens::TabContextualizationController {
+ public:
+  explicit MockTabContextualizationController(
+      tabs::TabInterface* tab_interface);
+  ~MockTabContextualizationController() override;
+
+  MOCK_METHOD(void,
+              GetPageContext,
+              (GetPageContextCallback callback),
+              (override));
+  MOCK_METHOD(void,
+              CaptureScreenshot,
+              (std::optional<lens::ImageEncodingOptions> image_options,
+               CaptureScreenshotCallback callback),
+              (override));
+};
 
 using testing::_;
 using testing::DoAll;
@@ -50,6 +69,11 @@ class MockSearchboxPage : public searchbox::mojom::Page {
               (const base::UnguessableToken&,
                composebox_query::mojom::FileUploadStatus,
                std::optional<composebox_query::mojom::FileUploadErrorType>));
+  MOCK_METHOD(void, OnTabStripChanged, ());
+  MOCK_METHOD(void,
+              AddFileContext,
+              (const base::UnguessableToken&,
+               searchbox::mojom::SelectedFileInfoPtr));
 };
 
 class MockAutocompleteController : public AutocompleteController {
@@ -68,8 +92,7 @@ class MockAutocompleteController : public AutocompleteController {
 
 class MockOmniboxEditModel : public OmniboxEditModel {
  public:
-  MockOmniboxEditModel(OmniboxController* omnibox_controller,
-                       OmniboxView* view);
+  explicit MockOmniboxEditModel(OmniboxController* omnibox_controller);
   ~MockOmniboxEditModel() override;
   MockOmniboxEditModel(const MockOmniboxEditModel&) = delete;
   MockOmniboxEditModel& operator=(const MockOmniboxEditModel&) = delete;

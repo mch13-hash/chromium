@@ -133,8 +133,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       const ColorProviderColorMaps* color_provider_colors,
       blink::mojom::PartitionedPopinParamsPtr partitioned_popin_params,
       int32_t history_index,
-      int32_t history_length,
-      const std::optional<NoiseToken>& canvas_noise_token);
+      int32_t history_length);
 
   // All calls to Create() should be balanced with a call to Close(). This
   // synchronously destroys the WebViewImpl.
@@ -235,7 +234,6 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   int32_t HistoryListLength() const { return history_list_length_; }
   const SessionStorageNamespaceId& GetSessionStorageNamespaceId() override;
   bool IsFencedFrameRoot() const override;
-  void SetSupportsDraggableRegions(bool supports_draggable_regions) override;
 
   // Functions to add and remove observers for this object.
   void AddObserver(WebViewObserver* observer);
@@ -323,10 +321,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       network::mojom::AttributionSupport support) override;
   void UpdateColorProviders(
       const ColorProviderColorMaps& color_provider_colors) override;
-  void UpdateCanvasNoiseToken(
-      std::optional<NoiseToken> canvas_noise_token) override;
-
-  std::optional<NoiseToken> CanvasNoiseTokenForTesting() override;
+  void SetSupportsDraggableRegions(bool supports_draggable_regions) override;
 
   void DispatchPersistedPageshow(base::TimeTicks navigation_start);
   void DispatchPagehide(mojom::blink::PagehideDispatch pagehide_dispatch);
@@ -605,6 +600,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // empty document of a main frame.
   void DidAccessInitialMainDocument();
 
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   // Sends window.minimize() requests to the browser window.
   void Minimize();
   // Sends window.maximize() requests to the browser window.
@@ -613,6 +609,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   void Restore();
   // Sends window.setResizable() requests to the browser window.
   void SetResizable(bool resizable);
+#endif
 
   // TODO(crbug.com/1149992): This is called from the associated widget and this
   // code should eventually move out of WebView into somewhere else.
@@ -636,8 +633,8 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // words, after the frame has painted something.
   void DidFirstVisuallyNonEmptyPaint();
 
-  // Caleld once the first contentful paint happens on the main frame.
-  void OnFirstContentfulPaint();
+  // Called once the first contentful paint happens on the main frame.
+  void OnFirstContentfulPaint(const base::TimeDelta& duration);
 
   scheduler::WebAgentGroupScheduler& GetWebAgentGroupScheduler();
 
@@ -731,8 +728,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       const ColorProviderColorMaps* color_provider_colors,
       blink::mojom::PartitionedPopinParamsPtr partitioned_popin_params,
       int32_t history_index,
-      int32_t history_length,
-      const std::optional<NoiseToken>& canvas_noise_token);
+      int32_t history_length);
   ~WebViewImpl() override;
 
   void ConfigureAutoResizeMode();

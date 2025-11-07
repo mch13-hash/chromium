@@ -17,7 +17,6 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_encode_options.h"
-#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_async_blob_creator.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
 #include "third_party/blink/renderer/core/html/canvas/unique_font_selector.h"
@@ -30,7 +29,6 @@
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
-#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 
@@ -52,9 +50,9 @@ CanvasRenderingContextHost::CanvasRenderingContextHost(HostType host_type,
     : size_(size), host_type_(host_type) {}
 
 CanvasRenderingContextHost::~CanvasRenderingContextHost() {
-  if (externally_allocated_memory_ > 0) {
+  if (externally_allocated_memory_.is_positive()) {
     external_memory_accounter_.Decrease(v8::Isolate::GetCurrent(),
-                                        externally_allocated_memory_);
+                                        externally_allocated_memory_.InBytes());
   }
 }
 
@@ -82,13 +80,23 @@ void CanvasRenderingContextHost::RecordCanvasSizeToUMA() {
   }
 }
 
+void CanvasRenderingContextHost::NotifyCachesOfSwitchingFrame() {
+  if (plain_text_painter_) {
+    plain_text_painter_->DidSwitchFrame();
+  }
+  if (unique_font_selector_) {
+    unique_font_selector_->DidSwitchFrame();
+  }
+}
+
 void CanvasRenderingContextHost::UpdateMemoryUsage() {
-  intptr_t externally_allocated_memory =
-      RenderingContext() ? RenderingContext()->AllocatedBufferSize() : 0;
+  base::ByteCount externally_allocated_memory =
+      RenderingContext() ? RenderingContext()->AllocatedBufferSize()
+                         : base::ByteCount(0);
 
   // Subtracting two intptr_t that are known to be positive will never
   // underflow.
-  intptr_t delta_bytes =
+  base::ByteCount delta_bytes =
       externally_allocated_memory - externally_allocated_memory_;
 
   // TODO(junov): We assume that it is impossible to be inside a FastAPICall
@@ -98,8 +106,10 @@ void CanvasRenderingContextHost::UpdateMemoryUsage() {
 
   // ExternalMemoryAccounter::Update() with a positive delta can trigger a GC,
   // which is not allowed when `IsAllocationAllowed() == false`.
-  CHECK(delta_bytes <= 0 || ThreadState::Current()->IsAllocationAllowed());
-  external_memory_accounter_.Update(v8::Isolate::GetCurrent(), delta_bytes);
+  CHECK(!delta_bytes.is_positive() ||
+        ThreadState::Current()->IsAllocationAllowed());
+  external_memory_accounter_.Update(v8::Isolate::GetCurrent(),
+                                    delta_bytes.InBytes());
   externally_allocated_memory_ = externally_allocated_memory;
 }
 
@@ -192,7 +202,6 @@ PlainTextPainter& CanvasRenderingContextHost::GetPlainTextPainter() {
   if (!plain_text_painter_) {
     plain_text_painter_ =
         MakeGarbageCollected<PlainTextPainter>(PlainTextPainter::kCanvas);
-    UseCounter::Count(GetTopExecutionContext(), WebFeature::kCanvasTextNg);
   }
   return *plain_text_painter_;
 }

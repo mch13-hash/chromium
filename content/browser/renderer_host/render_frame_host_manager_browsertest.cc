@@ -6234,7 +6234,15 @@ IN_PROC_BROWSER_TEST_P(
     RenderFrameHostManagerTest,
     ForegroundNavigationIsNeverBackgroundedWithSpareProcess) {
   // This test applies only when spare RenderProcessHost is enabled and in use.
-  if (!RenderProcessHostImpl::IsSpareProcessKeptAtAllTimes()) {
+  if (!RenderProcessHostImpl::IsSpareProcessKeptAtAllTimes() ||
+      // If the navigation throttle is required for the Android spare
+      // renderer, the spare process cannot be used if the creation of the RFH
+      // gets deferred. The throttle requires the process allocation to happen
+      // before sending the network request.
+      (base::FeatureList::IsEnabled(
+           features::kAndroidWarmUpSpareRendererWithTimeout) &&
+       features::kAndroidSpareRendererAddNavigationThrottle.Get() &&
+       base::FeatureList::IsEnabled(features::kDeferSpeculativeRFHCreation))) {
     return;
   }
 
@@ -7341,6 +7349,63 @@ IN_PROC_BROWSER_TEST_P(RenderFrameHostManagerClearWindowNameTest,
   EXPECT_EQ("", frame_c->GetFrameName());
 }
 
+class ResumeNavigationWithSpeculativeRFHProcessGoneTest
+    : public RenderFrameHostManagerTest {
+ public:
+  ResumeNavigationWithSpeculativeRFHProcessGoneTest() {
+    feature_list_.InitWithFeatures(
+        {features::kResumeNavigationWithSpeculativeRFHProcessGone},
+        {features::kDeferSpeculativeRFHCreation});
+  }
+  ~ResumeNavigationWithSpeculativeRFHProcessGoneTest() override = default;
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    // Isolate all sites so that speculative RFH will be created during
+    // navigation to a different site.
+    IsolateAllSitesForTesting(command_line);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(ResumeNavigationWithSpeculativeRFHProcessGoneTest,
+                       ProcessForSpeculativeRFHKilled) {
+  StartEmbeddedServer();
+
+  GURL url_a(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), url_a));
+
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+
+  // Start a navigation to a b.com URL, and don't wait for commit.
+  GURL url_b(embedded_test_server()->GetURL("b.com", "/title2.html"));
+  TestNavigationManager navigation_manager(web_contents, url_b);
+  shell()->LoadURL(url_b);
+  navigation_manager.WaitForSpeculativeRenderFrameHostCreation();
+  RenderFrameHost* rfh = navigation_manager.GetCreatedSpeculativeRFH();
+  RenderProcessHostWatcher crash_observer(
+      rfh->GetProcess(), RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
+  if (!rfh->GetProcess()->IsReady()) {
+    // ChildProcessLauncher::Terminate will not kill a process if it is not
+    // ready yet so we need to wait for the process to be ready.
+    RenderProcessHostWatcher ready_observer(
+        rfh->GetProcess(), RenderProcessHostWatcher::WATCH_FOR_PROCESS_READY);
+    ready_observer.Wait();
+  }
+  EXPECT_TRUE(rfh->GetProcess()->Shutdown(0));
+  crash_observer.Wait();
+  NavigationRequest* navigation_request =
+      NavigationRequest::From(navigation_manager.GetNavigationHandle());
+  EXPECT_EQ(navigation_request->GetAssociatedRFHType(),
+            NavigationRequest::AssociatedRenderFrameHostType::NONE);
+
+  EXPECT_TRUE(navigation_manager.WaitForNavigationFinished());
+  EXPECT_TRUE(navigation_manager.was_successful());
+  EXPECT_TRUE(navigation_manager.was_committed());
+}
+
 INSTANTIATE_TEST_SUITE_P(All,
                          RenderFrameHostManagerTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));
@@ -7365,5 +7430,8 @@ INSTANTIATE_TEST_SUITE_P(
     testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 INSTANTIATE_TEST_SUITE_P(All,
                          RenderFrameHostManagerClearWindowNameTest,
+                         testing::ValuesIn(RenderDocumentFeatureLevelValues()));
+INSTANTIATE_TEST_SUITE_P(All,
+                         ResumeNavigationWithSpeculativeRFHProcessGoneTest,
                          testing::ValuesIn(RenderDocumentFeatureLevelValues()));
 }  // namespace content

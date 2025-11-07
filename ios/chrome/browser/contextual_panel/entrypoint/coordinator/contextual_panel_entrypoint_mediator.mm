@@ -14,6 +14,7 @@
 #import "components/feature_engagement/public/tracker.h"
 #import "ios/chrome/browser/contextual_panel/entrypoint/coordinator/contextual_panel_entrypoint_mediator_delegate.h"
 #import "ios/chrome/browser/contextual_panel/entrypoint/ui/contextual_panel_entrypoint_consumer.h"
+#import "ios/chrome/browser/contextual_panel/entrypoint/ui/contextual_panel_entrypoint_visibility_delegate.h"
 #import "ios/chrome/browser/contextual_panel/model/active_contextual_panel_tab_helper_observation_forwarder.h"
 #import "ios/chrome/browser/contextual_panel/model/contextual_panel_item_configuration.h"
 #import "ios/chrome/browser/contextual_panel/model/contextual_panel_item_type.h"
@@ -23,6 +24,8 @@
 #import "ios/chrome/browser/infobars/model/infobar_badge_tab_helper.h"
 #import "ios/chrome/browser/infobars/model/infobar_badge_tab_helper_observer.h"
 #import "ios/chrome/browser/infobars/model/infobar_badge_tab_helper_observer_bridge.h"
+#import "ios/chrome/browser/intelligence/bwg/model/bwg_tab_helper.h"
+#import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/chrome/browser/shared/public/commands/contextual_panel_entrypoint_iph_commands.h"
 #import "ios/chrome/browser/shared/public/commands/contextual_sheet_commands.h"
@@ -196,6 +199,8 @@
   if (config) {
     config->DidTransitionToSmallEntrypoint();
   }
+  [self.visibilityDelegate setContextualPanelCurrentlyAnimating:NO];
+  [self.consumer updateAccessibilityStatus];
 }
 
 #pragma mark - ContextualPanelTabHelperObserving
@@ -308,6 +313,8 @@
 - (void)resetTimersAndUIStateAnimated:(BOOL)animated {
   _transitionToEntrypointLoudMomentTimer = nullptr;
   _transitionToDefaultEntrypointTimer = nullptr;
+  [self.visibilityDelegate setContextualPanelCurrentlyAnimating:NO];
+  [self.consumer updateAccessibilityStatus];
   [self dismissEntrypointIPHAnimated:animated];
   [self cleanupAndTransitionToSmallEntrypoint];
 }
@@ -320,6 +327,18 @@
   if (!config) {
     [self.consumer hideEntrypoint];
     return;
+  }
+
+  // Prevents entrypoint from showing while the Gemini promo is showing.
+  if (IsPageActionMenuEnabled()) {
+    BwgTabHelper* BWGTabHelper =
+        BwgTabHelper::FromWebState(_webStateList->GetActiveWebState());
+    if (BWGTabHelper) {
+      if (BWGTabHelper->ShouldPreventContextualPanelEntryPoint()) {
+        [self.consumer hideEntrypoint];
+        return;
+      }
+    }
   }
 
   ContextualPanelTabHelper* contextualPanelTabHelper =
@@ -335,6 +354,8 @@
   }
 
   [self.consumer setEntrypointConfig:config];
+  [self.visibilityDelegate setContextualPanelItemType:config->item_type];
+  [self.consumer updateAccessibilityStatus];
   [self.consumer transitionToSmallEntrypoint];
   [self.consumer showEntrypoint];
 
@@ -412,6 +433,8 @@
       base::BindOnce(^{
         [weakSelf setupAndTransitionToLargeEntrypoint];
       }));
+  [self.visibilityDelegate setContextualPanelCurrentlyAnimating:YES];
+  [self.consumer updateAccessibilityStatus];
 }
 
 - (void)setupAndShowEntrypointIPH {

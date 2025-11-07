@@ -33,7 +33,9 @@ enum class SidePanelOpenTrigger {
   kReadingListToast = 20,
   kNewTabFooter = 21,
   kNewTabPageCustomizationPromo = 22,
-  kMaxValue = kNewTabPageCustomizationPromo,
+  kNewTabPageAutomaticCustomizeChrome = 23,
+  kReadAnythingOmniboxChip = 24,
+  kMaxValue = kReadAnythingOmniboxChip,
 };
 
 enum class SidePanelContentState {

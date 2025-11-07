@@ -35,7 +35,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
-#include "base/hash/md5.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/path_service.h"
@@ -73,9 +72,19 @@
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item.h"
 #include "components/base32/base32.h"
+#include "crypto/obsolete/md5.h"
 #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
 
 using base::win::RegKey;
+
+namespace shell_util {
+
+std::string Md5AsBase32ForUserSpecificRegistrySuffix(std::string_view str) {
+  return base32::Base32Encode(crypto::obsolete::Md5::Hash(str),
+                              base32::Base32EncodePolicy::OMIT_PADDING);
+}
+
+}  // namespace shell_util
 
 namespace {
 
@@ -176,12 +185,10 @@ UserSpecificRegistrySuffix::UserSpecificRegistrySuffix() {
   if (!base::win::GetUserSidString(&user_sid)) {
     NOTREACHED();
   }
-  static_assert(sizeof(base::MD5Digest) == 16, "size of MD5 not as expected");
-  base::MD5Digest md5_digest;
   std::string user_sid_ascii(base::WideToASCII(user_sid));
-  base::MD5Sum(base::as_byte_span(user_sid_ascii), &md5_digest);
-  std::string base32_md5 = base32::Base32Encode(
-      md5_digest.a, base32::Base32EncodePolicy::OMIT_PADDING);
+  std::string base32_md5 =
+      shell_util::Md5AsBase32ForUserSpecificRegistrySuffix(user_sid_ascii);
+
   // The value returned by the base32 algorithm above must never change.
   DCHECK_EQ(base32_md5.length(), 26U);
   suffix_.reserve(base32_md5.length() + 1);
@@ -1842,41 +1849,6 @@ std::wstring ShellUtil::GetChromeDelegateCommand(
   return L"\"" + chrome_exe.value() + L"\" -- %*";
 }
 
-void ShellUtil::GetRegisteredBrowsers(
-    std::map<std::wstring, std::wstring>* browsers) {
-  DCHECK(browsers);
-
-  const std::wstring base_key(kRegStartMenuInternet);
-  std::wstring client_path;
-  RegKey key;
-  std::wstring name;
-  std::wstring command;
-
-  // HKCU has precedence over HKLM for these registrations: http://goo.gl/xjczJ.
-  // Look in HKCU second to override any identical values found in HKLM.
-  const HKEY roots[] = {HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER};
-  for (const HKEY root : roots) {
-    for (base::win::RegistryKeyIterator iter(root, base_key.c_str());
-         iter.Valid(); ++iter) {
-      client_path = base::StrCat({base_key, kFilePathSeparator, iter.Name()});
-      // Read the browser's name (localized according to install language).
-      if (key.Open(root, client_path.c_str(), KEY_QUERY_VALUE) !=
-              ERROR_SUCCESS ||
-          key.ReadValue(nullptr, &name) != ERROR_SUCCESS || name.empty() ||
-          name.find(install_static::GetBaseAppName()) != std::wstring::npos) {
-        continue;
-      }
-      // Read the browser's reinstall command.
-      if (key.Open(root, (client_path + L"\\InstallInfo").c_str(),
-                   KEY_QUERY_VALUE) == ERROR_SUCCESS &&
-          key.ReadValue(kReinstallCommand, &command) == ERROR_SUCCESS &&
-          !command.empty()) {
-        (*browsers)[name] = command;
-      }
-    }
-  }
-}
-
 std::wstring ShellUtil::GetCurrentInstallationSuffix(
     const base::FilePath& chrome_exe) {
   // This method is somewhat the opposite of GetInstallationSpecificSuffix().
@@ -2002,81 +1974,12 @@ ShellUtil::DefaultState ShellUtil::GetChromeDefaultFileHandlerState(
 }
 
 // static
-bool ShellUtil::CanMakeChromeDefaultUnattended() {
-  return base::win::GetVersion() < base::win::Version::WIN8;
-}
-
-bool ShellUtil::MakeChromeDefault(int shell_change,
-                                  const base::FilePath& chrome_exe,
-                                  bool elevate_if_not_admin) {
-  DCHECK(!(shell_change & SYSTEM_LEVEL) || IsUserAnAdmin());
-
-  if (!install_static::SupportsSetAsDefaultBrowser())
-    return false;
-
-  // Windows 8 does not permit making a browser default just like that.
-  // This process needs to be routed through the system's UI. Use
-  // ShowMakeChromeDefaultSystemUI instead (below).
-  if (!CanMakeChromeDefaultUnattended()) {
-    return false;
-  }
-
-  if (!RegisterChromeBrowser(chrome_exe, std::wstring(),
-                             elevate_if_not_admin)) {
-    return false;
-  }
-
-  bool ret = true;
-  // First use the new "recommended" way on Vista to make Chrome default
-  // browser.
-  std::wstring app_name = GetApplicationName(chrome_exe);
-
-  // On Windows 7 we still can set ourselves via the the
-  // IApplicationAssociationRegistration interface.
-  VLOG(1) << "Registering Chrome as default browser on Windows 7.";
-  Microsoft::WRL::ComPtr<IApplicationAssociationRegistration> pAAR;
-  HRESULT hr = ::CoCreateInstance(CLSID_ApplicationAssociationRegistration,
-                                  nullptr, CLSCTX_INPROC, IID_PPV_ARGS(&pAAR));
-  if (SUCCEEDED(hr)) {
-    for (int i = 0; kBrowserProtocolAssociations[i] != nullptr; i++) {
-      hr = pAAR->SetAppAsDefault(
-          app_name.c_str(), kBrowserProtocolAssociations[i], AT_URLPROTOCOL);
-      if (!SUCCEEDED(hr)) {
-        ret = false;
-        LOG(ERROR) << "Failed to register as default for protocol "
-                   << kBrowserProtocolAssociations[i] << " (" << hr << ")";
-      }
-    }
-
-    for (int i = 0; kDefaultFileAssociations[i] != nullptr; i++) {
-      hr = pAAR->SetAppAsDefault(app_name.c_str(), kDefaultFileAssociations[i],
-                                 AT_FILEEXTENSION);
-      if (!SUCCEEDED(hr)) {
-        ret = false;
-        LOG(ERROR) << "Failed to register as default for file extension "
-                   << kDefaultFileAssociations[i] << " (" << hr << ")";
-      }
-    }
-  }
-
-  if (!RegisterChromeAsDefaultXPStyle(shell_change, chrome_exe))
-    ret = false;
-
-  // Send Windows notification event so that it can update icons for
-  // file associations.
-  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-  return ret;
-}
-
-// static
 bool ShellUtil::LaunchUninstallAppsSettings() {
   return base::win::LaunchSettingsUri(L"page=SettingsPageAppsSizes");
 }
 
 bool ShellUtil::ShowMakeChromeDefaultSystemUI(
     const base::FilePath& chrome_exe) {
-  DCHECK(!CanMakeChromeDefaultUnattended());
-
   if (!install_static::SupportsSetAsDefaultBrowser())
     return false;
 
@@ -2141,57 +2044,9 @@ bool ShellUtil::ShowSetDefaultForFileExtensionSystemUI(
       L"&target=SettingsPageAppsDefaultsFileExtensionView");
 }
 
-bool ShellUtil::MakeChromeDefaultProtocolClient(
-    const base::FilePath& chrome_exe,
-    const std::wstring& protocol) {
-  if (!install_static::SupportsSetAsDefaultBrowser())
-    return false;
-
-  if (!RegisterChromeForProtocols(
-          chrome_exe, std::wstring(),
-          GetBrowserProtocolAssociation(protocol, chrome_exe), true)) {
-    return false;
-  }
-
-  // Windows 8 does not permit making a browser default just like that.
-  // This process needs to be routed through the system's UI. Use
-  // ShowMakeChromeDefaultProtocolClientSystemUI instead (below).
-  if (!CanMakeChromeDefaultUnattended())
-    return false;
-
-  bool ret = true;
-  // First use the "recommended" way introduced in Vista to make Chrome default
-  // protocol handler.
-  VLOG(1) << "Registering Chrome as default handler for " << protocol
-          << " on Windows 7.";
-  Microsoft::WRL::ComPtr<IApplicationAssociationRegistration> pAAR;
-  HRESULT hr = ::CoCreateInstance(CLSID_ApplicationAssociationRegistration,
-                                  nullptr, CLSCTX_INPROC, IID_PPV_ARGS(&pAAR));
-  if (SUCCEEDED(hr)) {
-    std::wstring app_name = GetApplicationName(chrome_exe);
-    hr = pAAR->SetAppAsDefault(app_name.c_str(), protocol.c_str(),
-                               AT_URLPROTOCOL);
-  }
-  if (!SUCCEEDED(hr)) {
-    ret = false;
-    LOG(ERROR) << "Could not make Chrome default protocol client (Windows 7):"
-               << " HRESULT=" << hr << ".";
-  }
-
-  // Now use the old way to associate Chrome with the desired protocol. This
-  // should not be required on Vista+, but since some applications still read
-  // Software\Classes\<protocol> key directly, do this on Vista+ also.
-  if (!RegisterChromeAsDefaultProtocolClientXPStyle(chrome_exe, protocol))
-    ret = false;
-
-  return ret;
-}
-
 bool ShellUtil::ShowMakeChromeDefaultProtocolClientSystemUI(
     const base::FilePath& chrome_exe,
     const std::wstring& protocol) {
-  DCHECK(!CanMakeChromeDefaultUnattended());
-
   if (!install_static::SupportsSetAsDefaultBrowser())
     return false;
 

@@ -46,7 +46,6 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service_utils.h"
 #include "chrome/browser/sync/device_info_sync_service_factory.h"
-#include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -61,7 +60,7 @@
 #include "chromeos/ash/components/browser_context_helper/annotated_account_id.h"
 #include "chromeos/ash/components/browser_context_helper/browser_context_flusher.h"
 #include "chromeos/ash/components/dbus/debug_daemon/debug_daemon_client.h"
-#include "chromeos/ash/components/geolocation/simple_geolocation_provider.h"
+#include "chromeos/ash/components/geolocation/system_location_provider.h"
 #include "chromeos/ash/components/login/login_state/login_state.h"
 #include "chromeos/ash/components/policy/restriction_schedule/device_restriction_schedule_controller.h"
 #include "chromeos/ash/components/scheduler_config/scheduler_configuration_manager.h"
@@ -107,7 +106,6 @@ class PrimaryProfileServicesShutdownNotifierFactory
       : BrowserContextKeyedServiceShutdownNotifierFactory(
             "PrimaryProfileServices") {
     DependsOn(DeviceInfoSyncServiceFactory::GetInstance());
-    DependsOn(SyncServiceFactory::GetInstance());
   }
   ~PrimaryProfileServicesShutdownNotifierFactory() override = default;
 };
@@ -324,9 +322,13 @@ void BrowserProcessPlatformPart::InitializePrimaryProfileServices(
   if (ash::features::IsAutoSignOutEnabled() &&
       primary_profile->IsRegularProfile() && syncer::IsSyncAllowedByFlag()) {
     PrefService* prefs = primary_profile->GetPrefs();
+    // AutoSignOutService is tied to the primary user profile and it's
+    // destroyed via the `primary_profile_shutdown_subscription_`. To ensure
+    // a safe shutdown, the `PrimaryProfileServicesShutdownNotifierFactory`
+    // uses a `DependsOn()` to guarantee that DeviceInfoSyncService outlives
+    // AutoSignOutService.
     auto_sign_out_service_ = std::make_unique<ash::AutoSignOutService>(
         DeviceInfoSyncServiceFactory::GetForProfile(primary_profile),
-        SyncServiceFactory::GetForProfile(primary_profile),
         session_manager_.get(), prefs);
   }
 }
@@ -369,7 +371,7 @@ BrowserProcessPlatformPart::GetTimezoneResolverManager() {
   if (!timezone_resolver_manager_.get()) {
     timezone_resolver_manager_ =
         std::make_unique<ash::system::TimeZoneResolverManager>(
-            ash::SimpleGeolocationProvider::GetInstance(),
+            ash::SystemLocationProvider::GetInstance(),
             session_manager::SessionManager::Get());
   }
   return timezone_resolver_manager_.get();

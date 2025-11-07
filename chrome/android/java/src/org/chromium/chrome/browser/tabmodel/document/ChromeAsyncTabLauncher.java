@@ -13,6 +13,7 @@ import android.provider.Browser;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.ActivityUtils;
@@ -23,6 +24,7 @@ import org.chromium.chrome.browser.app.tabmodel.AsyncTabParamsManagerSingleton;
 import org.chromium.chrome.browser.app.tabwindow.TabWindowManagerSingleton;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowAppSource;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
@@ -66,12 +68,14 @@ public class ChromeAsyncTabLauncher implements AsyncTabLauncher {
      * @param parentId The ID of the parent tab, or {@link Tab#INVALID_TAB_ID}.
      * @param otherActivity The activity to create a new tab in. This is non-null when we have a
      *     visible activity running adjacently.
+     * @param entryPoint The entry point of the new window used for metrics.
      */
     public void launchTabInOtherWindow(
             LoadUrlParams loadUrlParams,
             Activity activity,
             int parentId,
-            @Nullable Activity otherActivity) {
+            @Nullable Activity otherActivity,
+            @NewWindowAppSource int entryPoint) {
         Intent intent =
                 createNewTabIntent(
                         new AsyncTabCreationParams(loadUrlParams),
@@ -100,7 +104,12 @@ public class ChromeAsyncTabLauncher implements AsyncTabLauncher {
         if (!activity.isInMultiWindowMode() && !MultiWindowUtils.shouldOpenInAdjacentWindow()) {
             intent.setFlags(intent.getFlags() & ~Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
         }
+        intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_WINDOW, mIsIncognito);
         activity.startActivity(intent);
+        RecordHistogram.recordEnumeratedHistogram(
+                MultiInstanceManager.NEW_WINDOW_APP_SOURCE_HISTOGRAM,
+                entryPoint,
+                NewWindowAppSource.NUM_ENTRIES);
     }
 
     /**

@@ -360,7 +360,7 @@ const IID& GetElevatorIid() {
 
 std::wstring GetElevationServiceName() {
   std::wstring name = GetElevationServiceDisplayName();
-  name.erase(std::remove_if(name.begin(), name.end(), isspace), name.end());
+  std::erase_if(name, isspace);
   return name;
 }
 
@@ -380,7 +380,7 @@ const IID& GetTracingServiceIid() {
 
 std::wstring GetTracingServiceName() {
   std::wstring name = GetTracingServiceDisplayName();
-  name.erase(std::remove_if(name.begin(), name.end(), isspace), name.end());
+  std::erase_if(name, isspace);
   return name;
 }
 
@@ -403,6 +403,10 @@ const wchar_t* GetBrowserProgIdPrefix() {
 
 const wchar_t* GetBrowserProgIdDescription() {
   return InstallDetails::Get().mode().browser_prog_id_description;
+}
+
+const char* GetDirectLaunchUrlScheme() {
+  return InstallDetails::Get().mode().direct_launch_url_scheme;
 }
 
 const wchar_t* GetPDFProgIdPrefix() {

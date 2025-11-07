@@ -57,6 +57,7 @@
 // Must come after all headers that specialize FromJniType() / ToJniType().
 #include "chrome/browser/autofill/android/jni_headers/PersonalDataManager_jni.h"
 #include "components/autofill/android/payments_jni_headers/BankAccount_jni.h"
+#include "components/autofill/android/payments_jni_headers/BnplIssuerForSettings_jni.h"
 #include "components/autofill/android/payments_jni_headers/Ewallet_jni.h"
 #include "components/autofill/android/payments_jni_headers/PaymentInstrument_jni.h"
 
@@ -845,21 +846,40 @@ jboolean PersonalDataManagerAndroid::IsCardEligibleForBenefits(
   return false;
 }
 
+jboolean PersonalDataManagerAndroid::ShouldShowBnplSettings(JNIEnv* env) {
+  return payments_data_manager().ShouldShowBnplSettings();
+}
+
+base::android::ScopedJavaLocalRef<jobjectArray>
+PersonalDataManagerAndroid::GetBnplIssuersForSettings(JNIEnv* env) {
+  std::vector<base::android::ScopedJavaLocalRef<jobject>> jbnpl_issuers_list;
+  std::ranges::transform(payments_data_manager().GetLinkedBnplIssuers(),
+                         std::back_inserter(jbnpl_issuers_list),
+                         [env](const BnplIssuer& bnpl_issuer) {
+                           return CreateBnplIssuerForSettingsFromNative(
+                               env, bnpl_issuer);
+                         });
+  ScopedJavaLocalRef<jclass> type = base::android::GetClass(
+      env, "org/chromium/components/autofill/payments/BnplIssuerForSettings");
+  return base::android::ToTypedJavaArrayOfObjects(env, jbnpl_issuers_list,
+                                                  type.obj());
+}
+
 // static
 ScopedJavaLocalRef<jobject>
-PersonalDataManagerAndroid::CreateJavaBnplIssuerFromNative(
+PersonalDataManagerAndroid::CreateBnplIssuerForSettingsFromNative(
     JNIEnv* env,
     const BnplIssuer& bnpl_issuer) {
-  // For now, Android only uses the `LightModeImageId`.
-  const std::pair<BnplIssuer::LightModeImageId, BnplIssuer::DarkModeImageId>
-      image_ids = GetBnplIssuerIconIds(
-          bnpl_issuer.issuer_id(),
-          /*issuer_linked=*/bnpl_issuer.payment_instrument().has_value());
-  // TOOD(crbug.com/430575808): Provide the selection text to the Java
-  // BnplIssuer object.
-  return Java_BnplIssuer_createBnplIssuer(
-      env, bnpl_issuer.GetDisplayName(), image_ids.first.value(),
-      bnpl_issuer.payment_instrument().has_value());
+  // `light_mode_image_id` is used for both light and dark modes on Android.
+  const auto& [light_mode_image_id, _] = GetBnplIssuerIconIds(
+      bnpl_issuer.issuer_id(),
+      /*issuer_linked=*/bnpl_issuer.payment_instrument().has_value());
+
+  CHECK(bnpl_issuer.payment_instrument());
+  return Java_BnplIssuerForSettings_Constructor(
+      env, ResourceMapper::MapToJavaDrawableId(light_mode_image_id.value()),
+      bnpl_issuer.payment_instrument()->instrument_id(),
+      bnpl_issuer.GetDisplayName());
 }
 
 }  // namespace autofill

@@ -12,7 +12,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/time/time.h"
-#include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/data_model/payments/autofill_offer_data.h"
@@ -34,6 +33,7 @@
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/test_utils/autofill_testing_pref_service.h"
 #include "components/autofill/core/common/autofill_test_utils.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/sync/protocol/autofill_specifics.pb.h"
 
 class PrefService;
@@ -236,6 +236,9 @@ CreditCardMerchantBenefit GetActiveCreditCardMerchantBenefit();
 // Returns a set of merchant origin webpages used for a merchant credit card
 // benefit.
 base::flat_set<url::Origin> GetOriginsForMerchantBenefit();
+
+// Prevents kAccountNameEmail profile from being created.
+void HideAccountNameEmailProfile(PrefService* pref_service, AccountInfo info);
 
 // Adds `card` with a set `issuer_id`, `benefit` and `benefit_source` to
 // `personal_data`. Also configures a category benefit with the
@@ -478,6 +481,8 @@ struct FlightReservationOptionsT {
   const char16_t* name = u"John Doe";
   const char16_t* departure_airport = u"MUC";
   const char16_t* arrival_airport = u"BEY";
+  std::optional<base::Time> departure_time = std::nullopt;
+  base::TimeDelta departure_time_zone_offset = base::TimeDelta();
   std::string_view guid = "00000000-0000-4000-8000-500000000000";
   std::string_view nickname = "FlightReservation";
   std::string_view app_locale = "en-US";

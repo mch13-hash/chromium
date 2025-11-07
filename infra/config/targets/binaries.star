@@ -1460,6 +1460,14 @@ targets.binaries.generated_script(
 )
 
 targets.binaries.generated_script(
+    name = "ios_credential_provider_extension_unittests",
+    label = "//ios/chrome/test/extensions:ios_credential_provider_extension_unittests",
+    # All references have been moved to starlark
+    skip_usage_check = True,
+    module_scheme = "gtest",
+)
+
+targets.binaries.generated_script(
     name = "ios_net_unittests",
     label = "//ios/net:ios_net_unittests",
     # All references have been moved to starlark
@@ -1674,22 +1682,6 @@ targets.binaries.generated_script(
     module_scheme = "junit",
 )
 
-targets.binaries.console_test_launcher(
-    name = "monochrome_public_smoke_test",
-    label = "//chrome/android:monochrome_public_smoke_test",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    module_scheme = "gtest",
-)
-
-targets.binaries.console_test_launcher(
-    name = "monochrome_public_bundle_smoke_test",
-    label = "//chrome/android:monochrome_public_bundle_smoke_test",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    module_scheme = "junit",
-)
-
 targets.binaries.script(
     name = "mojo_python_unittests",
     label = "//mojo/public/tools:mojo_python_unittests",
@@ -1706,22 +1698,6 @@ targets.binaries.script(
 )
 
 targets.binaries.console_test_launcher(
-    name = "mojo_rust_integration_unittests",
-    label = "//mojo/public/rust:mojo_rust_integration_unittests",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    module_scheme = "gtest",
-)
-
-targets.binaries.console_test_launcher(
-    name = "mojo_rust_unittests",
-    label = "//mojo/public/rust:mojo_rust_unittests",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    module_scheme = "gtest",
-)
-
-targets.binaries.console_test_launcher(
     name = "mojo_test_apk",
     label = "//mojo/public/java/system:mojo_test_apk",
     # All references have been moved to starlark
@@ -1735,33 +1711,9 @@ targets.binaries.console_test_launcher(
     module_scheme = "gtest",
 )
 
-targets.binaries.script(
-    name = "monochrome_public_apk_checker",
-    label = "//chrome/android/monochrome:monochrome_public_apk_checker",
-    script = "//testing/scripts/run_isolated_script_test.py",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    args = [
-        "../../chrome/android/monochrome/scripts/monochrome_python_tests.py",
-        "--chrome-apk",
-        "apks/ChromePublic.apk",
-        "--chrome-pathmap",
-        "apks/ChromePublic.apk.pathmap.txt",
-        "--system-webview-apk",
-        "apks/SystemWebView.apk",
-        "--system-webview-pathmap",
-        "apks/SystemWebView.apk.pathmap.txt",
-        "--monochrome-apk",
-        "apks/MonochromePublic.apk",
-        "--monochrome-pathmap",
-        "apks/MonochromePublic.apk.pathmap.txt",
-    ],
-    module_scheme = "pyunit",
-)
-
 targets.binaries.console_test_launcher(
-    name = "monochrome_public_test_ar_apk",
-    label = "//chrome/android:monochrome_public_test_ar_apk",
+    name = "chrome_public_test_ar_apk",
+    label = "//chrome/android:chrome_public_test_ar_apk",
     # All references have been moved to starlark
     skip_usage_check = True,
     module_scheme = "junit",
@@ -1955,7 +1907,6 @@ targets.binaries.generated_script(
             "--smoke-test-mode",
         ],
     ),
-    module_scheme = "flat",
 )
 
 targets.binaries.generated_script(
@@ -2246,13 +2197,11 @@ targets.binaries.generated_script(
 targets.binaries.generated_script(
     name = "telemetry_gpu_integration_test",
     label = "//chrome/test:telemetry_gpu_integration_test",
-    module_scheme = "flat",
 )
 
 targets.binaries.generated_script(
     name = "telemetry_gpu_integration_test_android_chrome",
     label = "//chrome/test:telemetry_gpu_integration_test_android_chrome",
-    module_scheme = "flat",
 )
 
 targets.binaries.script(
@@ -2264,7 +2213,6 @@ targets.binaries.script(
     args = [
         "../../content/test/gpu/run_gpu_integration_test.py",
     ],
-    module_scheme = "flat",
 )
 
 targets.binaries.script(
@@ -2278,7 +2226,6 @@ targets.binaries.script(
         "--logs-dir",
         "${ISOLATED_OUTDIR}",
     ],
-    module_scheme = "flat",
 )
 
 targets.binaries.script(
@@ -2315,14 +2262,6 @@ targets.binaries.generated_script(
 targets.binaries.generated_script(
     name = "telemetry_perf_unittests_android_chrome",
     label = "//chrome/test:telemetry_perf_unittests_android_chrome",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-    module_scheme = "pyunit",
-)
-
-targets.binaries.generated_script(
-    name = "telemetry_perf_unittests_android_monochrome",
-    label = "//chrome/test:telemetry_perf_unittests_android_monochrome",
     # All references have been moved to starlark
     skip_usage_check = True,
     module_scheme = "pyunit",

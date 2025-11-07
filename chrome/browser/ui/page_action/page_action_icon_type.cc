@@ -9,7 +9,7 @@
 
 namespace {
 
-const base::FeatureParam<bool>* GetPageActionMigrationParam(
+const base::FeatureParam<bool>* GetPageActionsMigrationParam(
     PageActionIconType page_action) {
   switch (page_action) {
     case PageActionIconType::kLensOverlay:
@@ -52,6 +52,15 @@ const base::FeatureParam<bool>* GetPageActionMigrationParam(
       return &features::kPageActionsMigrationSharingHub;
     case PageActionIconType::kAiMode:
       return &features::kPageActionsMigrationAiMode;
+    case PageActionIconType::kVirtualCardEnroll:
+      return &features::kPageActionsMigrationVirtualCard;
+    case PageActionIconType::kFilledCardInformation:
+      return &features::kPageActionsMigrationFilledCardInformation;
+    case PageActionIconType::kReadingMode:
+      return &features::kPageActionsMigrationReadingMode;
+    case PageActionIconType::kSaveIban:
+    case PageActionIconType::kSaveCard:
+      return &features::kPageActionsMigrationSavePayments;
     default:
       return nullptr;
   }
@@ -60,7 +69,7 @@ const base::FeatureParam<bool>* GetPageActionMigrationParam(
 }  // namespace
 
 bool IsPageActionMigrated(PageActionIconType page_action) {
-  const auto* feature_param = GetPageActionMigrationParam(page_action);
+  const auto* feature_param = GetPageActionsMigrationParam(page_action);
   if (feature_param == nullptr) {
     return false;
   }

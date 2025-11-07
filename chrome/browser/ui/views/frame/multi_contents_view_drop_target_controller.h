@@ -85,9 +85,6 @@ class MultiContentsViewDropTargetController final
   views::View::DropCallback GetDropCallback(
       const ui::DropTargetEvent& event) override;
 
-  // Called when a tab is inserted into the tab strip.
-  void OnTabInserted();
-
   bool IsDropTimerRunningForTesting();
 
  private:
@@ -123,6 +120,9 @@ class MultiContentsViewDropTargetController final
   // drop target.
   void StartDropTargetHideTimer();
 
+  // Hide the drop target view.
+  void HideDropTarget(bool suppress_animation = false);
+
   // Timer to show the nudge after a small delay.
   void StartNudgeShowTimer(MultiContentsDropTargetView::DropSide drop_side);
 
@@ -151,6 +151,10 @@ class MultiContentsViewDropTargetController final
   base::OneShotTimer hide_drop_target_timer_;
 
   std::optional<DropTargetShowTimer> show_nudge_timer_ = std::nullopt;
+
+  // Stores the most recent time the drop target was hidden. Used to calculate
+  // the show timer for link drags.
+  base::Time drop_target_last_hidden_;
 
   // The view that is displayed when drags hover over the "drop" region of
   // the content area.

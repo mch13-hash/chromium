@@ -636,14 +636,26 @@ class TabListMediator implements TabListNotificationHandler {
                 @Override
                 public void onTabPinnedStateChanged(Tab tab, boolean isPinned) {
                     int index = mModelList.indexFromTabId(tab.getId());
+                    updateTab(index, tab, /* isUpdatingId= */ false, /* quickMode= */ false);
+
+                    // When pinning a tab in a group it will be removed from the group so the index
+                    // update is unnecessary.
+                    if (!mActionsOnAllRelatedTabs) return;
+
                     int finalIndex =
                             mModelList.indexOfNthTabCard(
                                     mCurrentTabGroupModelFilterSupplier
                                             .get()
                                             .getTabModel()
                                             .indexOf(tab));
-                    updateTab(index, tab, /* isUpdatingId= */ false, /* quickMode= */ false);
-                    if (index != finalIndex) {
+                    // indexOfNthTabCard returns n + 1 if the index is higher than the number of
+                    // tabs in the model list. Moving is implemented as removal then addition.
+                    // The last valid index to add to is the size of the model list after the
+                    // removal so we need to clamp to mModelList.size() - 1.
+                    finalIndex = Math.min(finalIndex, mModelList.size() - 1);
+                    if (index != finalIndex
+                            && index != TabModel.INVALID_TAB_INDEX
+                            && finalIndex != TabModel.INVALID_TAB_INDEX) {
                         mModelList.move(index, finalIndex);
                     }
                 }
@@ -1811,19 +1823,22 @@ class TabListMediator implements TabListNotificationHandler {
     private @MediaState int getTabGridMediaIndicator(Tab representativeTab) {
         if (!ChromeFeatureList.sMediaIndicatorsAndroid.isEnabled()) return MediaState.NONE;
 
-        if (!mActionsOnAllRelatedTabs || !isTabInTabGroup(representativeTab)) {
-            return representativeTab.getMediaState();
+        @MediaState int stateToReturn = representativeTab.getMediaState();
+        // If the tab is not in a group, or the  state has the highest priority, then return
+        // the state of the representative tab.
+        if (!mActionsOnAllRelatedTabs
+                || !isTabInTabGroup(representativeTab)
+                || stateToReturn == MediaState.MAX_VALUE) {
+            return stateToReturn;
         }
+
         List<Tab> relatedTabs = getRelatedTabsForId(representativeTab.getId());
-        // TODO(crbug.com/430072416): Add other media indicators and adjust priority.
-        @MediaState int stateToReturn = MediaState.NONE;
         for (Tab tab : relatedTabs) {
-            @MediaState int state = tab.getMediaState();
-            if (state == MediaState.AUDIBLE) {
-                return MediaState.AUDIBLE;
-            } else if (state == MediaState.MUTED) {
-                stateToReturn = MediaState.MUTED;
+            @MediaState int currentState = tab.getMediaState();
+            if (currentState > stateToReturn) {
+                stateToReturn = currentState;
             }
+            if (stateToReturn == MediaState.MAX_VALUE) return stateToReturn;
         }
         return stateToReturn;
     }

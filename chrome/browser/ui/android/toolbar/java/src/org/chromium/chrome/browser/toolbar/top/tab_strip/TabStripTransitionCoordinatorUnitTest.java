@@ -45,20 +45,17 @@ import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
-import org.chromium.base.test.util.Features.DisableFeatures;
-import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsVisibilityManager;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.TabObscuringHandler;
 import org.chromium.chrome.browser.tab.TabObscuringHandler.Target;
 import org.chromium.chrome.browser.toolbar.ControlContainer;
-import org.chromium.chrome.browser.toolbar.ToolbarFeatures;
 import org.chromium.chrome.browser.toolbar.ToolbarHairlineView;
 import org.chromium.chrome.browser.toolbar.top.tab_strip.TabStripTransitionCoordinator.TabStripHeightObserver;
 import org.chromium.chrome.browser.toolbar.top.tab_strip.TabStripTransitionCoordinator.TabStripTransitionDelegate;
@@ -74,8 +71,6 @@ import java.util.concurrent.TimeUnit;
 /** Unit test for {@link TabStripTransitionCoordinator}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(qualifiers = "w600dp-h800dp", shadows = ShadowLooper.class)
-@EnableFeatures(ChromeFeatureList.TAB_STRIP_TRANSITION_IN_DESKTOP_WINDOW)
-@DisableFeatures(ChromeFeatureList.TAB_STRIP_LAYOUT_OPTIMIZATION)
 public class TabStripTransitionCoordinatorUnitTest {
     private static final int TEST_TAB_STRIP_HEIGHT = 40;
     private static final int TEST_TOOLBAR_HEIGHT = 56;
@@ -159,6 +154,24 @@ public class TabStripTransitionCoordinatorUnitTest {
 
         setDeviceWidthDp(NARROW_NORMAL_WINDOW_WIDTH);
         Assert.assertEquals("Tab strip height is wrong.", 0, mObserver.heightRequested);
+    }
+
+    @Test
+    @Config(qualifiers = "w600dp")
+    @CommandLineFlags.Add("tab-strip-height-transition-threshold=700")
+    public void initWithWideWindow_CommandlineOverride() {
+        Assert.assertEquals(
+                "Init will not change the tab strip height.",
+                TEST_TAB_STRIP_HEIGHT,
+                mCoordinator.getTabStripHeight());
+        Assert.assertEquals(
+                "Tab strip height requested changing to 0.", 0, mObserver.heightRequested);
+
+        setDeviceWidthDp(800);
+        Assert.assertEquals(
+                "Changing the window to wide will request for full-size tab strip.",
+                TEST_TAB_STRIP_HEIGHT,
+                mObserver.heightRequested);
     }
 
     @Test
@@ -659,7 +672,6 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     @Test
     public void enterDesktopWindow_IncreaseHeight() {
-        ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
         // Simulate a rect update.
         int newHeight = 10 + TEST_TAB_STRIP_HEIGHT;
         Rect appHeaderRect = new Rect(0, 0, 600, newHeight);
@@ -683,7 +695,6 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     @Test
     public void enterDesktopWindow_DecreaseHeight() {
-        ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
         // Simulate a rect update that has a smaller height.
         int newHeight = TEST_TAB_STRIP_HEIGHT - 10;
         int expectedHeight = mReservedTopPadding + TEST_TAB_STRIP_HEIGHT;
@@ -708,7 +719,6 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     @Test
     public void enterDesktopWindow_DecreaseWidth() {
-        ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
         // Simulate a rect update that has a smaller width.
         int newHeight = TEST_TAB_STRIP_HEIGHT + mReservedTopPadding;
         Rect appHeaderRect = new Rect(0, 0, NARROW_DESKTOP_WINDOW_WIDTH, newHeight);
@@ -725,7 +735,6 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     @Test
     public void enterDesktopWindow_NarrowInitialWidth() {
-        ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
         // Create the transition coordinator again for a narrow width desktop window.
         int newHeight = TEST_TAB_STRIP_HEIGHT + mReservedTopPadding;
         setUpTabStripTransitionCoordinator(
@@ -740,7 +749,6 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     @Test
     public void enterDesktopWindow_WideInitialWidth() {
-        ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
         // Create the transition coordinator again for a large desktop window.
         setUpTabStripTransitionCoordinator(
                 /* isInDesktopWindow= */ true, LARGE_DESKTOP_WINDOW_WIDTH);
@@ -749,7 +757,6 @@ public class TabStripTransitionCoordinatorUnitTest {
 
     @Test
     public void enterDesktopWindow_WithoutControlContainerLayout() {
-        ToolbarFeatures.setIsTabStripLayoutOptimizationEnabledForTesting(true);
         // Set the height as if the first measure pass hasn't happened yet.
         doReturn(0).when(mSpyControlContainer).getHeight();
         doReturn(0).when(mSpyControlContainer).getWidth();
@@ -1405,6 +1412,11 @@ public class TabStripTransitionCoordinatorUnitTest {
         @Override
         public ObservableSupplier<Integer> getStripVisibilityStateSupplier() {
             return mStripVisibilitySupplier;
+        }
+
+        @Override
+        public int getFadeTransitionThresholdDp() {
+            return NARROW_DESKTOP_WINDOW_WIDTH + 1;
         }
     }
 }

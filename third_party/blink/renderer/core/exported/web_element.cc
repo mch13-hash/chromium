@@ -52,6 +52,7 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
+#include "third_party/blink/renderer/core/geometry/dom_rect_list.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_label_element.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
@@ -61,11 +62,14 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
+#include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
+#include "third_party/blink/renderer/core/svg/graphics/svg_image_for_container.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
@@ -348,10 +352,47 @@ gfx::Rect WebElement::VisibleBoundsInWidget() const {
   return bounds_in_viewport;
 }
 
+std::vector<gfx::Rect> WebElement::ClientRectsInWidget() {
+  Element* element = Unwrap<Element>();
+  LocalFrameView* view = element->GetDocument().View();
+  if (!view) {
+    return {};
+  }
+
+  std::vector<gfx::Rect> result;
+  Vector<gfx::RectF> rects = element->GetClientRectsNoAdjustment();
+  for (const gfx::RectF& rect : rects) {
+    result.emplace_back(view->FrameToViewport(gfx::ToEnclosingRect(rect)));
+  }
+  return result;
+}
+
 SkBitmap WebElement::ImageContents() {
   Image* image = GetImage();
   if (!image)
     return {};
+  scoped_refptr<SVGImageForContainer> svg_image_for_container;
+  if (RuntimeEnabledFeatures::SvgFallBackToContainerSizeEnabled()) {
+    if (auto* svg_image = blink::DynamicTo<SVGImage>(*image)) {
+      // Adapted from ImageElementBase::GetSourceImageFromCanvas.
+      Element* element = Unwrap<Element>();
+      const ComputedStyle* style = element->GetComputedStyle();
+      auto preferred_color_scheme = element->GetDocument()
+                                        .GetStyleEngine()
+                                        .ResolveColorSchemeForEmbedding(style);
+      const SVGImageViewInfo* view_info =
+          SVGImageForContainer::CreateViewInfo(*svg_image, *element);
+      const gfx::SizeF image_size = SVGImageForContainer::ConcreteObjectSize(
+          *svg_image, view_info, gfx::SizeF(GetClientSize()));
+      if (!image_size.IsEmpty()) {
+        svg_image_for_container = SVGImageForContainer::Create(
+            *svg_image, image_size, 1, view_info, preferred_color_scheme);
+      }
+    }
+  }
+  if (svg_image_for_container) {
+    image = svg_image_for_container.get();
+  }
   return image->AsSkBitmapForCurrentFrame(kRespectImageOrientation);
 }
 
@@ -362,11 +403,12 @@ std::vector<uint8_t> WebElement::CopyOfImageData() {
   return image->Data()->CopyAs<std::vector<uint8_t>>();
 }
 
-std::string WebElement::ImageExtension() {
+WebString WebElement::ImageMimeType() {
   Image* image = GetImage();
-  if (!image)
-    return std::string();
-  return image->FilenameExtension().Utf8();
+  if (!image) {
+    return WebString();
+  }
+  return image->MimeType();
 }
 
 gfx::Size WebElement::GetImageSize() {
@@ -401,8 +443,9 @@ bool WebElement::SetScrollOffset(const gfx::Vector2dF& offset) {
 }
 
 void WebElement::ScrollIntoViewIfNeeded() {
-  LayoutBox* box = GetScrollingBox();
-  if (!box) {
+  Element* element = Unwrap<Element>();
+  LayoutObject* layout_object = element->GetLayoutObject();
+  if (!layout_object) {
     return;
   }
 
@@ -427,7 +470,8 @@ void WebElement::ScrollIntoViewIfNeeded() {
   // User scrolling to ensure only user scrollable scrollers are affected.
   params->type = mojom::blink::ScrollType::kUser;
   scroll_into_view_util::ScrollRectToVisible(
-      *box, box->AbsoluteBoundingBoxRectForScrollIntoView(), std::move(params));
+      *layout_object, layout_object->AbsoluteBoundingBoxRectForScrollIntoView(),
+      std::move(params));
 }
 
 bool WebElement::HasScrollBehaviorSmooth() const {

@@ -45,7 +45,7 @@
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/browser_view_layout.h"
+#include "chrome/browser/ui/views/frame/layout/browser_view_layout.h"
 #include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
@@ -80,6 +80,7 @@
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -236,7 +237,7 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest, SpaceConstrained) {
 #if BUILDFLAG(IS_CHROMEOS)
   EXPECT_FALSE(window_title);
 #else
-  EXPECT_EQ(window_title->parent(), helper()->browser_view()->top_container());
+  EXPECT_EQ(window_title->parent(), helper()->browser_view());
 #endif
 
   WebAppToolbarButtonContainer* const toolbar_right_container =
@@ -247,10 +248,8 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest, SpaceConstrained) {
   std::vector<const views::View*> page_action_views = {};
   const auto& properties_provider =
       page_actions::PageActionPropertiesProvider();
-  for (auto action_id : helper()
-                            ->app_browser()
-                            ->GetAppBrowserController()
-                            ->GetTitleBarPageActions()) {
+  for (auto action_id :
+       helper()->app_browser()->app_controller()->GetTitleBarPageActions()) {
     const auto& properties = properties_provider.GetProperties(action_id);
 
     // When the page action migration is not enabled, the view should not be
@@ -433,7 +432,7 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest, TitleHover) {
   WebAppToolbarButtonContainer* const toolbar_right_container =
       helper()->web_app_frame_toolbar()->get_right_container_for_testing();
 
-  EXPECT_EQ(window_title->parent(), helper()->browser_view()->top_container());
+  EXPECT_EQ(window_title->parent(), helper()->browser_view());
   window_title->SetText(std::u16string(30, 't'));
 
   // Ensure we initially have abundant space. Set the size from the root view
@@ -496,11 +495,13 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest, MenuButtonUpdatePending) {
       helper()->browser_view()->toolbar_button_provider()->GetAppMenuButton());
   EXPECT_FALSE(menu_button->IsLabelPresentAndVisible());
 
+  // Set that the `update_info` was not ignored by the user.
   {
     web_app::ScopedRegistryUpdate update =
         provider().sync_bridge_unsafe().BeginUpdate();
     web_app::proto::PendingUpdateInfo update_info;
     update_info.set_name("Updated app name");
+    update_info.set_was_ignored(false);
     update->UpdateApp(app_id)->SetPendingUpdateInfo(std::move(update_info));
   }
 
@@ -517,6 +518,23 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest, MenuButtonUpdatePending) {
     update->UpdateApp(app_id)->SetPendingUpdateInfo(std::nullopt);
   }
 
+  menu_button->UpdateStateForTesting();
+  EXPECT_FALSE(menu_button->IsLabelPresentAndVisible());
+  EXPECT_EQ(menu_button->GetViewAccessibility().GetCachedName(),
+            u"Customize and control A minimal-ui app");
+  EXPECT_EQ(menu_button->GetRenderedTooltipText(gfx::Point()),
+            u"Customize and control A minimal-ui app");
+
+  // Setting a pending update info with available information but ignored by the
+  // user doesn't update the menu button.
+  {
+    web_app::ScopedRegistryUpdate update =
+        provider().sync_bridge_unsafe().BeginUpdate();
+    web_app::proto::PendingUpdateInfo update_info;
+    update_info.set_name("Updated app name");
+    update_info.set_was_ignored(true);
+    update->UpdateApp(app_id)->SetPendingUpdateInfo(std::move(update_info));
+  }
   menu_button->UpdateStateForTesting();
   EXPECT_FALSE(menu_button->IsLabelPresentAndVisible());
   EXPECT_EQ(menu_button->GetViewAccessibility().GetCachedName(),
@@ -1897,7 +1915,7 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest_WindowControlsOverlay,
   // Download a file in the app browser.
   ui_test_utils::DownloadURL(
       helper()->app_browser(),
-      ui_test_utils::GetTestUrl(
+      chrome_test_utils::GetTestUrl(
           base::FilePath().AppendASCII("downloads"),
           base::FilePath().AppendASCII("a_zip_file.zip")));
   views::test::WaitForAnimatingLayoutManager(
@@ -1938,7 +1956,7 @@ IN_PROC_BROWSER_TEST_F(WebAppFrameToolbarBrowserTest_WindowControlsOverlay,
 
   // Download a file in the regular browser.
   ui_test_utils::DownloadURL(
-      non_app_browser, ui_test_utils::GetTestUrl(
+      non_app_browser, chrome_test_utils::GetTestUrl(
                            base::FilePath().AppendASCII("downloads"),
                            base::FilePath().AppendASCII("a_zip_file.zip")));
 
@@ -2343,6 +2361,119 @@ IN_PROC_BROWSER_TEST_F(
     return MatchMediaMatches(
         web_contents, "window.matchMedia('(display-state: normal)').matches");
   }));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebAppFrameToolbarBrowserTest_AdditionalWindowingControls,
+    FullscreenAndRestoreWindowWithApi) {
+  InstallAndLaunchWebApp();
+  helper()->GrantWindowManagementPermission();
+  auto* web_contents = helper()->browser_view()->GetActiveWebContents();
+  content::WaitForLoadStop(web_contents);
+
+  // Enter fullscreen
+  EXPECT_TRUE(
+      ExecJs(web_contents, "document.documentElement.requestFullscreen();"));
+  EXPECT_TRUE(
+      RunUntil([&]() { return helper()->browser_view()->IsFullscreen(); }));
+  EXPECT_TRUE(RunUntil([&]() {
+    return MatchMediaMatches(
+        web_contents,
+        "window.matchMedia('(display-state: fullscreen)').matches");
+  }));
+  EXPECT_TRUE(helper()->browser_view()->IsFullscreen());
+#if !BUILDFLAG(IS_MAC)
+  EXPECT_FALSE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
+#else
+  // On Mac the top bar is displayed for web apps even in fullscreen mode
+  EXPECT_TRUE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
+#endif
+
+  // Restore window
+  EXPECT_TRUE(ExecJs(web_contents, "window.restore()"));
+  EXPECT_TRUE(
+      RunUntil([&]() { return !helper()->browser_view()->IsFullscreen(); }));
+  EXPECT_TRUE(RunUntil([&]() {
+    return MatchMediaMatches(
+        web_contents, "window.matchMedia('(display-state: normal)').matches");
+  }));
+  EXPECT_FALSE(helper()->browser_view()->IsMaximized());
+  EXPECT_FALSE(helper()->browser_view()->IsFullscreen());
+  EXPECT_TRUE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebAppFrameToolbarBrowserTest_AdditionalWindowingControls,
+    MaximizeFullscreenAndRestoreWindowWithApi) {
+  InstallAndLaunchWebApp();
+  helper()->GrantWindowManagementPermission();
+  auto* web_contents = helper()->browser_view()->GetActiveWebContents();
+
+  // Ensure maximizing is allowed.
+  helper()->browser_view()->SetCanMaximize(true);
+  EXPECT_TRUE(helper()->browser_view()->CanMaximize());
+  content::WaitForLoadStop(web_contents);
+
+  // Maximize window
+  EXPECT_TRUE(ExecJs(web_contents, "window.maximize()"));
+  EXPECT_TRUE(
+      RunUntil([&]() { return helper()->browser_view()->IsMaximized(); }));
+  EXPECT_TRUE(RunUntil([&]() {
+    return MatchMediaMatches(
+        web_contents,
+        "window.matchMedia('(display-state: maximized)').matches");
+  }));
+
+  // Enter fullscreen
+  EXPECT_TRUE(
+      ExecJs(web_contents, "document.documentElement.requestFullscreen();"));
+  EXPECT_TRUE(
+      RunUntil([&]() { return helper()->browser_view()->IsFullscreen(); }));
+  EXPECT_TRUE(RunUntil([&]() {
+    return MatchMediaMatches(
+        web_contents,
+        "window.matchMedia('(display-state: fullscreen)').matches");
+  }));
+  EXPECT_FALSE(helper()->browser_view()->IsMaximized());
+  EXPECT_TRUE(helper()->browser_view()->IsFullscreen());
+#if !BUILDFLAG(IS_MAC)
+  EXPECT_FALSE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
+#else
+  // On Mac the top bar is displayed for web apps even in fullscreen mode
+  EXPECT_TRUE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
+#endif
+
+  // Restore window
+  EXPECT_TRUE(ExecJs(web_contents, "window.restore()"));
+  EXPECT_TRUE(
+      RunUntil([&]() { return !helper()->browser_view()->IsFullscreen(); }));
+  EXPECT_TRUE(RunUntil([&]() {
+    return MatchMediaMatches(
+        web_contents,
+        "window.matchMedia('(display-state: maximized)').matches");
+  }));
+  EXPECT_TRUE(helper()->browser_view()->IsMaximized());
+  EXPECT_FALSE(helper()->browser_view()->IsFullscreen());
+  EXPECT_TRUE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
+
+  // Restore window once again
+  EXPECT_TRUE(ExecJs(web_contents, "window.restore()"));
+  EXPECT_TRUE(
+      RunUntil([&]() { return !helper()->browser_view()->IsMaximized(); }));
+  EXPECT_TRUE(RunUntil([&]() {
+    return MatchMediaMatches(
+        web_contents, "window.matchMedia('(display-state: normal)').matches");
+  }));
+  EXPECT_FALSE(helper()->browser_view()->IsMaximized());
+  EXPECT_FALSE(helper()->browser_view()->IsFullscreen());
+  EXPECT_TRUE(helper()->browser_view()->browser()->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureTitleBar));
 }
 
 // windows.setResizable API should block only user-initiated requests

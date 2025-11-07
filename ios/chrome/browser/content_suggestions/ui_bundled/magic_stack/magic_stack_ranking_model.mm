@@ -17,6 +17,7 @@
 #import "components/commerce/core/commerce_feature_list.h"
 #import "components/commerce/core/price_tracking_utils.h"
 #import "components/commerce/core/shopping_service.h"
+#import "components/ntp_tiles/pref_names.h"
 #import "components/password_manager/core/common/password_manager_pref_names.h"
 #import "components/power_bookmarks/core/power_bookmark_utils.h"
 #import "components/power_bookmarks/core/proto/power_bookmark_meta.pb.h"
@@ -102,7 +103,8 @@ BOOL PromoteTabResumptionShopCardToFrontOfStack() {
   return (base::Contains(commerce::kShopCardVariation.Get(),
                          commerce::kShopCardArm3) ||
           commerce::kShopCardVariation.Get() == commerce::kShopCardArm4 ||
-          commerce::kShopCardVariation.Get() == commerce::kShopCardArm5) &&
+          commerce::kShopCardVariation.Get() == commerce::kShopCardArm5 ||
+          commerce::kShopCardVariation.Get() == commerce::kShopCardArm6) &&
          commerce::kShopCardPosition.Get() == commerce::kShopCardFrontPosition;
 }
 
@@ -437,7 +439,6 @@ using segmentation_platform::home_modules::SavePasswordsEphemeralModule;
 // Adds the Safety Check module to `order` based on the current Safety Check
 // state.
 - (void)addSafetyCheckToMagicStackOrder:(NSMutableArray*)order {
-  CHECK(IsSafetyCheckMagicStackEnabled());
   [order addObject:@(int(ContentSuggestionsModuleType::kSafetyCheck))];
 }
 
@@ -460,22 +461,15 @@ using segmentation_platform::home_modules::SavePasswordsEphemeralModule;
   options.on_demand_execution = true;
   auto inputContext =
       base::MakeRefCounted<segmentation_platform::InputContext>();
-  // This check has to match check in HomeModulesCardRegistry::CreateAllCards()
-  // so that expected inputs match passed inputs.
-  if (base::FeatureList::IsEnabled(commerce::kPriceTrackingPromo) ||
-      (IsTipsMagicStackEnabled() && _tipsManager)) {
-    inputContext->metadata_args.emplace(
-        segmentation_platform::kIsNewUser,
-        segmentation_platform::processing::ProcessedValue::FromFloat(
-            IsFirstRunRecent(set_up_list::SetUpListDurationPastFirstRun())));
-  }
+  inputContext->metadata_args.emplace(
+      segmentation_platform::kIsNewUser,
+      segmentation_platform::processing::ProcessedValue::FromFloat(
+          IsFirstRunRecent(set_up_list::SetUpListDurationPastFirstRun())));
 
-  if (base::FeatureList::IsEnabled(commerce::kPriceTrackingPromo)) {
-    inputContext->metadata_args.emplace(
-        segmentation_platform::kIsSynced,
-        segmentation_platform::processing::ProcessedValue::FromFloat(
-            _shoppingService->IsShoppingListEligible()));
-  }
+  inputContext->metadata_args.emplace(
+      segmentation_platform::kIsSynced,
+      segmentation_platform::processing::ProcessedValue::FromFloat(
+          _shoppingService->IsShoppingListEligible()));
 
   if (send_tab_to_self::
           IsSendTabIOSPushNotificationsEnabledWithMagicStackCard()) {
@@ -611,7 +605,7 @@ using segmentation_platform::home_modules::SavePasswordsEphemeralModule;
   MagicStackModule* card;
 
   BOOL areTipsCardsEnabled =
-      _prefService->GetBoolean(prefs::kHomeCustomizationMagicStackTipsEnabled);
+      _prefService->GetBoolean(ntp_tiles::prefs::kTipsHomeModuleEnabled);
 
   for (const std::string& label : result.ordered_labels) {
     if (label == segmentation_platform::kPriceTrackingNotificationPromo) {
@@ -783,10 +777,8 @@ using segmentation_platform::home_modules::SavePasswordsEphemeralModule;
     // signal for Start.
     BOOL hasNoFreshnessSignal = shortcutsFreshnessImpressionCount != 0 &&
                                 parcelTrackingFreshnessImpressionCount != 0;
-    if (IsSafetyCheckMagicStackEnabled()) {
       hasNoFreshnessSignal =
           hasNoFreshnessSignal && safetyCheckFreshnessImpressionCount != 0;
-    }
     if (hasNoFreshnessSignal && [self.homeStartDataSource isStartSurface]) {
       options = segmentation_platform::PredictionOptions::ForCached(true);
     } else {
@@ -981,11 +973,8 @@ using segmentation_platform::home_modules::SavePasswordsEphemeralModule;
         // - No current or previous issues, to avoid consistently displaying the
         // "All Safe" state and taking up carousel space for other modules.
         // - Irrelevant modules are hidden and it's not the first ranked module.
-        BOOL disabled =
-            !IsSafetyCheckMagicStackEnabled() ||
-            safety_check_prefs::IsSafetyCheckInMagicStackDisabled(_prefService);
-
-        if (disabled) {
+        if (safety_check_prefs::IsSafetyCheckInMagicStackDisabled(
+                _prefService)) {
           base::UmaHistogramEnumeration(
               kIOSSafetyCheckMagicStackHiddenReason,
               IOSSafetyCheckHiddenReason::kManuallyDisabled);

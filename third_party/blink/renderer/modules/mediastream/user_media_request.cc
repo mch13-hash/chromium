@@ -940,6 +940,9 @@ void UserMediaRequest::Fail(Result error, const String& message) {
     case Result::PERMISSION_DENIED:
     case Result::PERMISSION_DENIED_BY_SYSTEM:
     case Result::PERMISSION_DISMISSED:
+    case Result::NO_TRANSIENT_ACTIVATION:
+      // TODO(crbug.com/453600255): Use `result_enum` kInvalidStateError for
+      // NO_TRANSIENT_ACTIVATION once all new enum values are added.
     case Result::KILL_SWITCH_ON:
       exception_code = DOMExceptionCode::kNotAllowedError;
       result_enum = UserMediaRequestResult::kNotAllowedError;
@@ -963,6 +966,7 @@ void UserMediaRequest::Fail(Result error, const String& message) {
       break;
     case Result::TRACK_START_FAILURE_AUDIO:
     case Result::TRACK_START_FAILURE_VIDEO:
+    case Result::AUDIO_DEVICE_SOCKET_ERROR:
     case Result::DEVICE_IN_USE:
       exception_code = DOMExceptionCode::kNotReadableError;
       result_enum = UserMediaRequestResult::kNotReadableError;

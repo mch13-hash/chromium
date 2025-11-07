@@ -36,7 +36,6 @@
 #include "components/viz/common/quads/compositor_render_pass.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/quads/video_hole_draw_quad.h"
-#include "components/viz/common/resources/resource_sizes.h"
 #include "components/viz/common/resources/shared_image_format_utils.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/client_shared_image.h"
@@ -82,34 +81,33 @@ gfx::ProtectedVideoType ProtectedVideoTypeFromMetadata(
                                : gfx::ProtectedVideoType::kSoftwareProtected;
 }
 
-VideoFrameResourceType ExternalResourceTypeForHardware(const VideoFrame& frame,
-                                                       GLuint target) {
+VideoFrameResourceType ExternalResourceTypeForHardware(
+    const VideoFrame& frame) {
   bool si_prefers_external_sampler =
       frame.shared_image()->format().PrefersExternalSampler();
   if (si_prefers_external_sampler) {
     return VideoFrameResourceType::RGB;
   }
 
+#if BUILDFLAG(IS_ANDROID)
+  // Hardware video decode on Android requires using external formats which are
+  // currently not expressible by SharedImageFormat, so images are created as
+  // RGBA+GL_TEXTURE_EXTERNAL_OES.
+  if (frame.shared_image()->GetTextureTarget() == GL_TEXTURE_EXTERNAL_OES &&
+      frame.shared_image()->format() == viz::SinglePlaneFormat::kRGBA_8888) {
+    return VideoFrameResourceType::RGB;
+  }
+#endif
+
   const VideoPixelFormat format = frame.format();
   switch (format) {
-    case PIXEL_FORMAT_ARGB:
     case PIXEL_FORMAT_XRGB:
+      return VideoFrameResourceType::RGB;
+    case PIXEL_FORMAT_ARGB:
     case PIXEL_FORMAT_ABGR:
     case PIXEL_FORMAT_XBGR:
     case PIXEL_FORMAT_BGRA:
-      switch (target) {
-        case GL_TEXTURE_EXTERNAL_OES:
-#if BUILDFLAG(IS_ANDROID)
-          return VideoFrameResourceType::RGB;
-#endif
-        case GL_TEXTURE_2D:
-        case GL_TEXTURE_RECTANGLE_ARB:
-          return (format == PIXEL_FORMAT_XRGB)
-                     ? VideoFrameResourceType::RGB
-                     : VideoFrameResourceType::RGBA_PREMULTIPLIED;
-        default:
-          NOTREACHED();
-      }
+      return VideoFrameResourceType::RGBA_PREMULTIPLIED;
     case PIXEL_FORMAT_XR30:
     case PIXEL_FORMAT_XB30:
     case PIXEL_FORMAT_I420:
@@ -720,9 +718,11 @@ VideoResourceUpdater::FrameResource* VideoResourceUpdater::AllocateResource(
   return all_resources_.back().get();
 }
 
-void VideoResourceUpdater::CopyHardwareResource(
-    VideoFrame* video_frame,
-    VideoFrameExternalResource* external_resource) {
+VideoFrameExternalResource VideoResourceUpdater::CopyHardwareResource(
+    VideoFrame* video_frame) {
+  VideoFrameExternalResource external_resource;
+  external_resource.type = VideoFrameResourceType::RGBA_PREMULTIPLIED;
+
   const gfx::Size output_resource_size = video_frame->coded_size();
   auto shared_image = video_frame->shared_image();
   // The copy needs to be a direct transfer of pixel data, so we use an RGBA8
@@ -732,10 +732,7 @@ void VideoResourceUpdater::CopyHardwareResource(
 
   // We copy to RGBA image, so we need only RGBA portion of the color space.
   const auto copy_color_space = video_frame->ColorSpace().GetAsFullRangeRGB();
-  SkAlphaType copy_alpha_type =
-      (external_resource->type == VideoFrameResourceType::RGBA_PREMULTIPLIED)
-          ? kPremul_SkAlphaType
-          : kUnpremul_SkAlphaType;
+  const SkAlphaType copy_alpha_type = kPremul_SkAlphaType;
 
   const VideoFrame::ID no_unique_id;  // Do not recycle referenced textures.
   FrameResource* hardware_resource = RecycleOrAllocateResource(
@@ -778,10 +775,12 @@ void VideoResourceUpdater::CopyHardwareResource(
       video_frame->hdr_metadata().value_or(gfx::HDRMetadata());
   transferable_resource.needs_detiling = video_frame->metadata().needs_detiling;
 
-  external_resource->resource = std::move(transferable_resource);
-  external_resource->release_callback =
+  external_resource.resource = std::move(transferable_resource);
+  external_resource.release_callback =
       base::BindOnce(&VideoResourceUpdater::RecycleResource,
                      weak_ptr_factory_.GetWeakPtr(), hardware_resource->id());
+
+  return external_resource;
 }
 
 VideoFrameExternalResource VideoResourceUpdater::CreateForHardwareFrame(
@@ -791,17 +790,14 @@ VideoFrameExternalResource VideoResourceUpdater::CreateForHardwareFrame(
     return VideoFrameExternalResource();
   }
 
-  VideoFrameExternalResource external_resource;
-  const bool copy_required = video_frame->metadata().copy_required;
-  auto shared_image = video_frame->shared_image();
-  GLuint target = shared_image->GetTextureTarget();
-  // If |copy_required| then we will copy into a GL_TEXTURE_2D target.
-  if (copy_required) {
-    target = GL_TEXTURE_2D;
+  if (video_frame->metadata().copy_required) {
+    return CopyHardwareResource(video_frame.get());
   }
 
-  external_resource.type =
-      ExternalResourceTypeForHardware(*video_frame, target);
+  VideoFrameExternalResource external_resource;
+  auto shared_image = video_frame->shared_image();
+
+  external_resource.type = ExternalResourceTypeForHardware(*video_frame);
   if (external_resource.type == VideoFrameResourceType::NONE) {
     DLOG(ERROR) << "Unsupported Texture format"
                 << VideoPixelFormatToString(video_frame->format());
@@ -812,18 +808,12 @@ VideoFrameExternalResource VideoResourceUpdater::CreateForHardwareFrame(
   CopyingSyncTokenClient client;
   auto original_release_token = video_frame->UpdateReleaseSyncToken(&client);
 
-  if (copy_required) {
-    CopyHardwareResource(video_frame.get(), &external_resource);
-    return external_resource;
-  }
-
   SkAlphaType alpha_type =
       (external_resource.type == VideoFrameResourceType::RGBA_PREMULTIPLIED)
           ? kPremul_SkAlphaType
           : kUnpremul_SkAlphaType;
 
   viz::TransferableResource::MetadataOverride overrides = {
-      .size = video_frame->coded_size(),
       .is_overlay_candidate = video_frame->metadata().allow_overlay,
       .color_space = video_frame->ColorSpace(),
       .alpha_type = alpha_type,
@@ -932,7 +922,8 @@ void VideoResourceUpdater::TransferRGBPixelsToPaintCanvas(
   // https://crbug.com/1090435
   PaintCanvasVideoRenderer::PaintParams paint_params;
   paint_params.dest_rect = gfx::RectF(video_frame->visible_rect());
-  video_renderer_->Paint(video_frame, &canvas, flags, paint_params, nullptr);
+  video_renderer_->Paint(video_frame, &canvas, flags, paint_params,
+                         /*raster_context_provider=*/nullptr);
 }
 
 bool VideoResourceUpdater::WriteRGBPixelsToTexture(
@@ -940,8 +931,10 @@ bool VideoResourceUpdater::WriteRGBPixelsToTexture(
     FrameResource* hardware_resource) {
   CHECK(!hardware_resource->is_software());
   viz::SharedImageFormat resource_format = hardware_resource->format();
-  size_t bytes_per_row = viz::ResourceSizes::CheckedWidthInBytes<size_t>(
-      video_frame->coded_size().width(), resource_format);
+  size_t bytes_per_row =
+      viz::SharedMemoryRowSizeForSharedImageFormat(
+          resource_format, 0, video_frame->coded_size().width())
+          .value();
   const int stride = video_frame->stride(VideoFrame::Plane::kARGB);
   const bool has_compatible_stride =
       stride > 0 && static_cast<size_t>(stride) == bytes_per_row;

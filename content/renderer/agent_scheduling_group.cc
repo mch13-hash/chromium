@@ -161,10 +161,10 @@ AgentSchedulingGroup::AgentSchedulingGroup(
 
 AgentSchedulingGroup::~AgentSchedulingGroup() = default;
 
-void AgentSchedulingGroup::OnBadMessageReceived(const IPC::Message& message) {
+void AgentSchedulingGroup::OnBadMessageReceived() {
   // Not strictly required, since we don't currently do anything with bad
   // messages in the renderer, but if we ever do then this will "just work".
-  return ToImpl(*render_thread_).OnBadMessageReceived(message);
+  return ToImpl(*render_thread_).OnBadMessageReceived();
 }
 
 void AgentSchedulingGroup::OnAssociatedInterfaceRequest(
@@ -251,7 +251,7 @@ blink::WebView* AgentSchedulingGroup::CreateWebView(
       params->session_storage_namespace_id, params->base_background_color,
       params->browsing_context_group_token, &params->color_provider_colors,
       std::move(params->partitioned_popin_params), params->history_index,
-      params->history_length, params->canvas_noise_token);
+      params->history_length);
 
   web_view->SetRendererPreferences(params->renderer_preferences);
   web_view->SetWebPreferences(params->web_preferences);
@@ -339,12 +339,6 @@ blink::WebView* AgentSchedulingGroup::CreateWebView(
       auto& provisional_local_params =
           params->main_frame->get_provisional_local_params();
       auto& local_params = provisional_local_params->local_params;
-
-      // It does not make swense to reuse the compositor if there is no previous
-      // RenderFrame to take it from.
-      if (local_params->widget_params->reuse_compositor) {
-        DCHECK(provisional_local_params->previous_frame_token);
-      }
 
       // Create the provisional main LocalFrame.
       // TODO(dcheng): RenderFrameImpl::CreateFrame() should probably be split

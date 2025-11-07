@@ -33,6 +33,7 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "cc/base/switches.h"
 #include "components/discardable_memory/service/discardable_shared_memory_manager.h"
 #include "components/tracing/common/tracing_switches.h"
 #include "components/viz/common/features.h"
@@ -270,6 +271,7 @@ static const char* const kSwitchNames[] = {
     switches::kDisableShaderNameHashing,
     switches::kDisableSkiaRuntimeOpts,
     switches::kDRMVirtualConnectorIsExternal,
+    switches::kDumpCompositorFrame,
     switches::kEnableGpuMainTimeKeeperMetrics,
     switches::kEnableGpuRasterization,
     switches::kEnableSkiaGraphite,
@@ -543,6 +545,12 @@ void InitGpuPersistentCacheFileFactoryOnce() {
       !viz::PersistentCacheSandboxedFileFactory::GetInstance()) {
     base::FilePath cache_root_dir =
         GetContentClient()->browser()->GetShaderDiskCacheDirectory();
+    if (cache_root_dir.empty()) {
+      // GetShaderDiskCacheDirectory() can return empty string in tests.
+      // Disable caching in this case since PersistentCacheSandboxedFileFactory
+      // doesn't support relative paths.
+      return;
+    }
     viz::PersistentCacheSandboxedFileFactory::CreateInstance(
         cache_root_dir.AppendASCII("PersistentCache"));
   }
@@ -736,10 +744,9 @@ GpuProcessHost::GpuProcessHost(int host_id, GpuProcessKind kind)
   }
 #if !BUILDFLAG(IS_ANDROID)
   if (!in_process_ && kind != GPU_PROCESS_KIND_INFO_COLLECTION) {
-    memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
-        FROM_HERE, base::MemoryPressureListenerTag::kGpuProcessHost,
-        base::BindRepeating(&GpuProcessHost::OnMemoryPressure,
-                            base::Unretained(this)));
+    memory_pressure_listener_registration_ =
+        std::make_unique<base::MemoryPressureListenerRegistration>(
+            FROM_HERE, base::MemoryPressureListenerTag::kGpuProcessHost, this);
   }
 #endif
 
@@ -910,7 +917,7 @@ bool GpuProcessHost::Init() {
 
   TRACE_EVENT_INSTANT0("gpu", "LaunchGpuProcess", TRACE_EVENT_SCOPE_THREAD);
 
-  process_->GetHost()->CreateChannelMojo();
+  process_->GetHost()->CreateChannel();
 
   mode_ = GpuDataManagerImpl::GetInstance()->GetGpuMode();
 
@@ -1484,8 +1491,7 @@ int GpuProcessHost::GetIDForTesting() const {
 }
 
 #if !BUILDFLAG(IS_ANDROID)
-void GpuProcessHost::OnMemoryPressure(
-    base::MemoryPressureListener::MemoryPressureLevel level) {
+void GpuProcessHost::OnMemoryPressure(base::MemoryPressureLevel level) {
   gpu_host_->gpu_service()->OnMemoryPressure(level);
 }
 #endif

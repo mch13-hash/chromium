@@ -9,6 +9,7 @@
 #import "base/ios/block_types.h"
 #import "base/metrics/user_metrics.h"
 #import "base/notreached.h"
+#import "google_apis/gaia/gaia_id.h"
 #import "ios/chrome/browser/authentication/ui_bundled/cells/table_view_identity_cell.h"
 #import "ios/chrome/browser/authentication/ui_bundled/cells/table_view_identity_item.h"
 #import "ios/chrome/browser/authentication/ui_bundled/enterprise/enterprise_utils.h"
@@ -118,13 +119,10 @@ CGFloat kSectionFooterHeight = 8.;
           [self.tableView cellForRowAtIndexPath:indexPath];
       __weak ConsistencyAccountChooserTableViewController* weakSelf = self;
       ProceduralBlock completionBlock = ^{
-        ConsistencyAccountChooserTableViewController* strongSelf = weakSelf;
-        if (!strongSelf) {
-          return;
-        }
-        [strongSelf.actionDelegate
-            consistencyAccountChooserTableViewController:strongSelf
-                             didSelectIdentityWithGaiaID:identityItem.gaiaID];
+        [weakSelf.actionDelegate
+            consistencyAccountChooserTableViewController:weakSelf
+                             didSelectIdentityWithGaiaID:GaiaId(identityItem
+                                                                    .gaiaID)];
       };
       if (newCell) {
         [identityItem configureCell:newCell
@@ -208,6 +206,8 @@ CGFloat kSectionFooterHeight = 8.;
   item.title = l10n_util::GetNSString(IDS_IOS_CONSISTENCY_PROMO_ADD_ACCOUNT);
   item.accessibilityIdentifier = kConsistencyAccountChooserAddAccountIdentifier;
   item.textColor = [UIColor colorNamed:kBlueColor];
+  item.isAccessibilityElement = YES;
+  item.accessibilityTraits |= UIAccessibilityTraitButton;
   [model addItem:item toSectionWithIdentifier:AddAccountSectionIdentifier];
 }
 
@@ -266,7 +266,7 @@ CGFloat kSectionFooterHeight = 8.;
     TableViewIdentityItem* item =
         base::apple::ObjCCastStrict<TableViewIdentityItem>(
             [model itemAtIndexPath:path]);
-    if ([item.gaiaID isEqualToString:configurator.gaiaID]) {
+    if (item.gaiaID == configurator.gaiaID) {
       [configurator configureIdentityChooser:item];
       [self reconfigureCellsForItems:@[ item ]];
       [self.tableView reloadRowsAtIndexPaths:@[ path ]

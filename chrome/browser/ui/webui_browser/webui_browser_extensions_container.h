@@ -8,8 +8,8 @@
 #include <map>
 
 #include "base/scoped_observation.h"
-#include "chrome/browser/ui/extensions/extensions_container.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "chrome/browser/ui/views/extensions/extensions_container_views.h"
 #include "chrome/browser/ui/views/extensions/extensions_menu_coordinator.h"
 #include "chrome/browser/ui/webui_browser/extensions_bar.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -22,19 +22,17 @@ class Browser;
 class WebUIBrowserWindow;
 
 class WebUIBrowserExtensionsContainer
-    : public ExtensionsContainer,
+    : public ExtensionsContainerViews,
       public ToolbarActionsModel::Observer,
       public extensions_bar::mojom::PageHandler {
  public:
   WebUIBrowserExtensionsContainer(Browser& browser, WebUIBrowserWindow& window);
   ~WebUIBrowserExtensionsContainer() override;
 
-  // ExtensionsContainer:
+  // ExtensionsContainerViews:
   ToolbarActionViewController* GetActionForId(
       const std::string& action_id) override;
   std::optional<extensions::ExtensionId> GetPoppedOutActionId() const override;
-  void OnContextMenuShownFromToolbar(const std::string& action_id) override;
-  void OnContextMenuClosedFromToolbar() override;
   bool IsActionVisibleOnToolbar(const std::string& action_id) const override;
   void UndoPopOut() override;
   void SetPopupOwner(ToolbarActionViewController* popup_owner) override;
@@ -46,9 +44,14 @@ class WebUIBrowserExtensionsContainer
                                         ShowPopupCallback callback) override;
   void ToggleExtensionsMenu() override;
   bool HasAnyExtensions() const override;
-  void UpdateToolbarActionHoverCard(
-      ToolbarActionView* action_view,
-      ToolbarActionHoverCardUpdateType update_type) override;
+  void ShowContextMenuAsFallback(
+      const extensions::ExtensionId& action_id) override;
+  void OnPopupShown(const extensions::ExtensionId& action_id,
+                    bool by_user) override;
+  void OnPopupClosed(const extensions::ExtensionId& action_id) override;
+  views::FocusManager* GetFocusManagerForAccelerator() override;
+  views::BubbleAnchor GetReferenceButtonForPopup(
+      const extensions::ExtensionId& action_id) override;
 
   void CollapseConfirmation() override;
 
@@ -79,6 +82,9 @@ class WebUIBrowserExtensionsContainer
 
   void CreateActions();
   void CreateActionForId(const ToolbarActionsModel::ActionId& action_id);
+
+  void OnContextMenuShownFromToolbar(const std::string& action_id);
+  void OnContextMenuClosedFromToolbar();
 
   const raw_ref<Browser> browser_;
   const raw_ref<WebUIBrowserWindow> window_;

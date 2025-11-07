@@ -34,37 +34,40 @@ class GlicInactiveSidePanelUi : public GlicUiEmbedder,
       GlicUiEmbedder::Delegate& delegate);
   static std::unique_ptr<GlicInactiveSidePanelUi> CreateForBackgroundTab(
       base::WeakPtr<tabs::TabInterface> tab,
+      content::WebContents* glic_webui_contents,
       GlicUiEmbedder::Delegate& delegate);
 
   ~GlicInactiveSidePanelUi() override;
 
   // GlicUiEmbedder:
   Host::EmbedderDelegate* GetHostEmbedderDelegate() override;
-  void Show() override;
+  void Show(const ShowOptions& options) override;
   bool IsShowing() const override;
   void Close() override;
   std::unique_ptr<GlicUiEmbedder> CreateInactiveEmbedder() const override;
-  views::View* GetViewForTesting() override;
+  void Focus() override;
+  bool HasFocus() override;
+
+  base::WeakPtr<views::View> GetView() override;
+  mojom::PanelState GetPanelState() const override;
+  gfx::Size GetPanelSize() override;
 
   // views::ViewObserver:
   void OnViewFocused(views::View* observed_view) override;
   void OnViewIsDeleting(views::View* observed_view) override;
 
-  void VisibilityChanged(bool visible);
-
  private:
   explicit GlicInactiveSidePanelUi(base::WeakPtr<tabs::TabInterface> tab,
                                    GlicUiEmbedder::Delegate& delegate);
+  GlicSidePanelCoordinator* GetGlicSidePanelCoordinator() const;
 
   InactiveViewController inactive_view_controller_;
   base::WeakPtr<tabs::TabInterface> tab_;
   raw_ref<GlicUiEmbedder::Delegate> delegate_;
-  bool is_showing_ = false;
 
   base::ScopedObservation<views::View, views::ViewObserver>
       scoped_view_observation_{this};
 
-  base::CallbackListSubscription panel_visibility_subscription_;
   base::WeakPtrFactory<GlicInactiveSidePanelUi> weak_ptr_factory_{this};
 };
 

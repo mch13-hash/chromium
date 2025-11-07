@@ -28,6 +28,8 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_metrics.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_action_context_desktop.h"
 #include "chrome/browser/ui/tabs/tab_group_deletion_dialog_controller.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -433,7 +435,7 @@ content::NavigationHandle* SavedTabGroupUtils::OpenTabInBrowser(
   params.tabstrip_index = tabstrip_index.value_or(params.tabstrip_index);
   params.group = local_group_id;
   params.navigation_initiated_from_sync = true;
-  params.window_action = NavigateParams::WindowAction::NO_ACTION;
+  params.window_action = NavigateParams::WindowAction::kNoAction;
   base::WeakPtr<content::NavigationHandle> handle = Navigate(&params);
   return handle.get();
 }
@@ -441,14 +443,18 @@ content::NavigationHandle* SavedTabGroupUtils::OpenTabInBrowser(
 // static
 Browser* SavedTabGroupUtils::GetBrowserWithTabGroupId(
     tab_groups::TabGroupId group_id) {
-  for (Browser* browser : *BrowserList::GetInstance()) {
-    const TabStripModel* const tab_strip_model = browser->tab_strip_model();
-    if (tab_strip_model && tab_strip_model->SupportsTabGroups() &&
-        tab_strip_model->group_model()->ContainsTabGroup(group_id)) {
-      return browser;
-    }
-  }
-  return nullptr;
+  Browser* result = nullptr;
+  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+      [group_id, &result](BrowserWindowInterface* browser) {
+        const TabStripModel* const tab_strip_model =
+            browser->GetTabStripModel();
+        if (tab_strip_model && tab_strip_model->SupportsTabGroups() &&
+            tab_strip_model->group_model()->ContainsTabGroup(group_id)) {
+          result = browser->GetBrowserForMigrationOnly();
+        }
+        return !result;
+      });
+  return result;
 }
 
 // static
@@ -494,9 +500,9 @@ std::vector<tabs::TabInterface*> SavedTabGroupUtils::GetTabsInGroup(
   const gfx::Range local_tab_group_indices =
       SavedTabGroupUtils::GetTabGroupWithId(group_id)->ListTabs();
   std::vector<tabs::TabInterface*> local_tabs;
-  for (size_t index = local_tab_group_indices.start();
-       index < local_tab_group_indices.end(); index++) {
-    local_tabs.push_back(browser->tab_strip_model()->GetTabAtIndex(index));
+  for (tabs::TabInterface* tab : browser->tab_strip_model()->GetTabsAtIndices(
+           local_tab_group_indices.ToIntVector())) {
+    local_tabs.push_back(tab);
   }
   return local_tabs;
 }
@@ -766,16 +772,81 @@ tabs::TabInterface* SavedTabGroupUtils::GetGroupedTab(LocalTabGroupID group_id,
   TabStripModel* tab_strip_model = browser->tab_strip_model();
   const gfx::Range tab_indices =
       tab_strip_model->group_model()->GetTabGroup(group_id)->ListTabs();
-  for (size_t grouped_tab_index = tab_indices.start();
-       grouped_tab_index < tab_indices.end(); grouped_tab_index++) {
-    tabs::TabInterface* const tab =
-        tab_strip_model->GetTabAtIndex(grouped_tab_index);
+  for (tabs::TabInterface* tab : browser->tab_strip_model()->GetTabsAtIndices(
+           tab_indices.ToIntVector())) {
     if (tab->GetHandle().raw_value() == tab_id) {
       return tab;
     }
   }
 
   return nullptr;
+}
+
+void SavedTabGroupUtils::PerformTabGroupMenuAction(
+    const TabGroupMenuAction& action,
+    Browser* browser,
+    TabGroupSyncService* tab_group_service) {
+  auto type = action.type;
+  if (type == TabGroupMenuAction::Type::OPEN_URL) {
+    SavedTabGroupUtils::OpenUrlInNewUngroupedTab(
+        browser, std::get<GURL>(action.element));
+    return;
+  }
+
+  auto uuid = std::get<base::Uuid>(action.element);
+  switch (type) {
+    case TabGroupMenuAction::Type::OPEN_IN_BROWSER: {
+      base::RecordAction(base::UserMetricsAction(
+          "TabGroups_SavedTabGroups_OpenedFromTabGroupsAppMenu"));
+
+      bool will_open_shared_group = false;
+      if (std::optional<tab_groups::SavedTabGroup> saved_group =
+              tab_group_service->GetGroup(uuid)) {
+        will_open_shared_group = !saved_group->local_group_id().has_value() &&
+                                 saved_group->is_shared_tab_group();
+      }
+
+      tab_group_service->OpenTabGroup(
+          uuid, std::make_unique<TabGroupActionContextDesktop>(
+                    browser, OpeningSource::kOpenedFromRevisitUi));
+
+      if (will_open_shared_group) {
+        saved_tab_groups::metrics::RecordSharedTabGroupRecallType(
+            saved_tab_groups::metrics::SharedTabGroupRecallTypeDesktop::
+                kOpenedFromSubmenu);
+      }
+      break;
+    }
+    case TabGroupMenuAction::Type::OPEN_OR_MOVE_TO_NEW_WINDOW:
+      base::RecordAction(base::UserMetricsAction(
+          "TabGroups_SavedTabGroups_MoveGroupToNewWindow"));
+      SavedTabGroupUtils::OpenOrMoveSavedGroupToNewWindow(browser, uuid);
+      break;
+    case TabGroupMenuAction::Type::PIN_OR_UNPIN_GROUP:
+
+      if (std::optional<tab_groups::SavedTabGroup> group =
+              tab_group_service->GetGroup(uuid)) {
+        if (group->is_pinned()) {
+          base::RecordAction(
+              base::UserMetricsAction("TabGroups_SavedTabGroups_Unpinned"));
+        } else {
+          base::RecordAction(
+              base::UserMetricsAction("TabGroups_SavedTabGroups_Pinned"));
+        }
+      }
+
+      SavedTabGroupUtils::ToggleGroupPinState(browser, uuid);
+      break;
+    case TabGroupMenuAction::Type::DELETE_GROUP:
+      SavedTabGroupUtils::DeleteSavedGroup(browser, uuid);
+      break;
+    case TabGroupMenuAction::Type::LEAVE_GROUP:
+      SavedTabGroupUtils::LeaveSharedGroup(browser, uuid);
+      break;
+    case TabGroupMenuAction::Type::OPEN_URL:
+    case TabGroupMenuAction::Type::DEFAULT:
+      break;
+  }
 }
 
 }  // namespace tab_groups

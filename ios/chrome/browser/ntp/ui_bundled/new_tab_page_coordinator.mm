@@ -17,10 +17,12 @@
 #import "components/feed/core/v2/public/ios/pref_names.h"
 #import "components/feed/feed_feature_list.h"
 #import "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
+#import "components/ntp_tiles/pref_names.h"
 #import "components/omnibox/common/omnibox_features.h"
 #import "components/policy/policy_constants.h"
 #import "components/pref_registry/pref_registry_syncable.h"
 #import "components/prefs/pref_service.h"
+#import "components/safety_check/safety_check_pref_names.h"
 #import "components/search/search.h"
 #import "components/search_engines/template_url_service.h"
 #import "components/signin/public/base/signin_metrics.h"
@@ -31,7 +33,6 @@
 #import "ios/chrome/app/profile/profile_init_stage.h"
 #import "ios/chrome/app/profile/profile_state.h"
 #import "ios/chrome/app/profile/profile_state_observer.h"
-#import "ios/chrome/browser/aim/prototype/coordinator/aim_prototype_availability.h"
 #import "ios/chrome/browser/authentication/account_menu/coordinator/account_menu_coordinator.h"
 #import "ios/chrome/browser/authentication/account_menu/coordinator/account_menu_coordinator_delegate.h"
 #import "ios/chrome/browser/authentication/account_menu/public/account_menu_constants.h"
@@ -40,6 +41,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/bubble/ui_bundled/bubble_view_controller_presenter.h"
+#import "ios/chrome/browser/composebox/coordinator/composebox_availability.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_coordinator.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_delegate.h"
@@ -50,17 +52,12 @@
 #import "ios/chrome/browser/discover_feed/model/discover_feed_service_factory.h"
 #import "ios/chrome/browser/discover_feed/model/discover_feed_visibility_observer.h"
 #import "ios/chrome/browser/discover_feed/model/feed_constants.h"
-#import "ios/chrome/browser/discover_feed/model/feed_model_configuration.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
-#import "ios/chrome/browser/follow/model/follow_browser_agent.h"
-#import "ios/chrome/browser/follow/model/followed_web_site.h"
-#import "ios/chrome/browser/follow/model/followed_web_site_state.h"
 #import "ios/chrome/browser/google/model/google_logo_service_factory.h"
 #import "ios/chrome/browser/home_customization/coordinator/home_customization_coordinator.h"
 #import "ios/chrome/browser/home_customization/coordinator/home_customization_delegate.h"
 #import "ios/chrome/browser/home_customization/utils/home_customization_constants.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
-#import "ios/chrome/browser/ntp/model/new_tab_page_state.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_util.h"
 #import "ios/chrome/browser/ntp/search_engine_logo/mediator/search_engine_logo_mediator.h"
@@ -86,7 +83,6 @@
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_coordinator+Testing.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_delegate.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_feature.h"
-#import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_follow_delegate.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_commands.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_header_view_controller.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_mediator.h"
@@ -134,6 +130,8 @@
 #import "ios/chrome/browser/signin/model/system_identity_manager.h"
 #import "ios/chrome/browser/supervised_user/model/family_link_user_capabilities_observer_bridge.h"
 #import "ios/chrome/browser/sync/model/sync_service_factory.h"
+#import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/coordinator/tab_grid_observing.h"
+#import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/coordinator/tab_grid_scene_agent.h"
 #import "ios/chrome/browser/toolbar/ui_bundled/public/fakebox_focuser.h"
 #import "ios/chrome/browser/toolbar/ui_bundled/tab_groups/coordinator/tab_group_indicator_coordinator.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_browser_agent.h"
@@ -164,12 +162,12 @@
                                      IdentityManagerObserverBridgeDelegate,
                                      NewTabPageContentDelegate,
                                      NewTabPageDelegate,
-                                     NewTabPageFollowDelegate,
                                      NewTabPageHeaderCommands,
                                      NewTabPageActionsDelegate,
                                      OverscrollActionsControllerDelegate,
                                      ProfileStateObserver,
                                      SceneStateObserver,
+                                     TabGridObserving,
                                      FamilyLinkUserCapabilitiesObserving,
                                      NewTabPageShortcutsHandler> {
   // Observes changes in the IdentityManager.
@@ -226,8 +224,7 @@
 // PrefService used by this Coordinator.
 @property(nonatomic, assign) PrefService* prefService;
 
-// The view controller representing the selected feed, such as the Discover or
-// Following feed.
+// The view controller representing the feed.
 @property(nonatomic, weak) UIViewController* feedViewController;
 
 // The Coordinator to display previews for Discover feed websites. It also
@@ -256,9 +253,6 @@
 // Coordinator for Feed top section.
 @property(nonatomic, strong)
     FeedTopSectionCoordinator* feedTopSectionCoordinator;
-
-// Currently selected feed. Redefined to readwrite.
-@property(nonatomic, assign, readwrite) FeedType selectedFeed;
 
 // The Webstate associated with this coordinator.
 @property(nonatomic, assign) web::WebState* webState;
@@ -336,6 +330,10 @@
   SceneState* sceneState = self.browser->GetSceneState();
   [sceneState addObserver:self];
 
+  if (IsNTPBackgroundCustomizationEnabled()) {
+    [[TabGridSceneAgent agentFromScene:sceneState] addObserver:self];
+  }
+
   // Configures incognito NTP if user is in incognito mode.
   if (self.isOffTheRecord) {
     DCHECK(!self.incognitoViewController);
@@ -349,10 +347,6 @@
 
   // NOTE: anything that executes below WILL NOT execute for OffTheRecord
   // browsers!
-
-  self.selectedFeed = NewTabPageTabHelper::FromWebState(self.webState)
-                          ->GetNTPState()
-                          .selectedFeed;
 
   [self initializeServices];
   [self initializeNTPComponents];
@@ -380,7 +374,7 @@
   }
   [self configureHeaderViewController];
   [self configureContentSuggestionsCoordinator];
-  [self configureFeedMetricsRecorder];
+  self.feedMetricsRecorder.NTPActionsDelegate = self;
   [self configureNTPViewController];
   [self configureTabGroupIndicator];
 
@@ -402,6 +396,10 @@
 
   SceneState* sceneState = self.browser->GetSceneState();
   [sceneState removeObserver:self];
+
+  if (IsNTPBackgroundCustomizationEnabled()) {
+    [[TabGridSceneAgent agentFromScene:sceneState] removeObserver:self];
+  }
 
   if (self.isOffTheRecord) {
     self.incognitoViewController = nil;
@@ -455,7 +453,6 @@
   }
   self.feedWrapperViewController = nil;
   self.feedViewController = nil;
-  self.feedMetricsRecorder.followDelegate = nil;
   self.feedMetricsRecorder.NTPActionsDelegate = nil;
   self.feedMetricsRecorder = nil;
 
@@ -504,8 +501,7 @@
 
 - (void)focusFakebox {
   [self dismissCustomizationMenu];
-  if (MaybeShowAIMPrototype(self.browser,
-                            AIMPrototypeEntrypoint::kNTPFakebox)) {
+  if (MaybeShowComposebox(self.browser, ComposeboxEntrypoint::kNTPFakebox)) {
     return;
   }
   _fakeboxTapped = NO;
@@ -546,26 +542,18 @@
           underName:kFeedIPHNamedGuide];
 }
 
-- (void)updateFollowingFeedHasUnseenContent:(BOOL)hasUnseenContent {
-  // No-op.
-}
-
-- (void)handleFeedModelOfType:(FeedType)feedType
-                didEndUpdates:(FeedLayoutUpdateType)updateType {
+- (void)handleFeedModelDidEndUpdates:(FeedLayoutUpdateType)updateType {
   DCHECK(self.NTPViewController);
   if (!self.feedViewController) {
     return;
   }
-  // When the visible feed has been updated, recalculate the minimum NTP height.
-  if (feedType == self.selectedFeed) {
-    [self.NTPViewController feedLayoutDidEndUpdatesWithType:updateType];
-  }
+  [self.NTPViewController feedLayoutDidEndUpdatesWithType:updateType];
 }
 
 - (void)didNavigateToNTPInWebState:(web::WebState*)webState {
   CHECK(self.started);
   self.webState = webState;
-  [self restoreNTPState];
+  [self restoreNTPScrollPosition];
   [self updateNTPIsVisible:YES];
   [self updateStartForVisibilityChange:YES];
   [self.toolbarDelegate didNavigateToNTPOnActiveWebState];
@@ -574,7 +562,7 @@
 - (void)didNavigateAwayFromNTP {
   [self cancelOmniboxEdit];
   [self dismissCustomizationMenu];
-  [self saveNTPState];
+  [self.NTPMediator saveNTPScrollPositionForWebState:self.webState];
   [self updateNTPIsVisible:NO];
   [self updateStartForVisibilityChange:NO];
   self.webState = nullptr;
@@ -613,20 +601,6 @@
   [self stopAccountMenuCoordinator];
   [self stopSigninCoordinator];
   [self dismissCustomizationMenu];
-}
-
-#pragma mark - Setters
-
-- (void)setSelectedFeed:(FeedType)selectedFeed {
-  if (_selectedFeed == selectedFeed) {
-    return;
-  }
-  // Updates the NTP state with the newly selected feed.
-  [self saveNTPState];
-
-  // Tell Metrics Recorder the feed has changed.
-  [self.feedMetricsRecorder recordFeedTypeChangedFromFeed:_selectedFeed];
-  _selectedFeed = selectedFeed;
 }
 
 #pragma mark - Initializers
@@ -721,26 +695,14 @@
   self.feedHeaderViewController.feedControlDelegate = self;
   self.feedHeaderViewController.NTPDelegate = self;
   self.feedHeaderViewController.feedMetricsRecorder = self.feedMetricsRecorder;
-  if (!IsFollowUIUpdateEnabled()) {
-    self.feedHeaderViewController.followingFeedSortType =
-        self.followingFeedSortType;
-  }
   self.NTPViewController.feedHeaderViewController =
       self.feedHeaderViewController;
 
   // Requests feeds here if the correct flags and prefs are enabled.
   if ([self.NTPMediator isFeedHeaderVisible]) {
-    if ([self isFollowingFeedAvailable] &&
-        self.selectedFeed == FeedTypeFollowing) {
-      self.feedViewController = [self.componentFactory
-              followingFeedForBrowser:self.browser
-          viewControllerConfiguration:[self feedViewControllerConfiguration]
-                             sortType:self.followingFeedSortType];
-    } else {
-      self.feedViewController = [self.componentFactory
-               discoverFeedForBrowser:self.browser
-          viewControllerConfiguration:[self feedViewControllerConfiguration]];
-    }
+    self.feedViewController = [self.componentFactory
+             discoverFeedForBrowser:self.browser
+        viewControllerConfiguration:[self feedViewControllerConfiguration]];
   }
 
   // Feed top section visibility is based on feed visibility, so this should
@@ -806,15 +768,6 @@
     NTPMediator.placeholderService = placeholderService;
   }
   [NTPMediator setUp];
-}
-
-// Configures `self.feedMetricsRecorder`.
-- (void)configureFeedMetricsRecorder {
-  CHECK(self.webState);
-  self.feedMetricsRecorder.NTPState =
-      NewTabPageTabHelper::FromWebState(self.webState)->GetNTPState();
-  self.feedMetricsRecorder.followDelegate = self;
-  self.feedMetricsRecorder.NTPActionsDelegate = self;
 }
 
 // Configures `self.NTPViewController` and sets it up as the main ViewController
@@ -896,17 +849,6 @@
   }
 }
 
-#pragma mark - NewTabPageConfiguring
-
-- (void)selectFeedType:(FeedType)feedType {
-  if (!self.NTPViewController.viewDidAppear ||
-      ![self isFollowingFeedAvailable]) {
-    self.selectedFeed = feedType;
-    return;
-  }
-  [self handleFeedSelected:feedType];
-}
-
 #pragma mark - NewTabPageHeaderCommands
 
 - (void)updateForHeaderSizeChange {
@@ -916,8 +858,7 @@
 - (void)fakeboxTapped {
   [self dismissCustomizationMenu];
   _fakeboxTapped = YES;
-  if (MaybeShowAIMPrototype(self.browser,
-                            AIMPrototypeEntrypoint::kNTPFakebox)) {
+  if (MaybeShowComposebox(self.browser, ComposeboxEntrypoint::kNTPFakebox)) {
     return;
   }
   [self.NTPViewController focusOmnibox];
@@ -1026,8 +967,6 @@
   if (!self.NTPViewController.viewLoaded) {
     return;
   }
-  [self handleChangeInModules];
-  [self.NTPViewController setContentOffsetToTop];
   [self updateModuleVisibility];
 }
 
@@ -1056,64 +995,6 @@
 }
 
 #pragma mark - FeedControlDelegate
-
-- (FollowingFeedSortType)followingFeedSortType {
-  // TODO(crbug.com/40858105): Add a DCHECK to make sure the coordinator isn't
-  // stopped when we check this. That would require us to use the NTPHelper to
-  // get this information.
-  return (FollowingFeedSortType)self.prefService->GetInteger(
-      prefs::kNTPFollowingFeedSortType);
-}
-
-- (void)handleFeedSelected:(FeedType)feedType {
-  DCHECK([self isFollowingFeedAvailable]);
-
-  if (self.selectedFeed == feedType) {
-    return;
-  }
-  self.selectedFeed = feedType;
-
-  // Saves scroll position before changing feed.
-  CGFloat scrollPosition = [self.NTPViewController scrollPosition];
-
-  [self handleChangeInModules];
-
-  // Scroll position resets when changing the feed, so we set it back to what it
-  // was.
-  [self.NTPViewController setContentOffsetToTopOfFeedOrLess:scrollPosition];
-}
-
-- (void)handleSortTypeForFollowingFeed:(FollowingFeedSortType)sortType {
-  DCHECK([self isFollowingFeedAvailable]);
-
-  if (self.feedHeaderViewController.followingFeedSortType == sortType) {
-    return;
-  }
-
-  // Save the scroll position before changing sort type.
-  CGFloat scrollPosition = [self.NTPViewController scrollPosition];
-
-  [self.feedMetricsRecorder recordFollowingFeedSortTypeSelected:sortType];
-  self.prefService->SetInteger(prefs::kNTPFollowingFeedSortType, sortType);
-  self.prefService->SetBoolean(prefs::kDefaultFollowingFeedSortTypeChanged,
-                               true);
-  self.discoverFeedService->SetFollowingFeedSortType(sortType);
-  self.feedHeaderViewController.followingFeedSortType = sortType;
-
-  [self handleChangeInModules];
-
-  // Scroll position resets when changing the feed, so we set it back to what it
-  // was.
-  [self.NTPViewController setContentOffsetToTopOfFeedOrLess:scrollPosition];
-
-  // Updates the NTP state for the newly selected sort type.
-  [self saveNTPState];
-}
-
-- (BOOL)isFollowingFeedAvailable {
-  return IsWebChannelsEnabled() && _identityManager &&
-         _identityManager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
-}
 
 - (NSUInteger)lastVisibleFeedCardIndex {
   return [self.feedWrapperViewController lastVisibleFeedCardIndex];
@@ -1287,25 +1168,10 @@
       FeedRefreshTrigger::kForegroundFeedVisibleOther);
 }
 
-- (void)updateForSelectedFeed:(FeedType)selectedFeed {
-  [self selectFeedType:selectedFeed];
-  if (!IsFollowUIUpdateEnabled()) {
-    // Reassign the sort type in case it changed in another tab.
-    self.feedHeaderViewController.followingFeedSortType =
-        self.followingFeedSortType;
-  }
-  // Update the header so that it's synced with the currently selected
-  // feed, which could have been changed when a new web state was
-  // inserted.
-  [self.feedHeaderViewController updateForSelectedFeed];
-  self.feedMetricsRecorder.followDelegate = self;
-}
-
 - (void)updateModuleVisibility {
   [_customizationCoordinator updateMenuData];
   [self handleChangeInModules];
   [self setContentOffsetToTop];
-  [self.feedHeaderViewController updateForFeedVisibilityChanged];
   UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification,
                                   nil);
 }
@@ -1356,35 +1222,6 @@
 
 - (BOOL)isSignInAllowed {
   return self.authService->SigninEnabled();
-}
-
-#pragma mark - NewTabPageFollowDelegate
-
-- (NSUInteger)followedPublisherCount {
-  return self.followedWebSites.count;
-}
-
-- (BOOL)doesFollowingFeedHaveContent {
-  for (FollowedWebSite* web_site in self.followedWebSites) {
-    if (web_site.state == FollowedWebSiteStateStateActive) {
-      return YES;
-    }
-  }
-
-  return NO;
-}
-
-- (NSArray<FollowedWebSite*>*)followedWebSites {
-  FollowBrowserAgent* followBrowserAgent =
-      FollowBrowserAgent::FromBrowser(self.browser);
-
-  // Return an empty list if the BrowserAgent is null (which can happen
-  // if e.g. the Browser is off-the-record).
-  if (!followBrowserAgent) {
-    return @[];
-  }
-
-  return followBrowserAgent->GetFollowedWebSites();
 }
 
 #pragma mark - NewTabPageActionsDelegate
@@ -1541,11 +1378,6 @@
 - (void)discoverFeedModelWasCreated {
   if (self.NTPViewController.viewDidAppear) {
     [self handleChangeInModules];
-
-    if (IsWebChannelsEnabled()) {
-      [self.feedHeaderViewController updateForFollowingFeedVisibilityChanged];
-      [self updateFeedLayout];
-    }
     [self.NTPViewController setContentOffsetToTop];
   }
 }
@@ -1796,11 +1628,11 @@
 
       PrefService* prefService = self.prefService;
       BOOL safetyCheckEnabled = prefService->GetBoolean(
-          prefs::kHomeCustomizationMagicStackSafetyCheckEnabled);
+          safety_check::prefs::kSafetyCheckHomeModuleEnabled);
       BOOL tabResumptionEnabled = prefService->GetBoolean(
-          prefs::kHomeCustomizationMagicStackTabResumptionEnabled);
-      BOOL tipsEnabled = prefService->GetBoolean(
-          prefs::kHomeCustomizationMagicStackTipsEnabled);
+          ntp_tiles::prefs::kTabResumptionHomeModuleEnabled);
+      BOOL tipsEnabled =
+          prefService->GetBoolean(ntp_tiles::prefs::kTipsHomeModuleEnabled);
       [self.NTPMetricsRecorder
           recordMagicStackCustomizationStateWithSafetyCheck:safetyCheckEnabled
                                               tabResumption:tabResumptionEnabled
@@ -1854,15 +1686,10 @@
   [handler showSnackbarMessage:message];
 }
 
-// Saves the state of the NTP associated with `self.webState`.
-- (void)saveNTPState {
-  [self.NTPMediator saveNTPStateForWebState:self.webState];
-}
-
-// Restores the saved state of the NTP associated with `self.webState` if
-// necessary.
-- (void)restoreNTPState {
-  [self.NTPMediator restoreNTPStateForWebState:self.webState];
+// Restores the saved scroll position of the NTP associated with `self.webState`
+// if necessary.
+- (void)restoreNTPScrollPosition {
+  [self.NTPMediator restoreNTPScrollPositionForWebState:self.webState];
 }
 
 // Opens the Home customization menu at a specific `page`.
@@ -1883,9 +1710,9 @@
 - (IOSNTPImpressionCustomizationState)currentCustomizationState {
   PrefService* prefService = self.prefService;
   BOOL MVTEnabled =
-      prefService->GetBoolean(prefs::kHomeCustomizationMostVisitedEnabled);
+      prefService->GetBoolean(ntp_tiles::prefs::kMostVisitedHomeModuleEnabled);
   BOOL magicStackEnabled =
-      prefService->GetBoolean(prefs::kHomeCustomizationMagicStackEnabled);
+      prefService->GetBoolean(ntp_tiles::prefs::kMagicStackHomeModuleEnabled);
   BOOL feedEnabled = [self.NTPMediator isFeedHeaderVisible];
 
   // All components enabled/disabled.
@@ -1978,8 +1805,7 @@
 }
 
 - (void)openMIA {
-  if (MaybeShowAIMPrototype(self.browser,
-                            AIMPrototypeEntrypoint::kNTPAIMButton)) {
+  if (MaybeShowComposebox(self.browser, ComposeboxEntrypoint::kNTPAIMButton)) {
     return;
   }
   [self.NTPMetricsRecorder recordMIATapped];
@@ -2024,6 +1850,16 @@
   id<ApplicationCommands> applicationHandler = HandlerForProtocol(
       self.browser->GetCommandDispatcher(), ApplicationCommands);
   [applicationHandler openURLInNewTab:command];
+}
+
+#pragma mark - TabGridObserving
+
+- (void)willEnterTabGrid {
+  [self clearPresentedState];
+}
+
+- (void)willExitTabGrid {
+  // Do nothing.
 }
 
 @end

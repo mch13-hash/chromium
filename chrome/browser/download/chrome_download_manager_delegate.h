@@ -40,8 +40,12 @@
 #include "chrome/browser/download/android/download_message_bridge.h"
 #endif
 
+#if BUILDFLAG(ENTERPRISE_CONTENT_ANALYSIS)
+#include "base/types/expected.h"
+#endif
+
 #if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
-#include "chrome/browser/safe_browsing/download_protection/download_protection_util.h"
+#include "chrome/browser/download/download_completion_blocker.h"
 #endif
 
 class DownloadPrefs;
@@ -51,7 +55,7 @@ namespace content {
 class DownloadManager;
 }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 namespace extensions {
 class CrxInstaller;
 class CrxInstallError;
@@ -67,6 +71,7 @@ enum class Error;
 #if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 namespace safe_browsing {
 class DownloadProtectionService;
+enum class DownloadCheckResult;
 }
 #endif
 
@@ -306,7 +311,7 @@ class ChromeDownloadManagerDelegate
       const base::FilePath& suggested_path,
       DownloadTargetDeterminerDelegate::ConfirmationCallback callback);
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   // Called when CrxInstaller in running_crx_installs_ finishes installation.
   void OnInstallerDone(const base::UnguessableToken& token,
                        content::DownloadOpenDelayedCallback callback,
@@ -414,7 +419,7 @@ class ChromeDownloadManagerDelegate
   IdCallbackVector id_callbacks_;
   std::unique_ptr<DownloadPrefs> download_prefs_;
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   // CRX installs that are currently in progress.
   std::map<base::UnguessableToken, scoped_refptr<extensions::CrxInstaller>>
       running_crx_installs_;

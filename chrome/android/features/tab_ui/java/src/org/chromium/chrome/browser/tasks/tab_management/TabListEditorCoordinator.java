@@ -39,7 +39,6 @@ import org.chromium.chrome.browser.tasks.tab_management.TabProperties.UiType;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiMetricsHelper.TabListEditorExitMetricGroups;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeController;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeControllerFactory;
-import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.undo_tab_close_snackbar.UndoBarExplicitTrigger;
 import org.chromium.chrome.tab_ui.R;
@@ -66,13 +65,14 @@ import java.util.Set;
  * TabListCoordinator} as well as the life-cycle of shared component.
  */
 @NullMarked
-class TabListEditorCoordinator {
-    @IntDef({CreationMode.FULL_SCREEN, CreationMode.DIALOG})
+public class TabListEditorCoordinator {
+    @IntDef({CreationMode.FULL_SCREEN, CreationMode.DIALOG, CreationMode.ITEM_PICKER})
     @Target(ElementType.TYPE_USE)
     @Retention(RetentionPolicy.SOURCE)
     public @interface CreationMode {
         int FULL_SCREEN = 0;
         int DIALOG = 1;
+        int ITEM_PICKER = 2;
     }
 
     static final String COMPONENT_NAME = "TabListEditor";
@@ -423,7 +423,7 @@ class TabListEditorCoordinator {
     /**
      * @return {@link TabListEditorController} that can control the TabListEditor.
      */
-    TabListEditorController getController() {
+    public TabListEditorController getController() {
         return mTabListEditorController;
     }
 
@@ -625,9 +625,7 @@ class TabListEditorCoordinator {
                 PropertyModelChangeProcessor.create(
                         mModel, mTabListEditorLayout, TabListEditorLayoutBinder::bind);
 
-        if (EdgeToEdgeUtils.isDrawKeyNativePageToEdgeEnabled()
-                && mEdgeToEdgeSupplier != null
-                && mDisplayGroups) {
+        if (mEdgeToEdgeSupplier != null && mDisplayGroups) {
             assert mTabListMode != TabListMode.STRIP
                     : "STRIP tab lists should not be padded for edge-to-edge.";
             mEdgeToEdgePadAdjuster =

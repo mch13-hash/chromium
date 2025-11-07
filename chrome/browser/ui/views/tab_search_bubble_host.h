@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_VIEWS_TAB_SEARCH_BUBBLE_HOST_H_
 
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "chrome/browser/ui/tabs/organization/tab_organization_observer.h"
@@ -96,8 +95,6 @@ class TabSearchBubbleHost : public views::WidgetObserver,
   std::optional<base::TimeTicks> bubble_created_time_;
 
   base::ObserverList<TabSearchBubbleHostObserver> observers_;
-
-  raw_ptr<views::MenuButtonController> menu_button_controller_ = nullptr;
 
   // A lock to keep its `button_` pressed while |bubble_| is showing or in the
   // process of being shown.

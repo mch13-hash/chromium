@@ -31,6 +31,9 @@ ci.defaults.set(
     tree_closing_notifiers = ci_constants.DEFAULT_TREE_CLOSING_NOTIFIERS,
     main_console_view = "main",
     execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
+    experiments = {
+        "chromium_tests.resultdb_module": 100,
+    },
     health_spec = health_spec.default(),
     notifies = ["chromium.linux"],
     service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
@@ -593,7 +596,7 @@ ci.thin_tester(
                 # crbug.com/1508286
                 # crbug.com/404871436
                 swarming = targets.swarming(
-                    shards = 48,
+                    shards = 60,
                 ),
             ),
             "content_browsertests": targets.mixin(
@@ -601,6 +604,11 @@ ci.thin_tester(
                 # crbug.com/404871436
                 swarming = targets.swarming(
                     shards = 12,
+                ),
+            ),
+            "content_unittests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 4,
                 ),
             ),
             "interactive_ui_tests": targets.mixin(
@@ -642,6 +650,9 @@ ci.thin_tester(
                 args = [
                     "--debug",
                 ],
+                swarming = targets.swarming(
+                    shards = 4,
+                ),
             ),
         },
     ),

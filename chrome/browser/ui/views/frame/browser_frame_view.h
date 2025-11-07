@@ -11,6 +11,7 @@
 #include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/frame/browser_widget.h"
+#include "chrome/browser/ui/views/frame/layout/browser_view_layout_params.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/gfx/geometry/outsets_f.h"
 #include "ui/gfx/geometry/rect.h"
@@ -36,83 +37,6 @@ enum class BrowserFrameActiveState {
   // Force the frame to be treated as inactive, regardless of the current sate.
   // Note: Only used on ChromeOS.
   kInactive,
-};
-
-// Represents an area in the upper left or right of the browser window that
-// browser UI should be careful when rendering in. This might include caption
-// buttons, control box, or app icon.
-//
-// This is an example of the leading exclusion area in LTR:
-//
-// ┏━━━━━━━━━━━━━━━━┯━━━━━━━━━━━━┯━━━━━
-// ┃ content        │ horizontal │
-// ┠────────────────┘     ↔      │
-// ┃    vertical ↕     padding   ┊
-// ┠─────────────────┄┄┄┄┄┄┄┄┄┄┄┄┘
-// ┃
-//
-struct BrowserLayoutExclusionArea {
-  // This is the area which has visual elements managed by the frame. No drawing
-  // should occur here.
-  gfx::SizeF content;
-
-  // Any additional area next to the content that should remain empty for visual
-  // balance. It's okay for edges and borders to be drawn in this space.
-  float horizontal_padding = 0.f;
-
-  // Any additional area below the content that should remain empty for visual
-  // balance. It's okay for edges and borders to be drawn in this space.
-  float vertical_padding = 0.f;
-
-  // Returns the content area plus the padding, if any.
-  gfx::SizeF ContentWithPadding() const {
-    return gfx::SizeF(content.width() + horizontal_padding,
-                      content.height() + vertical_padding);
-  }
-
-  // Returns true if there is no exclusion area.
-  bool IsEmpty() const { return ContentWithPadding().IsEmpty(); }
-};
-
-// Represents the parameters that the browser's layout requires in order to lay
-// out the window contents.
-//
-// This is how the exclusion areas look in LTR:
-// ┏━━━━━━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━┯━━━━━━━━━━━━━━━━━━━━┓
-// ┃ leading_exclusion │              │ trailing_exclusion ┃
-// ┠───────────────────┘              └────────────────────┨
-// ┃                                                       ┃
-//
-// Note that in RTL UI, coordinates are reversed, so the leading exclusion is
-// still at the lower X coordinate and the trailing exclusion at the higher.
-//
-// Also note that one or both exclusions may be empty, in which case there is
-// no exclusion.
-//
-struct BrowserLayoutParams {
-  // A rectangle in which it is generally safe to lay out browser view elements.
-  // This is in window coordinates and may not align with the actual content
-  // view. It is okay for the content view to paint outside this rectangle, but
-  // that may overlap OS or frame elements.
-  gfx::Rect visual_client_area;
-  // The area in the leading (lowest X values; i.e. top-left in LTR and top-
-  // right in RTL) corner occupied by frame-owned controls, from the edge of the
-  // visual client area.
-  //
-  // It is sometimes okay for the content to draw through the edge of this area,
-  // e.g. to draw the leading curve of the first tab. Use the difference between
-  // `content` and `content_with_padding` to determine the area it is safe to
-  // draw in.
-  BrowserLayoutExclusionArea leading_exclusion;
-  // The area in the trailing (highest X values; i.e. top-right in LTR and top-
-  // left in RTL) corner occupied by frame-owned controls, from the edge of the
-  // visual client area.
-  //
-  // It is sometimes okay for the content to draw through the edge of this area,
-  // e.g. to draw the leading curve of the first tab. Use the difference between
-  // `content` and `content_with_padding` to determine the area it is safe to
-  // draw in.
-  BrowserLayoutExclusionArea trailing_exclusion;
 };
 
 // BrowserFrameView is an abstract base class that defines the
@@ -148,9 +72,20 @@ class BrowserFrameView : public views::FrameView {
   // Called when the browser window's fullscreen state changes.
   virtual void OnFullscreenStateChanged();
 
-  // Returns whether the caption buttons are drawn at the leading edge (e.g. on
-  // the left for LTR languages, such as on macOS).
+  // Returns whether there are caption buttons at the leading edge of the
+  // browser frame (i.e. on the left for LtR languages, such as on macOS).
+  //
+  // Since it is possible to have caption buttons on both the leading and
+  // trailing edge on some platforms (e.g. Linux), if you want to know if there
+  // are buttons on the trailing edge, call `CaptionButtonsOnTrailingEdge()`
+  // instead.
   virtual bool CaptionButtonsOnLeadingEdge() const;
+
+  // Returns whether there are caption buttons drawn at the trailing edge of the
+  // window (i.e. on the right for LtR languages). Defaults to being the
+  // opposite of `CaptionButtonsOnLeadingEdge()` but on some platforms there may
+  // be buttons at both ends.
+  virtual bool CaptionButtonsOnTrailingEdge() const;
 
   // Default implementation for getting browser layout parameters.
   virtual BrowserLayoutParams GetBrowserLayoutParams() const;
@@ -193,10 +128,6 @@ class BrowserFrameView : public views::FrameView {
   // `GetBoundsForWebAppFrameToolbar()`.
   virtual bool ShouldShowWebAppFrameToolbar() const;
 
-  // Returns whether the user is allowed to exit fullscreen on their own (some
-  // special modes lock the user in fullscreen).
-  virtual bool CanUserExitFullscreen() const;
-
   // Determines whether the top of the frame is "condensed" (i.e., has less
   // vertical space). This is typically true when the window is maximized or
   // fullscreen. If true, the top frame is just the height of a tab,
@@ -209,15 +140,6 @@ class BrowserFrameView : public views::FrameView {
   // color.
   bool HasVisibleBackgroundTabShapes(
       BrowserFrameActiveState active_state) const;
-
-  // Returns true if background tabs are ever visibly distinct from the frame,
-  // in either the active or inactive state.
-  bool EverHasVisibleBackgroundTabShapes() const;
-
-  // Returns true if strokes (outlines/separators) should be drawn around tabs.
-  // This is generally true, but false for some web apps that don't have a tab
-  // strip.
-  bool CanDrawStrokes() const;
 
   // Returns the color that should be used for text and icons in the title bar
   // (e.g., the window title and caption button icons).
@@ -267,9 +189,6 @@ class BrowserFrameView : public views::FrameView {
   // Returns the height of the translucent area at the top of the frame. Returns
   // 0 if the frame is opaque (not transparent) or in fullscreen.
   virtual int GetTranslucentTopAreaHeight() const;
-
-  // Used by TabContainerOverlayView to paint tab strip background.
-  virtual void PaintThemedFrame(gfx::Canvas* canvas) {}
 
   // Sets the bounds of `frame_`.
   virtual void SetFrameBounds(const gfx::Rect& bounds);
@@ -360,9 +279,5 @@ std::unique_ptr<BrowserFrameView> CreateBrowserFrameView(
     BrowserView* browser_view);
 
 }  // namespace chrome
-
-// For debugging and testing.
-std::ostream& operator<<(std::ostream&, const BrowserLayoutExclusionArea&);
-std::ostream& operator<<(std::ostream&, const BrowserLayoutParams&);
 
 #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_VIEW_H_

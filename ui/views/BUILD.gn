@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
-import("//build/config/features.gni")
 import("//build/config/ozone.gni")
 import("//build/config/ui.gni")
 import("//build/nocompile.gni")
@@ -43,6 +42,8 @@ aggregate_vector_icons("views_vector_icons") {
     "linux_high_density.icon",
     "linux_low_density.icon",
     "menu_check.icon",
+    "menu_close.icon",
+    "menu_open.icon",
     "menu_radio_empty.icon",
     "menu_radio_selected.icon",
     "new_incognito_window.icon",

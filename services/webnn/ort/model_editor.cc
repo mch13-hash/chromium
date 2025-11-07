@@ -10,7 +10,6 @@
 #include "services/webnn/ort/external_weights_manager.h"
 #include "services/webnn/ort/ort_data_type.h"
 #include "services/webnn/ort/ort_status.h"
-#include "services/webnn/ort/ort_tensor.h"
 #include "third_party/abseil-cpp/absl/functional/overload.h"
 
 namespace webnn::ort {
@@ -34,6 +33,13 @@ constexpr char kMSInternalNhwcDomain[] = "com.ms.internal.nhwc";
 // TODO(crbug.com/442483649): Remove this domain once the ORT issue is fixed.
 // https://github.com/microsoft/onnxruntime/issues/25914
 constexpr char kMSNchwcDomain[] = "com.microsoft.nchwc";
+// Domain "com.microsoft.dml" is required by DirectML EP for certain fused
+// operators when the optimization level is set to "ENABLE_ALL", such as
+// DmlFusedConv. See more details at
+// https://github.com/microsoft/onnxruntime/blob/main/docs/OperatorKernels.md#dmlexecutionprovider
+// TODO(crbug.com/442483649): Remove this domain once the ORT issue is fixed.
+// https://github.com/microsoft/onnxruntime/issues/25914
+constexpr char kMSDmlDomain[] = "com.microsoft.dml";
 
 // Opset versions
 constexpr int32_t kOrtOpsetVersion = 21;
@@ -47,6 +53,9 @@ constexpr int32_t kMSInternalNhwcDomainOpsetVersion = kOrtOpsetVersion;
 // The op set version for domain "com.microsoft.nchwc".
 // https://github.com/microsoft/onnxruntime/blob/main/docs/OperatorKernels.md#operators-implemented-by-cpuexecutionprovider
 constexpr int32_t kMSNchwcDomainOpsetVersion = 1;
+// The op set version for domain "com.microsoft.dml".
+// https://github.com/microsoft/onnxruntime/blob/main/docs/OperatorKernels.md#dmlexecutionprovider
+constexpr int32_t kMSDmlDomainOpsetVersion = 1;
 
 // The minimum size (in bytes) to add the initializer as external data. An
 // initializer less than 128 bytes might be used for shape inferencing which
@@ -183,8 +192,9 @@ void ModelEditor::AddInitializerAsRawData(base::cstring_view name,
 
   // SAFETY: `mutable_data` was created to hold a tensor of `shape` and
   // `data_type`.
-  UNSAFE_BUFFERS(base::span(static_cast<uint8_t*>(mutable_data),
-                            CalculateOrtTensorSizeInBytes(shape, data_type)))
+  size_t tensor_size = 0;
+  CHECK_STATUS(ort_api->GetTensorSizeInBytes(initializer.get(), &tensor_size));
+  UNSAFE_BUFFERS(base::span(static_cast<uint8_t*>(mutable_data), tensor_size))
       .copy_from(data);
 
   const OrtModelEditorApi* ort_model_editor_api = GetOrtModelEditorApi();
@@ -199,7 +209,6 @@ void ModelEditor::AddInitializerAsExternalData(
     ONNXTensorElementDataType data_type,
     base::span<const int64_t> shape,
     base::HeapArray<uint8_t> data) {
-  CHECK_EQ(data.size(), CalculateOrtTensorSizeInBytes(shape, data_type));
   ScopedOrtValue initializer =
       model_info_->external_weights_manager->CreateInitializer(
           std::move(data), shape, data_type);
@@ -299,11 +308,13 @@ std::unique_ptr<ModelEditor::ModelInfo> ModelEditor::BuildAndTakeModelInfo() {
   CHECK_STATUS(ort_model_editor_api->SetGraphOutputs(
       graph_.get(), graph_outputs.data(), graph_outputs.size()));
 
-  std::array<const char*, 4> domains = {kOrtDefaultDomain, kMSDomain,
-                                        kMSInternalNhwcDomain, kMSNchwcDomain};
-  std::array<int32_t, 4> opset_versions = {
+  std::array<const char*, 5> domains = {kOrtDefaultDomain, kMSDomain,
+                                        kMSInternalNhwcDomain, kMSNchwcDomain,
+                                        kMSDmlDomain};
+  std::array<int32_t, 5> opset_versions = {
       kOrtOpsetVersion, kEPContextOpsetVersion,
-      kMSInternalNhwcDomainOpsetVersion, kMSNchwcDomainOpsetVersion};
+      kMSInternalNhwcDomainOpsetVersion, kMSNchwcDomainOpsetVersion,
+      kMSDmlDomainOpsetVersion};
   CHECK_STATUS(ort_model_editor_api->CreateModel(
       domains.data(), opset_versions.data(), domains.size(),
       ScopedOrtModel::Receiver(model_info_->model).get()));

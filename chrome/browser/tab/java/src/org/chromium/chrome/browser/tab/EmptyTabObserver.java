@@ -84,12 +84,6 @@ public class EmptyTabObserver implements TabObserver {
     public void onCrash(Tab tab) {}
 
     @Override
-    public void webContentsWillSwap(Tab tab) {}
-
-    @Override
-    public void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad) {}
-
-    @Override
     public void onContextMenuShown(Tab tab) {}
 
     @Override
@@ -105,7 +99,7 @@ public class EmptyTabObserver implements TabObserver {
     public void onLoadProgressChanged(Tab tab, float progress) {}
 
     @Override
-    public void onUpdateUrl(Tab tab, GURL url) {}
+    public void onUpdateTargetUrl(Tab tab, GURL url) {}
 
     @Override
     public void onDidStartNavigationInPrimaryMainFrame(

@@ -6,6 +6,7 @@
 
 #import <Foundation/Foundation.h>
 
+#import "base/debug/dump_without_crashing.h"
 #import "base/files/file_path.h"
 #import "base/functional/bind.h"
 #import "base/i18n/message_formatter.h"
@@ -14,6 +15,7 @@
 #import "base/strings/string_util.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
+#import "components/crash/core/common/crash_key.h"
 #import "components/image_fetcher/core/image_fetcher.h"
 #import "components/image_fetcher/core/image_fetcher_service.h"
 #import "components/image_fetcher/core/request_metadata.h"
@@ -28,13 +30,14 @@
 #import "ios/chrome/browser/home_customization/model/user_uploaded_image_manager.h"
 #import "ios/chrome/browser/home_customization/ui/background_collection_configuration.h"
 #import "ios/chrome/browser/home_customization/ui/background_customization_configuration.h"
+#import "ios/chrome/browser/home_customization/ui/home_customization_accessibility_identifiers.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_configuration_consumer.h"
-#import "ios/chrome/browser/home_customization/ui/home_customization_background_picker_action_sheet_consumer.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_picker_presentation_delegate.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_framing_coordinates.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_color_palette.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_color_palette_util.h"
 #import "ios/chrome/browser/ntp/ui_bundled/theme_utils.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/grit/ios_strings.h"
@@ -179,6 +182,16 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
     if (!config) {
       continue;
     }
+
+    if ([collectionConfiguration.configurationOrder
+            containsObject:config.configurationID]) {
+      static crash_reporter::CrashKeyString<64> id_key(
+          "duplicate-recent-configuration-id");
+      id_key.Set(base::SysNSStringToUTF8(config.configurationID));
+      base::debug::DumpWithoutCrashing();
+      continue;
+    }
+
     collectionConfiguration.configurations[config.configurationID] = config;
     [collectionConfiguration.configurationOrder
         addObject:config.configurationID];
@@ -188,7 +201,7 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
     }
   }
 
-  [self.configurationConsumer
+  [self.consumer
       setBackgroundCollectionConfigurations:@[ collectionConfiguration ]
                        selectedBackgroundId:selectedBackgroundID];
 }
@@ -224,17 +237,44 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
     }
   }
 
-  // If no color is currently selected, set selectedColorIndex to nil
-  // when a background image is active, or to the no background configuration's
-  // ID when there is no background.
-  if (!selectedColorID) {
-    selectedColorID =
-        _backgroundCustomizationService->GetCurrentCustomBackground()
-            ? nil
-            : noBackgroundConfiguration.configurationID;
+  BOOL isCustomColor = IsNTPBackgroundColorSliderEnabled() &&
+                       !selectedColorID && colorTheme && colorTheme->color();
+  BOOL isDefaultBackground =
+      !selectedColorID &&
+      !_backgroundCustomizationService->GetCurrentCustomBackground();
+
+  if (IsNTPBackgroundColorSliderEnabled()) {
+    // The hue slider displays either the custom color or the default red, since
+    // hue = 0% represents red on the color wheel.
+    UIColor* hueSliderColor =
+        isCustomColor ? skia::UIColorFromSkColor(colorTheme->color())
+                      : UIColor.redColor;
+
+    BackgroundCustomizationConfigurationItem* customHueConfiguration =
+        [[BackgroundCustomizationConfigurationItem alloc]
+            initWithBackgroundColor:hueSliderColor
+                       colorVariant:ui::ColorProviderKey::SchemeVariant::
+                                        kTonalSpot
+                  accessibilityName:
+                      l10n_util::GetNSString(
+                          IDS_IOS_HOME_CUSTOMIZATION_BACKGROUND_COLOR_CUSTOM_ACCESSIBILITY_LABEL)];
+    customHueConfiguration.isCustomColor = isCustomColor;
+    collectionConfiguration
+        .configurations[customHueConfiguration.configurationID] =
+        customHueConfiguration;
+    [collectionConfiguration.configurationOrder
+        addObject:customHueConfiguration.configurationID];
+
+    if (isCustomColor) {
+      selectedColorID = customHueConfiguration.configurationID;
+    }
   }
 
-  [self.configurationConsumer
+  if (!isCustomColor && isDefaultBackground) {
+    selectedColorID = noBackgroundConfiguration.configurationID;
+  }
+
+  [self.consumer
       setBackgroundCollectionConfigurations:@[ collectionConfiguration ]
                        selectedBackgroundId:selectedColorID];
 }
@@ -374,27 +414,33 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
       [self generateRecentBackgroundForConfiguration:configurationItem]);
 }
 
+- (void)saveBackground {
+  [self saveCurrentTheme];
+}
+
 #pragma mark - HomeBackgroundCustomizationServiceObserving
 
 - (void)onBackgroundChanged {
   self.themeHasChanged = YES;
 
-  if (!self.consumer || self.consumer.navigationItem.leftBarButtonItem) {
-    return;
+  id<BackgroundCustomizationConfiguration> currentConfiguration;
+
+  std::optional<HomeCustomBackground> customBackground =
+      _backgroundCustomizationService->GetCurrentCustomBackground();
+  std::optional<sync_pb::UserColorTheme> colorTheme =
+      _backgroundCustomizationService->GetCurrentColorTheme();
+  if (customBackground) {
+    currentConfiguration = [self
+        generateConfigurationItemForRecentBackground:customBackground.value()];
+  } else if (colorTheme) {
+    currentConfiguration =
+        [self generateConfigurationItemForRecentBackground:colorTheme.value()];
+  } else {
+    currentConfiguration =
+        [[BackgroundCustomizationConfigurationItem alloc] initWithNoBackground];
   }
 
-  UIBarButtonItem* cancelButton = [[UIBarButtonItem alloc]
-      initWithBarButtonSystemItem:UIBarButtonSystemItemCancel
-                           target:self
-                           action:@selector(discardBackground)];
-
-  UIBarButtonItem* doneButton = [[UIBarButtonItem alloc]
-      initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-                           target:self
-                           action:@selector(confirmBackground)];
-
-  self.consumer.navigationItem.leftBarButtonItem = cancelButton;
-  self.consumer.navigationItem.rightBarButtonItem = doneButton;
+  [self.consumer currentBackgroundConfigurationChanged:currentConfiguration];
 }
 
 #pragma mark - Private
@@ -453,9 +499,8 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
     [collectionConfigurations addObject:section];
   }
 
-  [self.configurationConsumer
-      setBackgroundCollectionConfigurations:collectionConfigurations
-                       selectedBackgroundId:selectedBackgroundId];
+  [self.consumer setBackgroundCollectionConfigurations:collectionConfigurations
+                                  selectedBackgroundId:selectedBackgroundId];
 }
 
 // Applies the user-uploaded photo background to the NTP.
@@ -628,15 +673,8 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
   }
 }
 
-// Discards customization changes and cancels the menu.
 - (void)discardBackground {
   [self cancelThemeSelection];
-  [self.delegate cancelBackgroundPicker];
-}
-
-// Dismiss the menu. The current background will be saved on menu dismiss.
-- (void)confirmBackground {
-  [self.delegate dismissBackgroundPicker];
 }
 
 @end

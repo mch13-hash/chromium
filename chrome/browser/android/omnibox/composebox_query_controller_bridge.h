@@ -10,9 +10,18 @@
 #include <memory>
 
 #include "base/android/jni_string.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/omnibox/composebox/composebox_query_controller.h"
+#include "components/contextual_search/internal/composebox_query_controller.h"
 #include "third_party/jni_zero/jni_zero.h"
+
+namespace content {
+class WebContents;
+}  //  namespace content
+
+namespace optimization_guide::proto {
+class PageContext;
+}  // namespace optimization_guide::proto
 
 class Profile;
 class GURL;
@@ -30,6 +39,12 @@ class ComposeboxQueryControllerBridge
       std::string& file_name,
       std::string& file_type,
       const jni_zero::JavaParamRef<jobject>& file_data);
+  base::android::ScopedJavaLocalRef<jobject> AddTabContext(
+      JNIEnv* env,
+      content::WebContents* web_contents);
+  base::android::ScopedJavaLocalRef<jobject> AddTabContextFromCache(
+      JNIEnv* env,
+      long tab_id);
   GURL GetAimUrl(JNIEnv* env, std::string& query_text);
   void RemoveAttachment(JNIEnv* env, const std::string& token);
 
@@ -37,11 +52,23 @@ class ComposeboxQueryControllerBridge
   void OnFileUploadStatusChanged(
       const base::UnguessableToken& file_token,
       lens::MimeType mime_type,
-      composebox_query::mojom::FileUploadStatus file_upload_status,
-      const std::optional<FileUploadErrorType>& error_type) override;
+      contextual_search::FileUploadStatus file_upload_status,
+      const std::optional<contextual_search::FileUploadErrorType>& error_type)
+      override;
 
  private:
+  void OnGetTabPageContext(
+      JNIEnv* env,
+      const base::UnguessableToken& context_token,
+      std::unique_ptr<lens::ContextualInputData> page_content_data);
+  void OnGetPageContentFromCache(
+      JNIEnv* env,
+      const base::UnguessableToken& context_token,
+      std::optional<optimization_guide::proto::PageContext> page_context);
+
+  raw_ptr<Profile> profile_;
   std::unique_ptr<ComposeboxQueryController> query_controller_;
+  base::WeakPtrFactory<ComposeboxQueryControllerBridge> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_ANDROID_OMNIBOX_COMPOSEBOX_QUERY_CONTROLLER_BRIDGE_H_

@@ -670,7 +670,8 @@ def _make_blink_api_call(code_node,
 
     code_generator_info = cg_context.member_like.code_generator_info
     is_partial = code_generator_info.defined_in_partial
-    if (is_partial and
+    is_across_component = code_generator_info.defined_across_component
+    if ((is_partial or is_across_component) and
             not (cg_context.constructor or cg_context.member_like.is_static)):
         arguments.append("*${blink_receiver}")
 
@@ -704,7 +705,7 @@ def _make_blink_api_call(code_node,
         func_name = _make_reflect_accessor_func_name(cg_context)
 
     if (cg_context.constructor or cg_context.member_like.is_static
-            or is_partial):
+            or is_partial or is_across_component):
         class_like = cg_context.member_like.owner_mixin or cg_context.class_like
         class_name = (code_generator_info.receiver_implemented_as
                       or name_style.class_(class_like.identifier))
@@ -905,8 +906,9 @@ def make_check_constructor_call(cg_context):
     if not cg_context.is_legacy_factory_function:
         node.append(
             CxxLikelyIfNode(
-                cond=("ConstructorMode::Current(${isolate}) == "
-                      "ConstructorMode::kWrapExistingObject"),
+                cond=(
+                    "V8PerIsolateData::From(${isolate})->InWrapperConstructor()"
+                ),
                 attribute=None,
                 body=T("bindings::V8SetReturnValue(${info}, ${v8_receiver});\n"
                        "return;")))
@@ -2960,26 +2962,19 @@ return ${class_name}::NamedPropertySetterCallback(
         TextNode("""\
 // 3.9.2. [[Set]]
 // https://webidl.spec.whatwg.org/#legacy-platform-object-set
-// step 1. If O and Receiver are the same object, then:\
+// step 1. If O and Receiver are the same object, then:
+// (V8 calls this callback only when that's the case).\
 """),
-        CxxLikelyIfNode(cond="${info}.HolderV2() == ${info}.This()",
-                        attribute=None,
-                        body=[
-                            TextNode("""\
+        TextNode("// TODO(https://crbug.com/455600234): remove this CHECK."),
+        TextNode("CHECK(${info}.HolderV2() == ${info}.This());"),
+        TextNode("""\
 // step 1.1.1. Invoke the indexed property setter with P and V.\
 """),
-                            make_steps_of_ce_reactions(cg_context),
-                            EmptyNode(),
-                            make_v8_set_return_value(cg_context),
-                            TextNode(
-                                "return BlinkInterceptorResultToV8Intercepted("
-                                "${return_value});"),
-                        ]),
+        make_steps_of_ce_reactions(cg_context),
         EmptyNode(),
-        TextNode("""\
-// Do not intercept.  Fallback to OrdinarySetWithOwnDescriptor.
-return v8::Intercepted::kNo;
-"""),
+        make_v8_set_return_value(cg_context),
+        TextNode("return BlinkInterceptorResultToV8Intercepted("
+                 "${return_value});"),
     ])
 
     return func_decl, func_def
@@ -3359,18 +3354,18 @@ return v8::Intercepted::kNo;
         TextNode("""\
 // 3.9.2. [[Set]]
 // https://webidl.spec.whatwg.org/#legacy-platform-object-set
-// step 1. If O and Receiver are the same object, then:\
+// step 1. If O and Receiver are the same object, then:
+// (V8 calls this callback only when that's the case).\
 """),
-        CxxLikelyIfNode(cond="${info}.HolderV2() == ${info}.This()",
-                        attribute=None,
-                        body=[
-                            TextNode("""\
+        TextNode("// TODO(https://crbug.com/455600234): remove this CHECK."),
+        TextNode("CHECK(${info}.HolderV2() == ${info}.This());"),
+        TextNode("""\
 // step 1.2.1. Invoke the named property setter with P and V.\
 """),
-                            make_steps_of_ce_reactions(cg_context),
-                            EmptyNode(),
-                            make_v8_set_return_value(cg_context),
-                            TextNode("""\
+        make_steps_of_ce_reactions(cg_context),
+        EmptyNode(),
+        make_v8_set_return_value(cg_context),
+        TextNode("""\
 % if interface.identifier == "CSSStyleDeclaration" or \
      interface.identifier == "HTMLEmbedElement" or \
      interface.identifier == "HTMLObjectElement":
@@ -3382,12 +3377,6 @@ return BlinkInterceptorResultToV8Intercepted(${return_value});
 // ${return_value} returned.
 return v8::Intercepted::kYes;
 % endif\
-"""),
-                        ]),
-        EmptyNode(),
-        TextNode("""\
-// Do not intercept.  Fallback to OrdinarySetWithOwnDescriptor.
-return v8::Intercepted::kNo;\
 """),
     ])
 
@@ -6387,8 +6376,8 @@ def make_wrapper_type_info(cg_context, function_name,
 
     public_defs.append(
         TextNode("""\
-  static_assert(static_cast<v8::CppHeapPointerTag>({this_tag}) <
-                 blink::kLastScriptWrappableTag,
+  static_assert({this_tag} <
+                 blink::kLastGeneratedScriptWrappableTag,
                  "There are more ScriptWrappable types than available type tags."
                  "You have to increase the kLastScirptWrappableTag in wrapper_type_info.h");
   static constexpr v8::CppHeapPointerTag kThisTag =

@@ -43,6 +43,7 @@
 #include "components/lens/lens_features.h"
 #include "components/lens/proto/server/lens_overlay_response.pb.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/autocomplete_controller_config.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
@@ -50,6 +51,7 @@
 #include "components/omnibox/browser/base_search_provider.h"
 #include "components/omnibox/browser/history_url_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/omnibox_triggered_feature_service.h"
 #include "components/omnibox/browser/remote_suggestions_service.h"
 #include "components/omnibox/browser/suggestion_answer.h"
 #include "components/omnibox/browser/zero_suggest_provider.h"
@@ -1113,7 +1115,8 @@ TEST_F(SearchProviderTest, KeywordOrderingAndDescriptions) {
   AutocompleteController controller(
       std::make_unique<TestAutocompleteProviderClient>(
           profile_.get(), &test_url_loader_factory_),
-      AutocompleteProvider::TYPE_SEARCH);
+      AutocompleteControllerConfig{.provider_types =
+                                       AutocompleteProvider::TYPE_SEARCH});
   AutocompleteInput input(u"k t", metrics::OmniboxEventProto::OTHER,
                           ChromeAutocompleteSchemeClassifier(profile_.get()));
   controller.Start(input);

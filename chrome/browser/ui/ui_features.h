@@ -20,10 +20,6 @@ namespace features {
 // All features in alphabetical order. The features should be documented
 // alongside the definition of their values in the .cc file.
 
-// TODO(crbug.com/40598679): Remove this when the tab dragging
-// interactive_ui_tests pass on Wayland.
-BASE_DECLARE_FEATURE(kAllowWindowDragUsingSystemDragDrop);
-
 BASE_DECLARE_FEATURE(kAllowEyeDropperWGCScreenCapture);
 
 BASE_DECLARE_FEATURE(kCloseOmniboxPopupOnInactiveAreaClick);
@@ -34,11 +30,6 @@ BASE_DECLARE_FEATURE(kCreateNewTabGroupAppMenuTopLevel);
 BASE_DECLARE_FEATURE(kFewerUpdateConfirmations);
 #endif
 
-#if !BUILDFLAG(IS_ANDROID)
-// Feature that manages the transition between old and new browser layout.
-BASE_DECLARE_FEATURE(kDesktopNewTopAreaLayoutFeature);
-#endif
-
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 
 // Controls how extensions show up in the main menu. When enabled, if the
@@ -47,6 +38,9 @@ BASE_DECLARE_FEATURE(kDesktopNewTopAreaLayoutFeature);
 BASE_DECLARE_FEATURE(kExtensionsCollapseMainMenu);
 
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+// Controls whether the refreshed infobar is enabled.
+BASE_DECLARE_FEATURE(kInfobarRefresh);
 
 #if BUILDFLAG(IS_WIN)
 BASE_DECLARE_FEATURE(kOfferPinToTaskbarWhenSettingToDefault);
@@ -157,6 +151,13 @@ BASE_DECLARE_FEATURE(kScrimForBrowserWindowModal);
 BASE_DECLARE_FEATURE(kSideBySide);
 
 BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kSideBySideShowDropTargetDelay);
+BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
+                           kSideBySideShowDropTargetForLinkDelay);
+BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
+                           kSideBySideShowDropTargetForLinkAfterHideDelay);
+BASE_DECLARE_FEATURE_PARAM(
+    base::TimeDelta,
+    kSideBySideShowDropTargetForLinkAfterHideLookbackWindow);
 BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kSideBySideHideDropTargetDelay);
 BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kSideBySideShowNudgeDelay);
 
@@ -166,6 +167,8 @@ BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kSideBySideShowNudgeDelay);
 BASE_DECLARE_FEATURE_PARAM(int, kSideBySideDropTargetMinWidth);
 BASE_DECLARE_FEATURE_PARAM(int, kSideBySideDropTargetMaxWidth);
 BASE_DECLARE_FEATURE_PARAM(int, kSideBySideDropTargetTargetWidthPercentage);
+BASE_DECLARE_FEATURE_PARAM(int,
+                           kSideBySideDropTargetForLinkTargetWidthPercentage);
 
 // The size of the edge of the screen where the Split View drop target is hidden
 // will be the max of the width and the percentage times the screen width.
@@ -216,6 +219,8 @@ BASE_DECLARE_FEATURE(kSideBySideLinkMenuNewBadge);
 BASE_DECLARE_FEATURE(kSideBySideKeyboardShortcut);
 
 bool IsSideBySideKeyboardShortcutEnabled();
+
+BASE_DECLARE_FEATURE(kTabbedBrowserUseNewLayout);
 
 BASE_DECLARE_FEATURE(kTabDuplicateMetrics);
 
@@ -325,6 +330,12 @@ BASE_DECLARE_FEATURE(kTearOffWebAppTabOpensWebAppWindow);
 BASE_DECLARE_FEATURE(kThreeButtonPasswordSaveDialog);
 #endif
 
+// Enables a side panel that occupies the vertical space from the top of the
+// toolbar to the bottom of the browser. This is taller than the default side
+// panel, which occupies the space from the top of the WebContents to the bottom
+// of the browser.
+BASE_DECLARE_FEATURE(kToolbarHeightSidePanel);
+
 bool IsToolbarPinningEnabled();
 
 BASE_DECLARE_FEATURE(kEnterpriseProfileBadgingForMenu);
@@ -393,6 +404,10 @@ BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationAutofillMandatoryReauth);
 BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationClickToCall);
 BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationSharingHub);
 BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationAiMode);
+BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationVirtualCard);
+BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationFilledCardInformation);
+BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationReadingMode);
+BASE_DECLARE_FEATURE_PARAM(bool, kPageActionsMigrationSavePayments);
 
 // Determines whether the "save password" page action displays different UI if
 // the user has said to never save passwords for that site.
@@ -430,6 +445,8 @@ bool HasTabSearchToolbarButton();
 BASE_DECLARE_FEATURE(kNewTabAddsToActiveGroup);
 
 bool IsNewTabAddsToActiveGroupEnabled();
+
+bool IsWebUIReloadButtonEnabled();
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 // Controls whether to show a toast for Chrome non milestone update.

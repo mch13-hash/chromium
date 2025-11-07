@@ -94,6 +94,7 @@
 #include "content/public/test/content_browser_test_content_browser_client.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/privacy_sandbox_coordinator_test_util.h"
+#include "content/public/test/render_frame_host_test_support.h"
 #include "content/public/test/test_frame_navigation_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/url_loader_monitor.h"
@@ -18575,7 +18576,7 @@ IN_PROC_BROWSER_TEST_F(InterestGroupPrivateNetworkBrowserTest,
 
   const network::URLLoaderCompletionStatus& bidder_status =
       url_loader_monitor.WaitForRequestCompletion(bidder_url);
-  EXPECT_EQ(net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS,
+  EXPECT_EQ(net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS,
             bidder_status.error_code);
   EXPECT_THAT(bidder_status.cors_error_status,
               Optional(network::CorsErrorStatus(
@@ -18632,7 +18633,7 @@ IN_PROC_BROWSER_TEST_F(InterestGroupPrivateNetworkBrowserTest,
 
   const network::URLLoaderCompletionStatus& seller_status =
       url_loader_monitor.WaitForRequestCompletion(seller_url);
-  EXPECT_EQ(net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS,
+  EXPECT_EQ(net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS,
             seller_status.error_code);
   EXPECT_THAT(
       seller_status.cors_error_status,
@@ -18713,7 +18714,7 @@ IN_PROC_BROWSER_TEST_F(InterestGroupPrivateNetworkBrowserTest,
     SCOPED_TRACE(report_url.spec());
     const network::URLLoaderCompletionStatus& report_status =
         url_loader_monitor.WaitForRequestCompletion(report_url);
-    EXPECT_EQ(net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS,
+    EXPECT_EQ(net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS,
               report_status.error_code);
     EXPECT_THAT(report_status.cors_error_status,
                 Optional(network::CorsErrorStatus(
@@ -26360,7 +26361,7 @@ class InterestGroupOOPIFBrowserTest : public InterestGroupBrowserTest {
 // Test to make sure we don't crash when Page changes with DFSS ad slot pending.
 // https://crbug.com/326085515
 // TODO(crbug.com/446756531): Re-enable this test.
-#if (BUILDFLAG(IS_FUCHSIA) || (BUILDFLAG(IS_WIN) && defined(ADDRESS_SANITIZER)))
+#if BUILDFLAG(IS_FUCHSIA)
 #define MAYBE_PageImplChangeDirectFromSellerSignals \
   DISABLED_PageImplChangeDirectFromSellerSignals
 #else
@@ -26398,9 +26399,13 @@ IN_PROC_BROWSER_TEST_F(InterestGroupOOPIFBrowserTest,
   // 2) Act as if there was an infinite unload handler in the OOPIF.
   child_rfh->DoNotDeleteForTesting();
 
-  // Set an arbitrarily long timeout to ensure the subframe unload timer doesn't
-  // fire before we call OnDetach().
+  // Ensure the subframe unload timer and the unload timers don't fire before
+  // we call OnDetach().
+  DisableUnloadTimerForTesting(child_rfh);
   child_rfh->SetSubframeUnloadTimeoutForTesting(base::Seconds(30));
+
+  // ...and also for main.
+  DisableUnloadTimerForTesting(root_ftn->current_frame_host());
 
   // With BackForwardCache, old document doesn't fire unload handlers as the
   // page is stored in BackForwardCache on navigation.

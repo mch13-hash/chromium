@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_TABS_TAB_STRIP_API_CONVERTERS_TAB_CONVERTERS_H_
 
 #include "chrome/browser/ui/tabs/tab_renderer_data.h"
-#include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_api.mojom.h"
+#include "components/browser_apis/tab_strip/tab_strip_api.mojom.h"
 #include "components/tabs/public/tab_collection.h"
 #include "components/tabs/public/tab_interface.h"
 #include "ui/color/color_provider.h"
@@ -28,6 +28,11 @@ tabs_api::mojom::TabPtr BuildMojoTab(tabs::TabHandle handle,
 // CHECK to enforce that precondition.
 tabs_api::mojom::DataPtr BuildMojoTabCollectionData(
     tabs::TabCollectionHandle handle);
+
+// Converts mojom::NetworkState back to a TabNetworkState.
+// TODO(crbug.com/458095449): Consider using bimap or just static casting these
+// enums if maintaining both this and ToMojo gets out of hand.
+TabNetworkState FromMojo(mojom::NetworkState state);
 
 }  // namespace tabs_api::converters
 

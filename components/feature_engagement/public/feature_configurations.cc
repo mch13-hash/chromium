@@ -188,19 +188,6 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
 
-  if (kIPHSignoutWebInterceptFeature.name == feature->name) {
-    FeatureConfig config;
-    config.valid = true;
-    config.availability = Comparator(ANY, 0);
-    config.session_rate = Comparator(ANY, 0);
-    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
-    config.trigger = EventConfig("iph_signout_web_intercept_triggered",
-                                 Comparator(ANY, 0), 0, 0);
-    config.used =
-        EventConfig("iph_signout_web_intercept_used", Comparator(ANY, 0), 0, 0);
-    return config;
-  }
-
   if (kIPHGMCCastStartStopFeature.name == feature->name) {
     FeatureConfig config;
     config.valid = true;
@@ -1717,18 +1704,6 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
 
-  if (kIPHRtlGestureNavigationFeature.name == feature->name) {
-    FeatureConfig config;
-    config.valid = true;
-    config.availability = Comparator(ANY, 0);
-    config.session_rate = Comparator(LESS_THAN, 1);
-    config.used =
-        EventConfig("rtl_gesture_iph_show", Comparator(EQUAL, 0), 365, 365);
-    config.trigger =
-        EventConfig("rtl_gesture_iph_trigger", Comparator(EQUAL, 0), 30, 365);
-    return config;
-  }
-
   if (kIPHPageZoomFeature.name == feature->name) {
     FeatureConfig config;
     config.valid = true;
@@ -2030,9 +2005,13 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     FeatureConfig config;
     config.valid = true;
     config.availability = Comparator(ANY, 0);
-    config.session_rate = Comparator(EQUAL, 0);
+    config.session_rate = Comparator(ANY, 0);
+    config.blocked_by.type = BlockedBy::Type::NONE;
+
+    // Show max of one time per week.
     config.trigger = EventConfig("reader_mode_distill_in_app_iph_triggered",
                                  Comparator(EQUAL, 0), 7, 7);
+    // Show max of three times per year.
     config.event_configs.insert(
         EventConfig("reader_mode_distill_in_app_iph_triggered",
                     Comparator(LESS_THAN, 3), 360, 360));
@@ -2413,17 +2392,6 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.event_configs.insert(
         EventConfig(feature_engagement::events::kChromeOpened,
                     Comparator(GREATER_THAN_OR_EQUAL, 7), 360, 360));
-
-    // Continue checking deprecated settings badge conditions to not show blue
-    // dot at all if user would not have qualified for settings badge.
-    // TODO(crbug.com/362504599): Remove in July 2025.
-    config.event_configs.insert(
-        EventConfig("blue_dot_promo_settings_shown_new_session",
-                    Comparator(LESS_THAN_OR_EQUAL, 2), 360, 360));
-    // TODO(crbug.com/362504058): Remove in Sept 2025.
-    config.event_configs.insert(
-        EventConfig("blue_dot_promo_overflow_menu_dismissed",
-                    Comparator(LESS_THAN, 3), 360, 360));
 
     config.blocked_by.type = BlockedBy::Type::NONE;
     config.blocking.type = Blocking::Type::NONE;
@@ -2882,6 +2850,29 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
 
+  if (kIPHIOSPageActionMenu.name == feature->name) {
+    // Show the promo only once when the conditions are met.
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(ANY, 0);
+
+    // This IPH showing does not affect the session count for other IPHs.
+    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
+    config.blocked_by.type = BlockedBy::Type::NONE;
+    config.blocking.type = Blocking::Type::NONE;
+
+    config.trigger =
+        EventConfig(feature_engagement::events::kIOSPageActionMenuIPHTrigger,
+                    Comparator(EQUAL, 0), feature_engagement::kMaxStoragePeriod,
+                    feature_engagement::kMaxStoragePeriod);
+    config.used =
+        EventConfig(feature_engagement::events::kIOSPageActionMenuIPHUsed,
+                    Comparator(EQUAL, 0), feature_engagement::kMaxStoragePeriod,
+                    feature_engagement::kMaxStoragePeriod);
+    return config;
+  }
+
   if (kIPHiOSAIHubNewBadge.name == feature->name) {
     FeatureConfig config;
     config.valid = true;
@@ -2910,6 +2901,32 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.event_configs.insert(
         EventConfig(events::kIOSGeminiEligiblity, Comparator(EQUAL, 1), 14,
                     feature_engagement::kMaxStoragePeriod));
+    return config;
+  }
+
+  if (kIPHiOSGeminiContextualCueChip.name == feature->name) {
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(ANY, 0);
+
+    // This badge showing does not affect the session count for other IPHs.
+    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
+    config.blocked_by.type = BlockedBy::Type::NONE;
+    config.blocking.type = Blocking::Type::NONE;
+
+    // Feature should show no matter how many times the chip was used.
+    config.used =
+        EventConfig(events::kIOSGeminiContextualCueChipUsed, Comparator(ANY, 0),
+                    feature_engagement::kMaxStoragePeriod,
+                    feature_engagement::kMaxStoragePeriod);
+
+    // Should trigger a maximum of 3 times in one day.
+    config.trigger =
+        EventConfig(events::kIOSGeminiContextualCueChipTriggered,
+                    Comparator(LESS_THAN_OR_EQUAL, 3), /*window=*/1,
+                    feature_engagement::kMaxStoragePeriod);
+
     return config;
   }
 

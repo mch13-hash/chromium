@@ -183,9 +183,7 @@ class FormFieldData {
 
   // Returns true if the field is focusable to the user.
   // This is an approximation of visibility with false positives.
-  bool IsFocusable() const {
-    return is_focusable() && role() != RoleAttribute::kPresentation;
-  }
+  bool IsFocusable() const;
 
   // NOTE: Update `DeepEqual()` and `FormFieldDataAndroid::SimilarFieldAs()`
   // if needed when adding new a member.
@@ -301,8 +299,6 @@ class FormFieldData {
 
   // A unique identifier of the containing frame. This value is not serialized
   // because LocalFrameTokens must not be leaked to other renderer processes.
-  // It is not persistent between page loads and therefore not used in
-  // comparison in DeepEqual().
   const LocalFrameToken& host_frame() const { return host_frame_; }
   void set_host_frame(LocalFrameToken host_frame) {
     host_frame_ = std::move(host_frame);
@@ -507,7 +503,7 @@ class FormFieldData {
   bool is_user_edited_ = false;
   CheckStatus check_status_ = CheckStatus::kNotCheckable;
   bool is_focusable_ = true;
-  bool is_visible_ = true;  // See `features::kAutofillDetectFieldVisibility`.
+  bool is_visible_ = true;
   bool should_autocomplete_ = true;
   RoleAttribute role_ = RoleAttribute::kOther;
   base::i18n::TextDirection text_direction_ = base::i18n::UNKNOWN_DIRECTION;

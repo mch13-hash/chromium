@@ -4,12 +4,13 @@
 
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_photo_framing_view_controller.h"
 
-#import <algorithm>
+#import <cmath>
 
 #import "base/check.h"
 #import "base/functional/bind.h"
 #import "base/functional/callback.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/content_suggestions_collection_utils.h"
+#import "ios/chrome/browser/home_customization/ui/home_customization_accessibility_identifiers.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_photo_framing_mutator.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_framing_coordinates.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_search_engine_logo_mediator_provider.h"
@@ -88,6 +89,8 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
   [super viewDidLoad];
 
   self.view.backgroundColor = UIColor.blackColor;
+  self.view.accessibilityIdentifier =
+      kPhotoFramingMainViewAccessibilityIdentifier;
 
   [self setupScrollView];
   [self setupImageView];
@@ -106,7 +109,7 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
 - (void)viewDidLayoutSubviews {
   [super viewDidLayoutSubviews];
 
-  [self updateMinimumZoomScale];
+  [self updateZoomScaleBounds];
   if (!_hasLaidOutSubviews) {
     // For the first appearance, start the zoom at 1, unless the image is too
     // small for that.
@@ -264,6 +267,8 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
 
   _saveButton = [UIButton buttonWithConfiguration:saveConfig primaryAction:nil];
   _saveButton.translatesAutoresizingMaskIntoConstraints = NO;
+  _saveButton.accessibilityIdentifier =
+      kPhotoFramingViewSaveButtonAccessibilityIdentifier;
   [_saveButton addTarget:self
                   action:@selector(saveButtonTapped)
         forControlEvents:UIControlEventTouchUpInside];
@@ -378,7 +383,7 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
 // parameters change due to rotation.
 - (void)performViewWillTransitionToSizeAnimationsKeepingCenterRatio:
     (CGPoint)centerRatio {
-  [self updateMinimumZoomScale];
+  [self updateZoomScaleBounds];
   [self setScrollableContentCenterRatio:centerRatio];
   [self updateOmniboxWidth];
 }
@@ -406,9 +411,9 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
 
 // Updates the width of the fake omnibox based on the current view width.
 - (void)updateOmniboxWidth {
-  CGFloat contentWidth = std::max<CGFloat>(
-      0, self.view.bounds.size.width - self.view.safeAreaInsets.left -
-             self.view.safeAreaInsets.right);
+  CGFloat contentWidth =
+      std::fmax(0, self.view.bounds.size.width - self.view.safeAreaInsets.left -
+                       self.view.safeAreaInsets.right);
   if (contentWidth == 0) {
     return;
   }
@@ -418,17 +423,32 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
 }
 
 // Updates the minimum zoom scale to fill the screen.
-- (void)updateMinimumZoomScale {
+- (void)updateZoomScaleBounds {
   CGSize scrollViewSize = _scrollView.bounds.size;
   CGSize imageSize = _originalImage.size;
 
   // Calculate the scale needed to fill the screen.
   CGFloat widthScale = scrollViewSize.width / imageSize.width;
+  // Ensure that the image will fill the screen. Due to floating point
+  // imprecision, sometimes the image would be slightly smaller than the screen,
+  // so fix that here.
+  if (widthScale * imageSize.width < scrollViewSize.width) {
+    widthScale = std::nextafter(widthScale, CGFLOAT_MAX);
+  }
   CGFloat heightScale = scrollViewSize.height / imageSize.height;
+  if (heightScale * imageSize.height < scrollViewSize.height) {
+    heightScale = std::nextafter(heightScale, CGFLOAT_MAX);
+  }
+
   CGFloat minimumScale = MAX(widthScale, heightScale);
 
   _scrollView.minimumZoomScale = minimumScale;
-  _scrollView.zoomScale = MAX(_scrollView.zoomScale, minimumScale);
+  // Always allow some zooming, even if the image is very small and thus already
+  // very zoomed in.
+  _scrollView.maximumZoomScale = MAX(kMaximumZoomScale, minimumScale + 2);
+  // Re-setting the zoom scale will factor any new min/max zoom scale into the
+  // actual final value.
+  _scrollView.zoomScale = _scrollView.zoomScale;
 }
 
 // Sets the displayed center of the scroll view to as close to `centerRatio` as
@@ -513,14 +533,14 @@ const CGFloat kGradientSpacingAboveInstructions = 150;
 
   // Translate the rect, keeping the same size, to make sure it's inside the
   // bounds of the original image.
-  visibleRectInOriginal.origin.x = std::clamp<CGFloat>(
-      visibleRectInOriginal.origin.x, 0,
-      std::max<CGFloat>(
-          0, _originalImage.size.width - visibleRectInOriginal.size.width));
-  visibleRectInOriginal.origin.y = std::clamp<CGFloat>(
-      visibleRectInOriginal.origin.y, 0,
-      std::max<CGFloat>(
-          0, _originalImage.size.height - visibleRectInOriginal.size.height));
+  visibleRectInOriginal.origin.x =
+      std::clamp<CGFloat>(visibleRectInOriginal.origin.x, 0,
+                          std::fmax(0, _originalImage.size.width -
+                                           visibleRectInOriginal.size.width));
+  visibleRectInOriginal.origin.y =
+      std::clamp<CGFloat>(visibleRectInOriginal.origin.y, 0,
+                          std::fmax(0, _originalImage.size.height -
+                                           visibleRectInOriginal.size.height));
 
   return [[HomeCustomizationFramingCoordinates alloc]
       initWithVisibleRect:visibleRectInOriginal];

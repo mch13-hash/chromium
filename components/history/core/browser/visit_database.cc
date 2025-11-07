@@ -14,10 +14,13 @@
 #include <string>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "components/google/core/common/google_util.h"
+#include "components/history/core/browser/features.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/url_database.h"
@@ -564,113 +567,73 @@ bool VisitDatabase::GetVisibleVisitsForURL(URLID url_id,
                                            VisitVector* visits) {
   visits->clear();
 
-  sql::Statement statement;
-  if (options.visit_order == QueryOptions::RECENT_FIRST) {
-    if (options.app_id) {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Recent first, filter by app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "WHERE url=? AND visit_time>=? AND visit_time<? AND app_id=? "
-              "ORDER BY visit_time DESC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Recent first, filter by app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "LEFT OUTER JOIN context_annotations "
-                             "ON visits.id = context_annotations.visit_id "
-                             "WHERE visits.url=? "
-                             "AND visits.visit_time>=? AND visits.visit_time<? "
-                             "AND visits.app_id=? "
-                             "AND (context_annotations.response_code IS NULL "
-                             "OR context_annotations.response_code!=404) "
-                             "ORDER BY visits.visit_time DESC"));
-          break;
-      }
-    } else {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Recent first, don't filter by app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "WHERE url=? AND visit_time>=? AND visit_time<? "
-                             "ORDER BY visit_time DESC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Recent first, don't filter by app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "LEFT OUTER JOIN context_annotations "
-                             "ON visits.id = context_annotations.visit_id "
-                             "WHERE visits.url=? "
-                             "AND visits.visit_time>=? AND visits.visit_time<? "
-                             "AND (context_annotations.response_code IS NULL "
-                             "OR context_annotations.response_code!=404) "
-                             "ORDER BY visits.visit_time DESC"));
-          break;
-      }
-    }
-  } else {
-    if (options.app_id) {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Oldest first, filter by app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "WHERE url=? AND visit_time>? AND visit_time<=? AND app_id=? "
-              "ORDER BY visit_time ASC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Oldest first, filter by app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "LEFT OUTER JOIN context_annotations "
-                             "ON visits.id = context_annotations.visit_id "
-                             "WHERE visits.url=? "
-                             "AND visits.visit_time>? AND visits.visit_time<=? "
-                             "AND visits.app_id=? "
-                             "AND (context_annotations.response_code IS NULL "
-                             "OR context_annotations.response_code!=404) "
-                             "ORDER BY visits.visit_time ASC"));
-          break;
-      }
-    } else {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Oldest first, don't filter by app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "WHERE url=? AND visit_time>? AND visit_time<=? "
-                             "ORDER BY visit_time ASC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Oldest first, don't filter by app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "LEFT OUTER JOIN context_annotations "
-                             "ON visits.id = context_annotations.visit_id "
-                             "WHERE visits.url=? "
-                             "AND visits.visit_time>? AND visits.visit_time<=? "
-                             "AND (context_annotations.response_code IS NULL "
-                             "OR context_annotations.response_code!=404) "
-                             "ORDER BY visits.visit_time ASC"));
-          break;
-      }
-    }
+  std::string sql = "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits ";
+  std::vector<std::string> where_clauses;
+
+  if (options.policy_for_404_visits == VisitQuery404sPolicy::kExclude404s) {
+    sql +=
+        "LEFT OUTER JOIN context_annotations "
+        "ON visits.id = context_annotations.visit_id ";
+    where_clauses.push_back(
+        "(context_annotations.response_code IS NULL "
+        "OR context_annotations.response_code != 404)");
   }
 
-  statement.BindInt64(0, url_id);
-  statement.BindInt64(1, options.EffectiveBeginTime());
-  statement.BindInt64(2, options.EffectiveEndTime());
-  if (options.app_id) {
-    statement.BindString(3, *options.app_id);
+// TODO(crbug.com/457641486) Clean up preprocessor statements once feature is
+// rolled out.
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  if (base::FeatureList::IsEnabled(kBrowsingHistoryActorIntegrationM2) &&
+      !options.include_actor_visits) {
+    sql += "LEFT JOIN visit_source ON visits.id = visit_source.id ";
+    where_clauses.push_back(
+        "(visit_source.source IS NULL OR visit_source.source != ?)");
   }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+  where_clauses.push_back("visits.url = ?");
+
+  if (options.visit_order == QueryOptions::RECENT_FIRST) {
+    where_clauses.push_back("visits.visit_time >= ?");
+    where_clauses.push_back("visits.visit_time < ?");
+  } else {
+    where_clauses.push_back("visits.visit_time > ?");
+    where_clauses.push_back("visits.visit_time <= ?");
+  }
+
+  if (options.app_id) {
+    where_clauses.push_back("visits.app_id = ?");
+  }
+
+  CHECK(!where_clauses.empty());
+
+  sql += "WHERE " + base::JoinString(where_clauses, " AND ") + " ";
+
+  if (options.visit_order == QueryOptions::RECENT_FIRST) {
+    sql += "ORDER BY visits.visit_time DESC ";
+  } else {
+    sql += "ORDER BY visits.visit_time ASC ";
+  }
+
+  sql::Statement statement(GetDB().GetUniqueStatement(base::cstring_view(sql)));
+  CHECK(statement.is_valid());
+
+  int bind_index = 0;
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  if (base::FeatureList::IsEnabled(kBrowsingHistoryActorIntegrationM2) &&
+      !options.include_actor_visits) {
+    statement.BindInt(bind_index++, SOURCE_ACTOR);
+  }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+  statement.BindInt64(bind_index++, url_id);
+  statement.BindInt64(bind_index++, options.EffectiveBeginTime());
+  statement.BindInt64(bind_index++, options.EffectiveEndTime());
+  if (options.app_id) {
+    statement.BindString(bind_index++, *options.app_id);
+  }
+  CHECK_EQ(static_cast<size_t>(bind_index),
+           static_cast<size_t>(std::count(sql.begin(), sql.end(), '?')));
 
   return FillVisitVectorWithOptions(statement, options, visits);
 }
@@ -795,129 +758,101 @@ bool VisitDatabase::GetVisibleVisitsInRange(const QueryOptions& options,
   // The visit_time values can be duplicated in a redirect chain, so we sort
   // by id too, to ensure a consistent ordering just in case.
 
-  sql::Statement statement;
-  if (options.visit_order == QueryOptions::RECENT_FIRST) {
-    if (options.app_id) {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Recent first, has app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "WHERE visit_time>=? AND visit_time<? AND app_id=? "
-              "ORDER BY visit_time DESC,id DESC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Recent first, has app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "LEFT OUTER JOIN context_annotations "
-              "ON visits.id=context_annotations.visit_id "
-              "WHERE visits.visit_time>=? AND visits.visit_time<? "
-              "AND visits.app_id=? "
-              "AND (context_annotations.response_code IS NULL "
-              "OR context_annotations.response_code!=404) "
-              "ORDER BY visits.visit_time DESC,visits.id DESC"));
-          break;
-      }
-    } else {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Recent first, no app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "WHERE visit_time>=? AND visit_time<? "
-                             "ORDER BY visit_time DESC,id DESC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Recent first, no app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "LEFT OUTER JOIN context_annotations "
-              "ON visits.id=context_annotations.visit_id "
-              "WHERE visits.visit_time>=? AND visits.visit_time<? "
-              "AND (context_annotations.response_code IS NULL "
-              "OR context_annotations.response_code!=404) "
-              "ORDER BY visits.visit_time DESC,visits.id DESC"));
-          break;
-      }
-    }
-  } else {
-    if (options.app_id) {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Oldest first, has app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "WHERE visit_time>? AND visit_time<=? AND app_id=? "
-              "ORDER BY visit_time ASC,id DESC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Oldest first, has app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "LEFT OUTER JOIN context_annotations "
-              "ON visits.id=context_annotations.visit_id "
-              "WHERE visits.visit_time>? AND visits.visit_time<=? "
-              "AND visits.app_id=? "
-              "AND (context_annotations.response_code IS NULL "
-              "OR context_annotations.response_code!=404) "
-              "ORDER BY visits.visit_time ASC,visits.id DESC"));
-          break;
-      }
-    } else {
-      switch (options.policy_for_404_visits) {
-        case VisitQuery404sPolicy::kInclude404s:
-          // Oldest first, no app id, include 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                             "WHERE visit_time>? AND visit_time<=? "
-                             "ORDER BY visit_time ASC,id DESC"));
-          break;
-        case VisitQuery404sPolicy::kExclude404s:
-          // Oldest first, no app id, exclude 404s.
-          statement.Assign(GetDB().GetCachedStatement(
-              SQL_FROM_HERE,
-              "SELECT" HISTORY_VISIT_ROW_FIELDS
-              "FROM visits "
-              "LEFT OUTER JOIN context_annotations "
-              "ON visits.id=context_annotations.visit_id "
-              "WHERE visits.visit_time>? AND visits.visit_time<=? "
-              "AND (context_annotations.response_code IS NULL "
-              "OR context_annotations.response_code!=404) "
-              "ORDER BY visits.visit_time ASC,visits.id DESC"));
-          break;
-      }
-    }
+  std::string sql = "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits ";
+  std::vector<std::string> where_clauses;
+
+  if (options.policy_for_404_visits == VisitQuery404sPolicy::kExclude404s) {
+    sql +=
+        "LEFT OUTER JOIN context_annotations "
+        "ON visits.id = context_annotations.visit_id ";
+    where_clauses.push_back(
+        "(context_annotations.response_code IS NULL "
+        "OR context_annotations.response_code != 404)");
   }
 
-  statement.BindInt64(0, options.EffectiveBeginTime());
-  statement.BindInt64(1, options.EffectiveEndTime());
-  if (options.app_id) {
-    statement.BindString(2, *options.app_id);
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  if (base::FeatureList::IsEnabled(kBrowsingHistoryActorIntegrationM2) &&
+      !options.include_actor_visits) {
+    sql += "LEFT JOIN visit_source ON visits.id = visit_source.id ";
+    where_clauses.push_back(
+        "(visit_source.source IS NULL OR visit_source.source != ?)");
   }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+  if (options.visit_order == QueryOptions::RECENT_FIRST) {
+    where_clauses.push_back("visits.visit_time >= ?");
+    where_clauses.push_back("visits.visit_time < ?");
+  } else {
+    where_clauses.push_back("visits.visit_time > ?");
+    where_clauses.push_back("visits.visit_time <= ?");
+  }
+
+  if (options.app_id) {
+    where_clauses.push_back("visits.app_id = ?");
+  }
+
+  CHECK(!where_clauses.empty());
+
+  sql += "WHERE " + base::JoinString(where_clauses, " AND ") + " ";
+
+  if (options.visit_order == QueryOptions::RECENT_FIRST) {
+    sql += "ORDER BY visits.visit_time DESC, visits.id DESC ";
+  } else {
+    sql += "ORDER BY visits.visit_time ASC, visits.id DESC ";
+  }
+
+  sql::Statement statement(GetDB().GetUniqueStatement(base::cstring_view(sql)));
+  CHECK(statement.is_valid());
+  int bind_index = 0;
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  if (base::FeatureList::IsEnabled(kBrowsingHistoryActorIntegrationM2) &&
+      !options.include_actor_visits) {
+    statement.BindInt(bind_index++, SOURCE_ACTOR);
+  }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
+  statement.BindInt64(bind_index++, options.EffectiveBeginTime());
+  statement.BindInt64(bind_index++, options.EffectiveEndTime());
+  if (options.app_id) {
+    statement.BindString(bind_index++, *options.app_id);
+  }
+
+  CHECK_EQ(static_cast<size_t>(bind_index),
+           static_cast<size_t>(std::count(sql.begin(), sql.end(), '?')));
 
   return FillVisitVectorWithOptions(statement, options, visits);
 }
 
-VisitID VisitDatabase::GetMostRecentVisitForURL(URLID url_id,
-                                                VisitRow* visit_row) {
+VisitID VisitDatabase::GetMostRecentVisitForURL(
+    URLID url_id,
+    VisitRow* visit_row,
+    VisitQuery404sPolicy policy_for_404_visits) {
   // The visit_time values can be duplicated in a redirect chain, so we sort
   // by id too, to ensure a consistent ordering just in case.
-  sql::Statement statement(GetDB().GetCachedStatement(
-      SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
-                     "WHERE url=? "
-                     "ORDER BY visit_time DESC, id DESC "
-                     "LIMIT 1"));
+  sql::Statement statement;
+
+  switch (policy_for_404_visits) {
+    case VisitQuery404sPolicy::kInclude404s:
+      statement.Assign(GetDB().GetCachedStatement(
+          SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
+                         "WHERE url=? "
+                         "ORDER BY visit_time DESC,id DESC "
+                         "LIMIT 1"));
+      break;
+    case VisitQuery404sPolicy::kExclude404s:
+      statement.Assign(GetDB().GetCachedStatement(
+          SQL_FROM_HERE, "SELECT" HISTORY_VISIT_ROW_FIELDS "FROM visits "
+                         "LEFT OUTER JOIN context_annotations "
+                         "ON visits.id=context_annotations.visit_id "
+                         "WHERE visits.url=?"
+                         "AND(context_annotations.response_code IS NULL "
+                         "OR context_annotations.response_code!=404) "
+                         "ORDER BY visits.visit_time DESC,visits.id DESC "
+                         "LIMIT 1"));
+      break;
+  }
+
   statement.BindInt64(0, url_id);
   if (!statement.Step())
     return 0;  // No visits for this URL.
@@ -953,11 +888,11 @@ bool VisitDatabase::GetMostRecentVisitsForURL(
       statement.Assign(GetDB().GetCachedStatement(
           SQL_FROM_HERE,
           "SELECT" HISTORY_VISIT_ROW_FIELDS
-          "FROM visits v "
-          "LEFT OUTER JOIN context_annotations ca ON v.id=ca.visit_id "
-          "WHERE v.url=? "
+          "FROM visits "
+          "LEFT OUTER JOIN context_annotations ca ON visits.id=ca.visit_id "
+          "WHERE visits.url=? "
           "AND (ca.response_code IS NULL OR ca.response_code!=404) "
-          "ORDER BY v.visit_time DESC, v.id DESC "
+          "ORDER BY visits.visit_time DESC, visits.id DESC "
           "LIMIT ?"));
       break;
   }
@@ -967,15 +902,32 @@ bool VisitDatabase::GetMostRecentVisitsForURL(
   return FillVisitVector(statement, visits);
 }
 
-bool VisitDatabase::GetRedirectFromVisit(VisitID from_visit,
-                                         VisitID* to_visit,
-                                         GURL* to_url) {
-  sql::Statement statement(GetDB().GetCachedStatement(
-      SQL_FROM_HERE,
-      "SELECT v.id,u.url "
-      "FROM visits v JOIN urls u ON v.url = u.id "
-      "WHERE v.from_visit = ? "
-      "AND (v.transition & ?) != 0"));  // IS_REDIRECT_MASK
+bool VisitDatabase::GetRedirectFromVisit(
+    VisitID from_visit,
+    VisitID* to_visit,
+    GURL* to_url,
+    VisitQuery404sPolicy policy_for_404_visits) {
+  sql::Statement statement;
+  switch (policy_for_404_visits) {
+    case VisitQuery404sPolicy::kInclude404s:
+      statement.Assign(GetDB().GetCachedStatement(
+          SQL_FROM_HERE,
+          "SELECT v.id,u.url "
+          "FROM visits v JOIN urls u ON v.url=u.id "
+          "WHERE v.from_visit=? "
+          "AND (v.transition & ?)!=0"));  // IS_REDIRECT_MASK
+      break;
+    case VisitQuery404sPolicy::kExclude404s:
+      statement.Assign(GetDB().GetCachedStatement(
+          SQL_FROM_HERE,
+          "SELECT v.id,u.url "
+          "FROM visits v JOIN urls u ON v.url=u.id "
+          "LEFT OUTER JOIN context_annotations ca ON v.id=ca.visit_id "
+          "WHERE v.from_visit=? "
+          "AND (ca.response_code IS NULL OR ca.response_code!=404)"
+          "AND (v.transition & ?)!=0"));  // IS_REDIRECT_MASK
+      break;
+  }
   statement.BindInt64(0, from_visit);
   statement.BindInt64(1, ui::PAGE_TRANSITION_IS_REDIRECT_MASK);
 

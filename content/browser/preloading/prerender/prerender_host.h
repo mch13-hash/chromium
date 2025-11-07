@@ -186,7 +186,7 @@ class CONTENT_EXPORT PrerenderHost {
   static bool AreHttpRequestHeadersCompatible(
       const std::string& potential_activation_headers_str,
 #if BUILDFLAG(IS_ANDROID)
-      const net::HttpRequestHeaders& potential_activation_additional_headers,
+      const std::string& potential_activation_additional_headers_str,
 #endif  // BUILDFLAG(IS_ANDROID)
       const std::string& prerender_headers_str,
       PreloadingTriggerType trigger_type,
@@ -399,6 +399,9 @@ class CONTENT_EXPORT PrerenderHost {
   bool should_pause_javascript_execution() const {
     return attributes_.prerender_action_type ==
            blink::mojom::SpeculationAction::kPrerenderUntilScript;
+  }
+  blink::mojom::SpeculationAction speculation_action() const {
+    return attributes_.prerender_action_type;
   }
 
   bool IsInitialNavigation(const NavigationRequest& navigation_request) const;

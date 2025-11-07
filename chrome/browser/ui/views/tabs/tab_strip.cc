@@ -43,6 +43,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
@@ -83,8 +84,6 @@
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
 #include "components/tabs/public/split_tab_id.h"
-#include "ui/base/clipboard/clipboard.h"
-#include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/base/interaction/element_identifier.h"
@@ -200,11 +199,11 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
     if (TabDragController::IsSystemDnDSessionRunning()) {
       TabDragController::OnSystemDnDEnded();
     } else {
-      EndDrag(END_DRAG_COMPLETE);
+      EndDrag(EndDragReason::kComplete);
     }
   }
 
-  void OnMouseCaptureLost() override { EndDrag(END_DRAG_CAPTURE_LOST); }
+  void OnMouseCaptureLost() override { EndDrag(EndDragReason::kCaptureLost); }
 
   void OnGestureEvent(ui::GestureEvent* event) override {
     Liveness tabstrip_alive = Liveness::kAlive;
@@ -212,11 +211,11 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
       case ui::EventType::kGestureScrollEnd:
       case ui::EventType::kScrollFlingStart:
       case ui::EventType::kGestureEnd:
-        EndDrag(END_DRAG_COMPLETE);
+        EndDrag(EndDragReason::kComplete);
         break;
 
       case ui::EventType::kGestureLongTap: {
-        EndDrag(END_DRAG_CANCEL);
+        EndDrag(EndDragReason::kCancel);
         break;
       }
 
@@ -226,7 +225,7 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
         break;
 
       case ui::EventType::kGestureTapDown:
-        EndDrag(END_DRAG_CANCEL);
+        EndDrag(EndDragReason::kCancel);
         break;
 
       default:
@@ -307,9 +306,10 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
         if (tab_strip_->IsTabSelected(other_tab)) {
           if (other_tab->group().has_value()) {
             const tab_groups::TabGroupId group = other_tab->group().value();
-            if (fully_selected_groups.contains(group)) {
-              dragging_views.push_back(fully_selected_groups[group]);
-              fully_selected_groups.erase(group);
+            if (auto it = fully_selected_groups.find(group);
+                it != fully_selected_groups.end()) {
+              dragging_views.push_back(it->second);
+              fully_selected_groups.erase(it);
             }
           }
 
@@ -350,7 +350,7 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
     if (drag_controller_->Init(this, source, dragging_views, gfx::Point(x, y),
                                event.x(), std::move(selection_model),
                                EventSourceFromEvent(event)) ==
-        TabDragController::Liveness::DELETED) {
+        TabDragController::Liveness::kDeleted) {
       return;
     }
 
@@ -375,7 +375,7 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
     const TabDragController::Liveness drag_controller_alive =
         drag_controller_->Drag(screen_location);
 
-    return drag_controller_alive == TabDragController::Liveness::ALIVE
+    return drag_controller_alive == TabDragController::Liveness::kAlive
                ? Liveness::kAlive
                : Liveness::kDeleted;
   }
@@ -1128,14 +1128,6 @@ void TabStrip::SetTabStripObserver(TabStripObserver* observer) {
   observer_ = observer;
 }
 
-void TabStrip::SetBackgroundOffset(int background_offset) {
-  if (background_offset == background_offset_) {
-    return;
-  }
-  background_offset_ = background_offset;
-  OnPropertyChanged(&background_offset_, views::kPropertyEffectsPaint);
-}
-
 bool TabStrip::IsRectInWindowCaption(const gfx::Rect& rect) {
   // `rect` is in the window caption if it doesn't hit any content area.
   return !tab_container_->IsRectInContentArea(rect);
@@ -1628,6 +1620,10 @@ void TabStrip::OnDropIndexUpdate(const std::optional<int> index,
   controller_->OnDropIndexUpdate(index, drop_before);
 }
 
+bool TabStrip::IsBrowserClosing() const {
+  return controller_->IsBrowserClosing();
+}
+
 std::optional<int> TabStrip::GetFirstTabInGroup(
     const tab_groups::TabGroupId& group) const {
   return controller_->GetFirstTabInGroup(group);
@@ -2031,10 +2027,6 @@ void TabStrip::HideHover(Tab* tab, TabStyle::HideHoverStyle style) {
   }
 }
 
-int TabStrip::GetBackgroundOffset() const {
-  return background_offset_;
-}
-
 int TabStrip::GetStrokeThickness() const {
   return ShouldDrawStrokes() ? 1 : 0;
 }
@@ -2259,8 +2251,6 @@ void TabStrip::NewTabButtonPressed(const ui::Event& event) {
   new_tab_button_pressed_start_time_ = base::TimeTicks::Now();
 
   base::RecordAction(base::UserMetricsAction("NewTab_Button"));
-  UMA_HISTOGRAM_ENUMERATION("Tab.NewTab", NewTabTypes::NEW_TAB_BUTTON,
-                            NewTabTypes::NEW_TAB_ENUM_COUNT);
   GetBrowser()->profile()->SetUserData(
       NewTabGroupingUserData::kNewTabGroupingUserDataKey,
       std::make_unique<NewTabGroupingUserData>(
@@ -2271,26 +2261,8 @@ void TabStrip::NewTabButtonPressed(const ui::Event& event) {
     if (hover_card_controller_) {
       hover_card_controller_->PreventImmediateReshow();
     }
-
-    const ui::MouseEvent& mouse = static_cast<const ui::MouseEvent&>(event);
-    if (mouse.IsOnlyMiddleMouseButton()) {
-      if (ui::Clipboard::IsSupportedClipboardBuffer(
-              ui::ClipboardBuffer::kSelection)) {
-        ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
-        CHECK(clipboard)
-            << "Clipboard instance is not available, cannot proceed with "
-               "middle mouse button action.";
-        std::u16string clipboard_text;
-        clipboard->ReadText(ui::ClipboardBuffer::kSelection,
-                            /* data_dst = */ nullptr, &clipboard_text);
-        if (!clipboard_text.empty()) {
-          controller_->CreateNewTabWithLocation(clipboard_text);
-        }
-      }
-      return;
-    }
   }
-  controller_->CreateNewTab();
+  controller_->CreateNewTab(NewTabTypes::kNewTabButton);
 }
 
 bool TabStrip::ShouldHighlightCloseButtonAfterRemove() {
@@ -2343,7 +2315,7 @@ void TabStrip::CloseTabInternal(int model_index, CloseTabSource source) {
     if (controller_->GetCount() == 1) {
       // Prevent the browser from closing when the last grouped tab is closed
       // from the browser by adding a new tab.
-      controller_->CreateNewTab();
+      controller_->CreateNewTab(NewTabTypes::kNoUserAction);
       // In some situations the new tab is assigned a group. So if it is in a
       // group, we remove it from the group so that after closing the tab at
       // `model_index`, the browser shows a tab without a group.
@@ -2611,7 +2583,6 @@ void TabStrip::AnnounceTabRemovedFromGroup(tab_groups::TabGroupId group_id) {
 }
 
 BEGIN_METADATA(TabStrip)
-ADD_PROPERTY_METADATA(int, BackgroundOffset)
 ADD_READONLY_PROPERTY_METADATA(int, TabCount)
 ADD_READONLY_PROPERTY_METADATA(int, ModelCount)
 ADD_READONLY_PROPERTY_METADATA(int, ModelPinnedTabCount)

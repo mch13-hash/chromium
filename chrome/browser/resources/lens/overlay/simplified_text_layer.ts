@@ -43,6 +43,10 @@ export class SimplifiedTextLayerElement extends CrLitElement implements
 
   static override get properties() {
     return {
+      enableHighlights: {
+        type: Boolean,
+        reflect: true,
+      },
       hasActionedText: {
         type: Boolean,
         reflect: true,
@@ -71,6 +75,7 @@ export class SimplifiedTextLayerElement extends CrLitElement implements
   protected accessor hideHighlightedLines: boolean = true;
   // The currently selected lines.
   protected accessor highlightedLines: HighlightedLine[] = [];
+  protected accessor enableHighlights: boolean = true;
 
   // The lens text response corresponding to the full image response.
   private fullTextResponse: TextResponse|null = null;
@@ -136,6 +141,8 @@ export class SimplifiedTextLayerElement extends CrLitElement implements
           this.onClearRegionSelection.bind(this)),
       this.browserProxy.callbackRouter.setPostRegionSelection.addListener(
           this.setSelection.bind(this)),
+      this.browserProxy.callbackRouter.onOverlayReshown.addListener(
+          this.onOverlayReshown.bind(this)),
     ];
 
     this.setTextReceivedTimeout();
@@ -232,6 +239,17 @@ export class SimplifiedTextLayerElement extends CrLitElement implements
       this.translateTimeout.timeoutId = -1;
       this.selectAndTranslateWords(startIndex, endIndex);
     }, this.translateTimeout.timeout);
+  }
+
+  disableHighlights() {
+    this.enableHighlights = false;
+  }
+
+  private onOverlayReshown() {
+    this.onClearRegionSelection();
+    this.fullTextResponse = null;
+    this.regionTextResponse = null;
+    this.enableHighlights = false;
   }
 
   private onClearRegionSelection() {

@@ -399,17 +399,10 @@ void CorsURLLoaderFactory::CreateLoaderAndStart(
       network::mojom::RequestDestination::kWebBundle) {
     DCHECK(resource_request.web_bundle_token_params.has_value());
 
-    mojo::PendingRemote<mojom::DevToolsObserver> devtools_observer;
-    if (resource_request.devtools_request_id.has_value()) {
-      devtools_observer = GetDevToolsObserver(resource_request);
-    }
-
     base::WeakPtr<WebBundleURLLoaderFactory> web_bundle_url_loader_factory =
         context_->GetWebBundleManager().CreateWebBundleURLLoaderFactory(
             resource_request.url, *resource_request.web_bundle_token_params,
-            process_id_, std::move(devtools_observer),
-            resource_request.devtools_request_id, cross_origin_embedder_policy_,
-            coep_reporter());
+            process_id_, cross_origin_embedder_policy_, coep_reporter());
     client = web_bundle_url_loader_factory->MaybeWrapURLLoaderClient(
         std::move(client));
     if (!client) {
@@ -554,6 +547,11 @@ bool CorsURLLoaderFactory::IsValidCorsExemptHeaders(
   return true;
 }
 
+bool CorsURLLoaderFactory::IsMultiNetworkCCTWorkFlow() const {
+  return context_->url_request_context()->bound_network() !=
+         net::handles::kInvalidNetworkHandle;
+}
+
 bool CorsURLLoaderFactory::IsCorsPreflighLoadOptionAllowed() const {
   // kURLLoadOptionAsCorsPreflight is set by CorsURLLoader itself, when
   // starting a request, if CORS preflight request is needed.
@@ -588,9 +586,7 @@ bool CorsURLLoaderFactory::IsCorsPreflighLoadOptionAllowed() const {
   // a valid network. So, given that this config is security critical, it's best
   // to "peek into implementation details" rather than granting this exception
   // to a bigger group.
-  return allow_external_preflights_for_testing_ ||
-         context_->url_request_context()->bound_network() !=
-             net::handles::kInvalidNetworkHandle;
+  return allow_external_preflights_for_testing_ || IsMultiNetworkCCTWorkFlow();
 }
 
 bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
@@ -617,8 +613,24 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
   if (request.load_flags &
       (net::LOAD_CAN_USE_SHARED_DICTIONARY |
        net::LOAD_DISABLE_SHARED_DICTIONARY_AFTER_CROSS_ORIGIN_REDIRECT)) {
-    mojo::ReportBadMessage("CorsURLLoaderFactory: Internal load flag received");
-    return false;
+    // In the multi-network CCT workflow, when fetching the subresource, we
+    // create a nested CorsURLLoaderFactory to run the same request on a
+    // specific network. That causes this check to be invoked twice: the first
+    // invocation performs the authoritative validation, and later passes may
+    // add internal flags to the request. Re-validating here is unnecessary and
+    // can falsely reject otherwise valid requests (See
+    // CorsURLLoaderFactory::IsCorsPreflighLoadOptionAllowed for the rational).
+    // Note: Skipping this check is appropriate for subresource requests.
+    // For main page loads or navigation requests, ideally the check should
+    // still be performed as there is no nesting. However, since this is only
+    // a sanity check, skipping it here is safe.
+    // TODO(crbug.com/449098586): refactor to get rid of nested
+    // CorsURLLoaderFactory to make the design clearer.
+    if (!IsMultiNetworkCCTWorkFlow()) {
+      mojo::ReportBadMessage(
+          "CorsURLLoaderFactory: Internal load flag received");
+      return false;
+    }
   }
 
   // Check if this is an untrusted factory being provided parameters that should
@@ -752,14 +764,58 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
         break;
     }
 
-    // Only the browser process is allowed to initiate FedCM requests.
-    if (request.destination ==
-        network::mojom::RequestDestination::kWebIdentity) {
-      mojo::ReportBadMessage(
-          "CorsURLLoaderFactory: attempt to use forbidden destination from "
-          "renderer");
-      return false;
+    switch (request.destination) {
+      // Allowed destinations from unprivileged process:
+      case network::mojom::RequestDestination::kEmpty:
+      case network::mojom::RequestDestination::kAudio:
+      case network::mojom::RequestDestination::kAudioWorklet:
+      case network::mojom::RequestDestination::kDocument:
+      case network::mojom::RequestDestination::kEmbed:
+      case network::mojom::RequestDestination::kFont:
+      case network::mojom::RequestDestination::kFrame:
+      case network::mojom::RequestDestination::kIframe:
+      case network::mojom::RequestDestination::kImage:
+      case network::mojom::RequestDestination::kManifest:
+      case network::mojom::RequestDestination::kObject:
+      case network::mojom::RequestDestination::kPaintWorklet:
+      case network::mojom::RequestDestination::kReport:
+      case network::mojom::RequestDestination::kScript:
+      case network::mojom::RequestDestination::kServiceWorker:
+      case network::mojom::RequestDestination::kSharedWorker:
+      case network::mojom::RequestDestination::kStyle:
+      case network::mojom::RequestDestination::kTrack:
+      case network::mojom::RequestDestination::kVideo:
+      case network::mojom::RequestDestination::kWebBundle:
+      case network::mojom::RequestDestination::kWorker:
+      case network::mojom::RequestDestination::kXslt:
+      case network::mojom::RequestDestination::kFencedframe:
+      case network::mojom::RequestDestination::kDictionary:
+      case network::mojom::RequestDestination::kSpeculationRules:
+      case network::mojom::RequestDestination::kJson:
+      case network::mojom::RequestDestination::kSharedStorageWorklet:
+        break;
+      case network::mojom::RequestDestination::kWebIdentity:
+      case network::mojom::RequestDestination::kEmailVerification:
+        mojo::ReportBadMessage(
+            "CorsURLLoaderFactory: attempt to use forbidden destination from "
+            "renderer");
+        return false;
     }
+  }
+
+  // FedCM requests must either disable cookies or disable redirects
+  // (this simplifies reasoning around SameSite=Lax cookies).
+  // See also the DCHECK in url_loader_util::ConfigureUrlRequest.
+  if ((request.destination == mojom::RequestDestination::kWebIdentity ||
+       request.destination ==
+           network::mojom::RequestDestination::kEmailVerification) &&
+      request.redirect_mode != mojom::RedirectMode::kError &&
+      request.credentials_mode != mojom::CredentialsMode::kOmit) {
+    mojo::ReportBadMessage(
+        "CorsURLLoaderFactory: FedCM and email verification requests must "
+        "either disable redirects "
+        "or disable cookies");
+    return false;
   }
 
   // Depending on the type of request, compare either `request_initiator` or
@@ -879,13 +935,6 @@ bool CorsURLLoaderFactory::IsValidRequest(const ResourceRequest& request,
       mojo::ReportBadMessage(
           "CorsURLLoaderFactory: net_log_reference_info field is not "
           "expected.");
-      return false;
-    }
-
-    if (request.target_ip_address_space != mojom::IPAddressSpace::kUnknown) {
-      mojo::ReportBadMessage(
-          "CorsURLLoaderFactory: target_ip_address_space is "
-          "set.");
       return false;
     }
   }

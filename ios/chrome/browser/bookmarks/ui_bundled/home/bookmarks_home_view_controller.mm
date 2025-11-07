@@ -33,24 +33,24 @@
 #import "ios/chrome/browser/authentication/ui_bundled/cells/table_view_signin_promo_item.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
+#import "ios/chrome/browser/bookmarks/folder_chooser/coordinator/bookmarks_folder_chooser_coordinator.h"
+#import "ios/chrome/browser/bookmarks/folder_chooser/coordinator/bookmarks_folder_chooser_coordinator_delegate.h"
+#import "ios/chrome/browser/bookmarks/folder_chooser/ui/table_view_bookmarks_folder_item.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_model_bridge_observer.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_model_factory.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_storage_type.h"
 #import "ios/chrome/browser/bookmarks/model/bookmarks_utils.h"
 #import "ios/chrome/browser/bookmarks/model/managed_bookmark_service_factory.h"
+#import "ios/chrome/browser/bookmarks/public/bookmarks_ui_constants.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/bookmark_navigation_controller.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/bookmark_path_cache.h"
-#import "ios/chrome/browser/bookmarks/ui_bundled/bookmark_ui_constants.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/bookmark_utils_ios.h"
-#import "ios/chrome/browser/bookmarks/ui_bundled/cells/bookmark_home_node_item.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/cells/bookmark_table_cell_title_edit_delegate.h"
-#import "ios/chrome/browser/bookmarks/ui_bundled/cells/table_view_bookmarks_folder_item.h"
-#import "ios/chrome/browser/bookmarks/ui_bundled/folder_chooser/bookmarks_folder_chooser_coordinator.h"
-#import "ios/chrome/browser/bookmarks/ui_bundled/folder_chooser/bookmarks_folder_chooser_coordinator_delegate.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/home/bookmarks_coordinator.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/home/bookmarks_coordinator_delegate.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/home/bookmarks_home_consumer.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/home/bookmarks_home_mediator.h"
+#import "ios/chrome/browser/bookmarks/ui_bundled/home/bookmarks_home_node_item.h"
 #import "ios/chrome/browser/drag_and_drop/model/drag_item_util.h"
 #import "ios/chrome/browser/drag_and_drop/model/table_view_url_drag_drop_handler.h"
 #import "ios/chrome/browser/favicon/model/favicon_loader.h"
@@ -630,28 +630,19 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 
 - (void)loadFaviconAtIndexPath:(NSIndexPath*)indexPath
         fallbackToGoogleServer:(BOOL)fallbackToGoogleServer {
-  UITableViewCell* cell = [self.tableView cellForRowAtIndexPath:indexPath];
-  [self loadFaviconAtIndexPath:indexPath
-                       forCell:cell
-        fallbackToGoogleServer:fallbackToGoogleServer];
-}
-
-// Asynchronously loads favicon for given index path. The loads are cancelled
-// upon cell reuse automatically.  When the favicon is not found in cache, try
-// loading it from a Google server if `fallbackToGoogleServer` is YES,
-// otherwise, use the fall back icon style.
-- (void)loadFaviconAtIndexPath:(NSIndexPath*)indexPath
-                       forCell:(UITableViewCell*)cell
-        fallbackToGoogleServer:(BOOL)fallbackToGoogleServer {
   const BookmarkNode* node = [self nodeAtIndexPath:indexPath];
   if (node->is_folder()) {
     return;
   }
 
+  TableViewItem* item = [self.tableViewModel itemAtIndexPath:indexPath];
+  BookmarksHomeNodeItem* URLItem =
+      base::apple::ObjCCastStrict<BookmarksHomeNodeItem>(item);
+
   // Start loading a favicon.
   __weak BookmarksHomeViewController* weakSelf = self;
   GURL blockURL(node->url());
-  auto faviconLoadedBlock = ^(FaviconAttributes* attributes) {
+  auto faviconLoadedBlock = ^(FaviconAttributes* attributes, bool cached) {
     BookmarksHomeViewController* strongSelf = weakSelf;
     if (!strongSelf) {
       return;
@@ -662,9 +653,10 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
         [strongSelf nodeAtIndexPath:indexPath] != node) {
       return;
     }
-    TableViewURLCell* URLCell =
-        base::apple::ObjCCastStrict<TableViewURLCell>(cell);
-    [URLCell.faviconView configureWithAttributes:attributes];
+    URLItem.faviconAttributes = attributes;
+    if (!cached && attributes.faviconImage) {
+      [strongSelf.tableView reconfigureRowsAtIndexPaths:@[ indexPath ]];
+    }
   };
 
   self.faviconLoader->FaviconForPageUrl(
@@ -895,7 +887,7 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
   DCHECK_GE(nodes.size(), 1u);
   base::RecordAction(base::UserMetricsAction(userAction));
   [self.snackbarCommandsHandler
-      showSnackbarMessage:bookmark_utils_ios::DeleteBookmarksWithUndoToast(
+      showSnackbarMessage:bookmark_utils_ios::DeleteBookmarksWithUndoSnackbar(
                               nodes, _bookmarkModel.get(), self.profile,
                               FROM_HERE)];
   [self setTableViewEditing:NO];
@@ -1215,7 +1207,7 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 - (void)handleMoveNode:(const BookmarkNode*)node toPosition:(size_t)position {
   [self.snackbarCommandsHandler
       showSnackbarMessage:
-          bookmark_utils_ios::UpdateBookmarkPositionWithUndoToast(
+          bookmark_utils_ios::UpdateBookmarkPositionWithUndoSnackbar(
               node, self.displayedFolderNode, position, _bookmarkModel.get(),
               self.profile)];
 }
@@ -1280,7 +1272,7 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
   [self setTableViewEditing:NO];
   ProfileIOS* profile = self.profile;
   [self.snackbarCommandsHandler
-      showSnackbarMessage:bookmark_utils_ios::MoveBookmarksWithUndoToast(
+      showSnackbarMessage:bookmark_utils_ios::MoveBookmarksWithUndoSnackbar(
                               editedNodesVector, _bookmarkModel.get(), folder,
                               profile,
                               AuthenticationServiceFactory::GetForProfile(
@@ -2606,13 +2598,20 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 
 - (UITableViewCell*)tableView:(UITableView*)tableView
         cellForRowAtIndexPath:(NSIndexPath*)indexPath {
+  TableViewItem* item = [self.tableViewModel itemAtIndexPath:indexPath];
+
+  if (item.type == BookmarksHomeItemTypeBookmark) {
+    // Load the favicon from cache. If not found, try fetching it from a
+    // Google Server.
+    [self loadFaviconAtIndexPath:indexPath fallbackToGoogleServer:YES];
+  }
+
   UITableViewCell* cell = [super tableView:tableView
                      cellForRowAtIndexPath:indexPath];
   UIView* selectedBackgroundView = [[UIView alloc] init];
   selectedBackgroundView.backgroundColor =
       [UIColor colorNamed:kTertiaryBackgroundColor];
   cell.selectedBackgroundView = selectedBackgroundView;
-  TableViewItem* item = [self.tableViewModel itemAtIndexPath:indexPath];
 
   cell.userInteractionEnabled =
       (item.type != BookmarksHomeItemTypeMessage &&
@@ -2644,12 +2643,6 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
         tableCell.textDelegate = strongSelf;
       });
     }
-
-    // Load the favicon from cache. If not found, try fetching it from a
-    // Google Server.
-    [self loadFaviconAtIndexPath:indexPath
-                         forCell:cell
-          fallbackToGoogleServer:YES];
   }
 
   return cell;
@@ -2943,7 +2936,7 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 
   [self.snackbarCommandsHandler
       showSnackbarMessage:
-          bookmark_utils_ios::CreateBookmarkAtPositionWithUndoToast(
+          bookmark_utils_ios::CreateBookmarkAtPositionWithUndoSnackbar(
               base::SysUTF8ToNSString(URL.spec()), URL,
               self.displayedFolderNode, index, _bookmarkModel.get(),
               self.profile)];

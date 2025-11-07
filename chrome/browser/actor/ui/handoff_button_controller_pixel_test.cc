@@ -6,6 +6,7 @@
 #include "base/test/test_future.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/actor_task.h"
+#include "chrome/browser/actor/actor_task_metadata.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/ui/actor_ui_tab_controller.h"
 #include "chrome/browser/actor/ui/states/handoff_button_state.h"
@@ -51,6 +52,7 @@ class ActorUiHandoffButtonControllerPixelTest : public DialogBrowserTest {
     std::vector<std::unique_ptr<actor::ToolRequest>> actions;
     actions.push_back(actor::MakeWaitRequest());
     GetActorKeyedService()->PerformActions(task_id_, std::move(actions),
+                                           actor::ActorTaskMetadata(),
                                            result_future.GetCallback());
     ExpectOkResult(result_future);
 
@@ -80,11 +82,22 @@ IN_PROC_BROWSER_TEST_F(ActorUiHandoffButtonControllerPixelTest,
   ShowAndVerifyUi();
 }
 
-IN_PROC_BROWSER_TEST_F(ActorUiHandoffButtonControllerPixelTest,
-                       InvokeUi_GiveTaskBack) {
+class ActorUiHandoffButtonHiddenPixelTest
+    : public ActorUiHandoffButtonControllerPixelTest {
+ public:
+  ActorUiHandoffButtonHiddenPixelTest() {
+    override_feature_list_.InitAndDisableFeature(
+        features::kGlicHandoffButtonHiddenClientControl);
+  }
+
+ private:
+  base::test::ScopedFeatureList override_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ActorUiHandoffButtonHiddenPixelTest,
+                       InvokeUi_TakeOverTask) {
   ownership_ = HandoffButtonState::ControlOwnership::kClient;
   ShowAndVerifyUi();
 }
-
 }  // namespace
 }  // namespace actor::ui

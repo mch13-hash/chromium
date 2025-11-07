@@ -15,6 +15,7 @@
 #import "components/bookmarks/browser/bookmark_model.h"
 #import "components/omnibox/browser/autocomplete_classifier.h"
 #import "components/omnibox/browser/autocomplete_controller.h"
+#import "components/omnibox/browser/autocomplete_controller_config.h"
 #import "components/omnibox/browser/autocomplete_input.h"
 #import "components/omnibox/browser/autocomplete_match.h"
 #import "components/omnibox/browser/autocomplete_result.h"
@@ -29,6 +30,7 @@
 #import "ios/chrome/browser/omnibox/model/autocomplete_controller_observer_bridge.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_autocomplete_controller_debugger_delegate.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_autocomplete_controller_delegate.h"
+#import "ios/chrome/browser/omnibox/model/omnibox_lens_delegate.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_metrics_recorder.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_text_controller.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_text_model.h"
@@ -76,7 +78,9 @@ using base::UserMetricsAction;
 
     _autocompleteController = std::make_unique<AutocompleteController>(
         _omniboxClient->CreateAutocompleteProviderClient(),
-        AutocompleteClassifier::DefaultOmniboxProviders());
+        AutocompleteControllerConfig{
+            .provider_types =
+                AutocompleteClassifier::DefaultOmniboxProviders()});
 
     _autocompleteControllerObserverBridge =
         std::make_unique<AutocompleteControllerObserverBridge>(self);
@@ -344,9 +348,9 @@ using base::UserMetricsAction;
     return;
   }
 
-    [self openSelection:OmniboxPopupSelection(row)
-              timestamp:matchSelectionTimestamp
-            disposition:disposition];
+  [self openSelection:OmniboxPopupSelection(row)
+            timestamp:matchSelectionTimestamp
+          disposition:disposition];
 }
 
 - (void)selectMatchForAppending:(const AutocompleteMatch&)match {
@@ -837,15 +841,20 @@ using base::UserMetricsAction;
       break;
     }
     case AutocompleteMatchType::CLIPBOARD_IMAGE: {
-      clipboardRecentContent->GetRecentImageFromClipboard(base::BindOnce(
-          [](OmniboxAutocompleteController* controller,
-             WindowOpenDisposition disposition, base::TimeTicks timestamp,
-             std::optional<gfx::Image> optionalImage) {
-            [controller openClipboardImage:optionalImage
-                               disposition:disposition
-                                 timestamp:timestamp];
-          },
-          weakSelf, disposition, timestamp));
+      if ([self.lensHander shouldUseLensForCopiedImage]) {
+        [self.lensHander lensCopiedImage];
+      } else {
+        clipboardRecentContent->GetRecentImageFromClipboard(base::BindOnce(
+            [](OmniboxAutocompleteController* controller,
+               WindowOpenDisposition disposition, base::TimeTicks timestamp,
+               std::optional<gfx::Image> optionalImage) {
+              [controller openClipboardImage:optionalImage
+                                 disposition:disposition
+                                   timestamp:timestamp];
+            },
+            weakSelf, disposition, timestamp));
+      }
+
       break;
     }
     default:

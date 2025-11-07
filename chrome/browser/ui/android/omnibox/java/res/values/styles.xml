@@ -5,21 +5,6 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style
-        name="Base.Theme.Chromium.TabbedMode"
-        parent="Theme.Chromium.WithWindowAnimation">
-
-        <item name="android:statusBarColor">@macro/default_bg_color</item>
-        <item name="android:windowLightStatusBar">
-            @bool/window_light_status_bar
-        </item>
-
-    </style>
-
-    <style
-        name="Theme.Chromium.TabbedMode"
-        parent="Base.Theme.Chromium.TabbedMode"/>
-
     <!-- Omnibox -->
     <style
         name="TextAppearance.OmniboxVerboseStatus"
@@ -45,12 +30,49 @@ found in the LICENSE file.
     </style>
 
     <!-- Navigation Attachments bar styles -->
+    <style name="NavigationAttachments"/>
+    <style name="NavigationAttachments.PopupMenu"/>
     <style
-        name="TextAppearance.TextMedium.Primary.Bold"
-        parent="@style/TextAppearance.TextMedium.Primary">
+        name="NavigationAttachments.PopupMenu.Header"
+        parent="@style/TextButton">
 
-        <item name="android:textStyle">bold</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">
+            @dimen/min_touch_target_size
+        </item>
+        <item name="android:drawablePadding">8dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textAlignment">viewStart</item>
+        <item name="android:textAppearance">
+            @style/TextAppearance.TextSmall.Primary
+        </item>
+        <item name="layout_constraintStart_toStartOf">parent</item>
+        <item name="layout_constraintEnd_toEndOf">parent</item>
+        <item name="drawableTint">
+            @color/default_icon_color_tint_list
+        </item>
+        <item name="buttonTextColor">@null</item>
 
+    </style>
+
+    <style
+        name="NavigationAttachments.PopupMenu.Item"
+        parent="@style/NavigationAttachments.PopupMenu.Header">
+
+        <item name="android:textAppearance">
+            @style/TextAppearance.TextMedium.Primary
+        </item>
+
+    </style>
+
+    <style name="NavigationAttachments.PopupMenu.Divider">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="android:background">?android:attr/listDivider</item>
+        <item name="layout_constraintStart_toStartOf">parent</item>
+        <item name="layout_constraintEnd_toEndOf">parent</item>
     </style>
 
     <style name="OmniboxIcon" parent="LocationBarButton">

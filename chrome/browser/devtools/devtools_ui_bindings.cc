@@ -66,6 +66,7 @@
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/metrics/structured/structured_events.h"
 #include "components/metrics/structured/structured_metrics_client.h"
+#include "components/permissions/permission_util.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/policy_constants.h"
@@ -124,6 +125,8 @@
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
@@ -389,6 +392,15 @@ std::string SanitizeEnabledExperiments(const std::string& value) {
   return std::ranges::all_of(value, is_legal) ? value : std::string();
 }
 
+std::string SanitizeTraceURL(const std::string& value) {
+  if (base::StartsWith(value, "http") &&
+      (base::EndsWith(value, ".json") || base::EndsWith(value, ".json.gz"))) {
+    return value;
+  }
+
+  return std::string();
+}
+
 std::string SanitizeFrontendQueryParam(const std::string& key,
                                        const std::string& value) {
   // Convert boolean flags to true.
@@ -405,7 +417,8 @@ std::string SanitizeFrontendQueryParam(const std::string& key,
   }
 
   if (key == "panel" &&
-      (value == "elements" || value == "console" || value == "sources")) {
+      (value == "elements" || value == "console" || value == "sources" ||
+       value == "network" || value == "resources")) {
     return value;
   }
 
@@ -423,6 +436,10 @@ std::string SanitizeFrontendQueryParam(const std::string& key,
 
   if (key == "enabledExperiments") {
     return SanitizeEnabledExperiments(value);
+  }
+
+  if (key == "traceURL") {
+    return SanitizeTraceURL(value);
   }
 
   if (key == "targetType" && value == "tab") {
@@ -1824,6 +1841,16 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
                       std::move(ai_code_completion_dict));
   }
 
+  if (base::FeatureList::IsEnabled(
+          ::features::kDevToolsEnableDurableMessages)) {
+    base::Value::Dict devtools_durable_message_dict;
+    devtools_durable_message_dict.Set(
+        "enabled",
+        base::FeatureList::IsEnabled(features::kDevToolsEnableDurableMessages));
+    response_dict.Set("devToolsEnableDurableMessages",
+                      std::move(devtools_durable_message_dict));
+  }
+
   base::Value::Dict devtools_well_known_dict;
   devtools_well_known_dict.Set(
       "enabled", base::FeatureList::IsEnabled(::features::kDevToolsWellKnown));
@@ -1885,6 +1912,11 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
       base::FeatureList::IsEnabled(net::features::kEnableSchemeBoundCookies));
   response_dict.Set("devToolsEnableOriginBoundCookies",
                     std::move(origin_bound_cookies_dict));
+
+  if (base::FeatureList::IsEnabled(features::kDevToolsGreenDevUi)) {
+    response_dict.Set("devToolsGreenDevUi",
+                      base::Value::Dict().Set("enabled", true));
+  }
 
   if (base::FeatureList::IsEnabled(
           ::features::kDevToolsAnimationStylesInStylesTab)) {
@@ -2006,6 +2038,13 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
                      ::features::kDevToolsStartingStyleDebugging));
   response_dict.Set("devToolsStartingStyleDebugging",
                     std::move(starting_style_debugging));
+
+  base::Value::Dict prompt_api_dict;
+  prompt_api_dict.Set("enabled", base::FeatureList::IsEnabled(
+                                     ::features::kDevToolsAiPromptApi));
+  prompt_api_dict.Set("allowWithoutGpu",
+                      features::kDevToolsAiPromptApiAllowWithoutGpu.Get());
+  response_dict.Set("devToolsAiPromptApi", std::move(prompt_api_dict));
 
   base::Value response = base::Value(std::move(response_dict));
   std::move(callback).Run(&response);

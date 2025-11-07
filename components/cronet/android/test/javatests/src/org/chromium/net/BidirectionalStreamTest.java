@@ -30,8 +30,8 @@ import org.chromium.base.Log;
 import org.chromium.base.test.util.DoNotBatch;
 import org.chromium.base.test.util.RequiresRestart;
 import org.chromium.build.BuildConfig;
+import org.chromium.net.CronetTestFramework.CronetImplementation;
 import org.chromium.net.CronetTestRule.BoolFlag;
-import org.chromium.net.CronetTestRule.CronetImplementation;
 import org.chromium.net.CronetTestRule.Flags;
 import org.chromium.net.CronetTestRule.IgnoreFor;
 import org.chromium.net.CronetTestRule.RequiresMinAndroidApi;
@@ -47,6 +47,7 @@ import org.chromium.net.impl.JavaCronetProvider;
 import org.chromium.net.impl.NetworkExceptionImpl;
 import org.chromium.net.impl.TestLogger;
 import org.chromium.net.impl.UrlResponseInfoImpl;
+import org.chromium.net.impl.UserAgentTestUtil;
 
 import java.nio.ByteBuffer;
 import java.util.AbstractMap;
@@ -1200,8 +1201,7 @@ public class BidirectionalStreamTest {
         assertThat(callback.getResponseInfoWithChecks()).hasHttpStatusCodeThat().isEqualTo(200);
         assertThat(callback.mResponseAsString)
                 .isEqualTo(
-                        new CronetEngine.Builder(mTestRule.getTestFramework().getContext())
-                                .getDefaultUserAgent());
+                        UserAgentTestUtil.getDefaultUserAgent(mTestRule.implementationUnderTest()));
     }
 
     @Test

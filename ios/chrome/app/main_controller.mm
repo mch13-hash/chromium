@@ -26,7 +26,6 @@
 #import "base/timer/timer.h"
 #import "components/application_locale_storage/application_locale_storage.h"
 #import "components/component_updater/component_updater_service.h"
-#import "components/component_updater/installer_policies/afp_content_rule_list_component_installer.h"
 #import "components/component_updater/installer_policies/autofill_states_component_installer.h"
 #import "components/component_updater/installer_policies/on_device_head_suggest_component_installer.h"
 #import "components/component_updater/installer_policies/optimization_hints_component_installer.h"
@@ -214,9 +213,6 @@ NSString* const kUploadCrashReports = @"UploadCrashReports";
 // Constants for deferring the enterprise managed device check.
 NSString* const kEnterpriseManagedDeviceCheck = @"EnterpriseManagedDeviceCheck";
 
-// Constants for deferred deletion of leftover session state files.
-NSString* const kPurgeWebSessionStates = @"PurgeWebSessionStates";
-
 // Constant for deffered memory experimentation.
 NSString* const kMemoryExperimentation = @"BeginMemoryExperimentation";
 
@@ -237,6 +233,10 @@ NSString* const kShareExtensionForMultiprofileKey =
 // Constant for enabling  multi-profile.
 NSString* const kMultiprofileKey = @"MultiprofileKey";
 
+// Constant for enabling the swap of confirmation button order.
+NSString* const kConfirmationButtonSwapOrderKey =
+    @"ConfirmationButtonSwapOrderKey";
+
 // Adapted from chrome/browser/ui/browser_init.cc.
 void RegisterComponentsForUpdate() {
   component_updater::ComponentUpdateService* cus =
@@ -249,8 +249,6 @@ void RegisterComponentsForUpdate() {
                                   GetApplicationContext()->GetLocalState());
   RegisterOptimizationHintsComponent(cus);
   RegisterPlusAddressBlocklistComponent(cus);
-  component_updater::AntiFingerprintingContentRuleListComponentInstallerPolicy::
-      Register(cus);
 }
 
 // The delay before beginning memory experimentation.
@@ -498,8 +496,9 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
   // appropriate pref changes.
   MemoryDebuggerManager* _memoryDebuggerManager;
 
-  // Variable backing metricsMediator property.
-  __weak MetricsMediator* _metricsMediator;
+  // Metrics mediator used to check and update the metrics accordingly to the
+  // user preferences.
+  MetricsMediator* _metricsMediator;
 
   // Holds the ProfileController for all loaded profiles.
   std::map<std::string, ProfileController*, std::less<>> _profileControllers;
@@ -559,6 +558,7 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
   if ((self = [super init])) {
     _isFirstRun = ShouldPresentFirstRunExperience();
     _startupTasks = [[StartupTasks alloc] init];
+    _metricsMediator = [[MetricsMediator alloc] init];
   }
   return self;
 }
@@ -1052,7 +1052,6 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
         NOTREACHED();
 
       case ProfileInitStage::kLoadProfile:
-      case ProfileInitStage::kMigrateStorage:
       case ProfileInitStage::kPurgeDiscardedSessionsData:
       case ProfileInitStage::kProfileLoaded:
       case ProfileInitStage::kPrepareUI:
@@ -1091,7 +1090,6 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
         NOTREACHED();
 
       case ProfileInitStage::kLoadProfile:
-      case ProfileInitStage::kMigrateStorage:
       case ProfileInitStage::kPurgeDiscardedSessionsData:
         // Nothing to do.
         break;
@@ -1498,6 +1496,10 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
     },
     kMultiprofileKey : @{
       kFieldTrialValueKey : @(AreSeparateProfilesForManagedAccountsEnabled()),
+      kFieldTrialVersionKey : @1,
+    },
+    kConfirmationButtonSwapOrderKey : @{
+      kFieldTrialValueKey : @(IsConfirmationButtonSwapOrderEnabled()),
       kFieldTrialVersionKey : @1,
     },
   };

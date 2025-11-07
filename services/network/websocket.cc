@@ -297,7 +297,7 @@ int WebSocket::WebSocketEventHandler::OnURLRequestConnected(
               std::move(callback).Run(
                   permission_granted
                       ? net::OK
-                      : net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS);
+                      : net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS);
             },
             impl_->weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
     return net::ERR_IO_PENDING;
@@ -305,7 +305,7 @@ int WebSocket::WebSocketEventHandler::OnURLRequestConnected(
 
   // Otherwise, if there was a Local Network Access CORS error, block by
   // default.
-  return net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS;
+  return net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS;
 }
 
 void WebSocket::WebSocketEventHandler::OnAddChannelResponse(
@@ -701,10 +701,11 @@ int WebSocket::OnHeadersReceived(
     net::CompletionOnceCallback callback,
     const net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
-    std::optional<GURL>* preserve_fragment_on_redirect_url) {
+    std::optional<GURL>* preserve_fragment_on_redirect_url,
+    const std::optional<net::SSLInfo>& ssl_info) {
   if (header_client_) {
     header_client_->OnHeadersReceived(
-        original_response_headers->raw_headers(), net::IPEndPoint(),
+        original_response_headers->raw_headers(), net::IPEndPoint(), ssl_info,
         base::BindOnce(&WebSocket::OnHeadersReceivedComplete,
                        weak_ptr_factory_.GetWeakPtr(), std::move(callback),
                        override_response_headers,

@@ -32,6 +32,8 @@ namespace safe_browsing {
 
 namespace {
 
+using enterprise_connectors::ConnectorDataPipeGetter;
+
 // HTTP headers for resumable upload requests
 constexpr char kUploadProtocolHeader[] = "X-Goog-Upload-Protocol";
 constexpr char kUploadCommandHeader[] = "X-Goog-Upload-Command";
@@ -318,9 +320,7 @@ void ResumableUploadRequest::OnMetadataUploadCompleted(
     return;
   }
 
-  if (base::FeatureList::IsEnabled(
-          enterprise_connectors::kEnableAsyncUploadAfterVerdict) &&
-      !force_sync_upload_) {
+  if (!force_sync_upload_) {
     if (headers->HasHeader(kUploadIntermediateHeader)) {
       response_body = headers->GetNormalizedHeader(kUploadIntermediateHeader);
 

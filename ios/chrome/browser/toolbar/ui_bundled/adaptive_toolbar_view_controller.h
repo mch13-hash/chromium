@@ -75,6 +75,10 @@
 // Highlights the tab grid button if `highlight` is YES, resets to original
 // color if NO.
 - (void)IPHHighlightTabGridButton:(BOOL)highlight;
+// Sets the height of the location bar. Used when the omnibox is multiline.
+- (void)setLocationBarHeight:(CGFloat)height;
+// Informs the view controller that the location bar is focused or not.
+- (void)setLocationBarFocused:(BOOL)focused;
 
 @end
 

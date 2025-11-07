@@ -109,15 +109,6 @@ inline constexpr char kDownloadAutoDeletionIPHShown[] =
 inline constexpr char kDownloadAutoDeletionScheduledFiles[] =
     "ios.auto_deletion.scheduled_files";
 
-// Number of times the First Follow UI has been shown.
-inline constexpr char kFirstFollowUIShownCount[] =
-    "follow.first_follow_ui_modal_count";
-
-// Number of times the First Follow UI has been shown with Follow UI Update
-// enabled.
-inline constexpr char kFirstFollowUpdateUIShownCount[] =
-    "follow.first_follow_update_ui_modal_count";
-
 // A dictionary mapping push notification enabled features to their permission
 // to send notifications to the user. This is stored in Profile prefs.
 inline constexpr char kFeaturePushNotificationPermissions[] =
@@ -316,15 +307,15 @@ inline constexpr char
 inline constexpr char kIosMiniMapShowNativeMap[] =
     "ios.mini_map.show_native_map";
 
-// The number of consecutive times the user dismissed the password bottom sheet.
-// This gets reset to 0 whenever the user selects a password from the bottom
-// sheet or from the keyboard accessory.
+// The number of consecutive times the user dismissed the credential bottom
+// sheet. This gets reset to 0 whenever the user selects a password from the
+// bottom sheet or from the keyboard accessory.
 inline constexpr char kIosPasswordBottomSheetDismissCount[] =
     "ios.password_bottom_sheet_dismiss_count";
 
-// The number of consecutive times the user dismissed the password bottom sheet.
-// This gets reset to 0 whenever the user selects the generated password from
-// the bottom sheet or from the keyboard accessory.
+// The number of consecutive times the user dismissed the password generation
+// bottom sheet. This gets reset to 0 whenever the user selects the generated
+// password from the bottom sheet or from the keyboard accessory.
 inline constexpr char kIosPasswordGenerationBottomSheetDismissCount[] =
     "ios.password_generation_bottom_sheet_dismiss_count";
 
@@ -496,10 +487,6 @@ inline constexpr char kNTPContentSuggestionsForSupervisedUserEnabled[] =
 inline constexpr char kNTPCustomBackgroundEnabledByPolicy[] =
     "ios.ntp.custom_background_enabled_by_policy";
 
-// Preference that represents the sorting order of the Following feed content.
-inline constexpr char kNTPFollowingFeedSortType[] =
-    "ios.ntp.following_feed.sort_type";
-
 // Preference that determines if the user changed the Following feed sort type.
 inline constexpr char kDefaultFollowingFeedSortTypeChanged[] =
     "ios.ntp.following_feed_default_sort_type_changed";
@@ -664,6 +651,11 @@ inline constexpr char kAutofillBrandingIconAnimationRemainingCount[] =
 inline constexpr char kAutofillBrandingIconDisplayCount[] =
     "ios.autofill.branding.display_count";
 
+// A boolean used for the automatically open tab groups from other devices
+// setting.
+inline constexpr char kAutomaticallyOpenTabGroupsEnabled[] =
+    "ios.settings.automatically_open_tab_groups_enabled";
+
 // A boolean used to determine if the Price Tracking UI has been shown.
 inline constexpr char kPriceNotificationsHasBeenShown[] =
     "ios.price_notifications.has_been_shown";
@@ -806,6 +798,10 @@ inline constexpr char kLastGeminiInteractionTimestamp[] =
 inline constexpr char kLastGeminiInteractionURL[] =
     "ios.gemini.last_interaction_url";
 
+// Timestamp tracking the last time the Gemini contextual chip was displayed.
+inline constexpr char kLastGeminiContextualChipDisplayedTimestamp[] =
+    "ios.gemini.last_contextual_chip_displayed";
+
 // A string specifying the active conversation ID.
 inline constexpr char kGeminiConversationId[] = "ios.gemini.conversation_id";
 
@@ -849,6 +845,21 @@ inline constexpr char kIOSGMOSKOPlacementIDNextLogDate[] =
 // the short window or the long window.
 inline constexpr char kIOSGMOSKOLastAttributionWindowType[] =
     "ios.gmosko_last_attribution_window_type";
+
+// An integer pref to store the placement ID of the acceptance data if the
+// install was attributable to the external promo from the App Preview.
+inline constexpr char kIOSAppPreviewLastAttributionPlacementID[] =
+    "ios.app_preview_last_attribution_placement_id";
+
+// A time pref to store the date after which the placement ID can be logged for
+// the App Preview.
+inline constexpr char kIOSAppPreviewPlacementIDNextLogDate[] =
+    "ios.app_preview_placement_id_next_log_date";
+
+// An integer storing whether the install attribution was attributable within
+// the short window or the long window for the App Preview.
+inline constexpr char kIOSAppPreviewLastAttributionWindowType[] =
+    "ios.app_preview_last_attribution_window_type";
 
 // A profile pref for storing a list of timestamps of days the user was active.
 inline constexpr char kCrossPlatformPromosActiveDays[] =

@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "base/functional/callback_forward.h"
-#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/password_manager/web_app_profile_switcher.h"
 #include "chrome/browser/profiles/avatar_menu.h"
@@ -26,6 +25,7 @@
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_metrics.h"
 #include "components/sync/service/local_data_description.h"
+#include "components/sync/service/sync_service.h"
 #include "ui/views/controls/styled_label.h"
 
 namespace signin_metrics {
@@ -95,7 +95,7 @@ class ProfileMenuView : public ProfileMenuViewBase {
   void OnSyncSettingsButtonClicked();
   void OnGoogleServicesSettingsButtonClicked();
   void OnAccountSettingsButtonClicked();
-  void OnSyncErrorButtonClicked(AvatarSyncErrorType error);
+  void OnSyncErrorButtonClicked(syncer::SyncService::UserActionableError error);
   void OnSigninButtonClicked(CoreAccountInfo account,
                              ActionableItem button_type,
                              signin_metrics::AccessPoint access_point);

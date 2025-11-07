@@ -18,8 +18,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.test.util.Batch;
+import org.chromium.net.CronetTestFramework;
 import org.chromium.net.CronetTestRule;
-import org.chromium.net.CronetTestRule.CronetTestFramework;
 import org.chromium.net.impl.CronetLogger.CronetSource;
 
 /** Tests {@link CronetManifest} */
@@ -146,5 +146,36 @@ public class CronetManifestTest {
     public void testShouldReadHttpFlags_whenMetadataIsFalse() throws Exception {
         setReadHttpFlags(false);
         assertThat(CronetManifest.shouldReadHttpFlags(mCronetTestFramework.getContext())).isFalse();
+    }
+
+    @Test
+    @SmallTest
+    public void testLegacyUserAgent_whenNoMetadata() throws Exception {
+        assertThat(
+                        CronetManifest.shouldUseLegacyDefaultUserAgent(
+                                mCronetTestFramework.getContext()))
+                .isFalse();
+    }
+
+    @Test
+    @SmallTest
+    public void testLegacyUserAgent_whenMetadataIsTrue() throws Exception {
+        mCronetTestFramework.interceptContext(
+                UserAgentTestUtil.getContextInterceptorWithLegacyUserAgent(true));
+        assertThat(
+                        CronetManifest.shouldUseLegacyDefaultUserAgent(
+                                mCronetTestFramework.getContext()))
+                .isTrue();
+    }
+
+    @Test
+    @SmallTest
+    public void testLegacyUserAgent_whenMetadataIsFalse() throws Exception {
+        mCronetTestFramework.interceptContext(
+                UserAgentTestUtil.getContextInterceptorWithLegacyUserAgent(false));
+        assertThat(
+                        CronetManifest.shouldUseLegacyDefaultUserAgent(
+                                mCronetTestFramework.getContext()))
+                .isFalse();
     }
 }

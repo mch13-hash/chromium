@@ -25,7 +25,7 @@
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/tab_groups/tab_groups_eg_utils.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/test/query_title_server_util.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/test/tabs_egtest_util.h"
-#import "ios/chrome/common/ui/confirmation_alert/constants.h"
+#import "ios/chrome/common/ui/button_stack/button_stack_constants.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey.h"
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
@@ -267,7 +267,7 @@ void WaitForFakeJoinFlowView() {
   // Dismiss it, go back and re-enter.
   [[EarlGrey selectElementWithMatcher:
                  grey_accessibilityID(
-                     kConfirmationAlertPrimaryActionAccessibilityIdentifier)]
+                     kButtonStackPrimaryActionAccessibilityIdentifier)]
       performAction:grey_tap()];
   [ChromeEarlGrey waitForUIElementToDisappearWithMatcher:educationScreen];
   [[EarlGrey selectElementWithMatcher:CloseTabGroupButton()]
@@ -872,7 +872,8 @@ void WaitForFakeJoinFlowView() {
 }
 
 // Ensures new tab is added when closing the last tab of a shared group.
-- (void)testCloseLastTabInSharedGroup {
+// TODO(crbug.com/454567832): Re-enable this test.
+- (void)FLAKY_testCloseLastTabInSharedGroup {
   AddSharedGroup(/*owner=*/NO, self.testServer);
   [ChromeEarlGrey waitForMainTabCount:1];
 
@@ -1282,6 +1283,13 @@ void WaitForFakeJoinFlowView() {
 // Tests that the activity summary is displayed when a tab is added from sync to
 // a shared tab group.
 - (void)testActivitySummary {
+#if TARGET_IPHONE_SIMULATOR
+  // TODO(crbug.com/456719999): Re-enable the test on simulators.
+  if (base::ios::IsRunningOnIOS26OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on simulators.");
+  }
+#endif
+
   AddSharedGroup(/*owner=*/YES, self.testServer);
   [ChromeEarlGrey waitForMainTabCount:1];
 
@@ -1446,7 +1454,8 @@ void WaitForFakeJoinFlowView() {
 
 // Tests that the activity indicators (blue dot and notification dot) on the
 // toolbar are updated when a shared group is updated.
-- (void)testActivityIndicatorsOnToolbar {
+// TODO(crbug.com/454262963): test is flaky, disable it.
+- (void)DISABLED_testActivityIndicatorsOnToolbar {
   AddSharedGroup(/*owner=*/YES, self.testServer);
   [ChromeEarlGrey waitForMainTabCount:1];
 

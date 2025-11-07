@@ -60,7 +60,6 @@ PermissionStatusToEmbeddedPermissionControlResult(PermissionStatus status) {
     case PermissionStatus::GRANTED:
       return EmbeddedPermissionControlResult::kGranted;
     case PermissionStatus::DENIED:
-    case blink::mojom::PermissionStatus::UNSATISFIED_OPTIONS:
       return EmbeddedPermissionControlResult::kDenied;
     case PermissionStatus::ASK:
       return EmbeddedPermissionControlResult::kDismissed;
@@ -174,10 +173,8 @@ void PermissionServiceImpl::RegisterPageEmbeddedPermissionControl(
       web_contents->GetPrimaryPage());
   std::set<PermissionName> permission_names;
   for (const auto& permission : permissions) {
-    // Ensure all requested permissions are device permissions and check for
-    // duplicates.
-    if (!PermissionUtil::IsDevicePermission(permission) ||
-        !permission_names.insert(permission->name).second) {
+    // Check for duplicates.
+    if (!permission_names.insert(permission->name).second) {
       ReceivedBadMessage();
       return;
     }
@@ -208,7 +205,11 @@ void PermissionServiceImpl::OnPageEmbeddedPermissionControlRegistered(
   std::vector<PermissionStatus> statuses(permissions.size());
   std::ranges::transform(
       permissions, statuses.begin(), [&](const auto& permission) {
-        return this->GetCombinedPermissionAndDeviceResult(permission).status;
+        bool should_include_device_status =
+            PermissionUtil::IsDevicePermission(permission);
+        return should_include_device_status
+                   ? GetCombinedPermissionAndDeviceResult(permission).status
+                   : GetPermissionResultForCurrentContext(permission).status;
       });
   client->OnEmbeddedPermissionControlRegistered(/*allow=*/true,
                                                 std::move(statuses));
@@ -337,24 +338,7 @@ void PermissionServiceImpl::OnRequestPermissionsResponse(
 
 void PermissionServiceImpl::HasPermission(PermissionDescriptorPtr permission,
                                           PermissionStatusCallback callback) {
-  auto permission_status = GetPermissionResult(permission).status;
-  if (base::FeatureList::IsEnabled(
-          content_settings::features::kApproximateGeolocationPermission) &&
-      blink::PermissionDescriptorToPermissionType(permission) ==
-          blink::PermissionType::GEOLOCATION &&
-      permission_status ==
-          blink::mojom::PermissionStatus::UNSATISFIED_OPTIONS) {
-    // TODO(crbug.com/430586927): This is a short-term solution. Once the
-    // geolocation permission descriptor supports isPrecise, the correct
-    // preciseness should be queried. The query API uses a permission descriptor
-    // to query the permission state. Since the coarse location MVP currently
-    // doesn't use a special permission descriptor, the query API can only query
-    // whether precise location is granted, which results in UNSATISFIED_OPTIONS
-    // for a coarse location granted. We can map this to a GRANTED for the
-    // purposes of the query API.
-    permission_status = PermissionStatus::GRANTED;
-  }
-  std::move(callback).Run(permission_status);
+  std::move(callback).Run(GetPermissionResult(permission).status);
 }
 
 void PermissionServiceImpl::RevokePermission(
@@ -397,7 +381,7 @@ void PermissionServiceImpl::AddPermissionObserver(
       /*should_include_device_status*/ false, std::move(observer));
 }
 
-void PermissionServiceImpl::AddCombinedPermissionObserver(
+void PermissionServiceImpl::AddPageEmbeddedPermissionObserver(
     PermissionDescriptorPtr permission,
     PermissionStatus last_known_status,
     mojo::PendingRemote<blink::mojom::PermissionObserver> observer) {

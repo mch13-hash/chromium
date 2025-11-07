@@ -2186,11 +2186,11 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
     const ComputedStyle& style,
     bool force_computed_value) {
   if (style.IsDisplayMasonryBox()) {
-    return ValueForGridTrackList<LayoutMasonry>(direction, layout_object, style,
-                                                force_computed_value);
+    return blink::ValueForGridTrackList<LayoutMasonry>(
+        direction, layout_object, style, force_computed_value);
   }
-  return ValueForGridTrackList<LayoutGrid>(direction, layout_object, style,
-                                           force_computed_value);
+  return blink::ValueForGridTrackList<LayoutGrid>(direction, layout_object,
+                                                  style, force_computed_value);
 }
 
 CSSValue* ComputedStyleUtils::ValueForGridPosition(
@@ -2294,9 +2294,7 @@ CSSValue* ComputedStyleUtils::RenderTextDecorationFlagsToCSSValue(
   if (EnumHasFlags(text_decoration, TextDecorationLine::kLineThrough)) {
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kLineThrough));
   }
-  if (RuntimeEnabledFeatures::
-          CssTextDecorationLineBlinkSerializationEnabled() &&
-      EnumHasFlags(text_decoration, TextDecorationLine::kBlink)) {
+  if (EnumHasFlags(text_decoration, TextDecorationLine::kBlink)) {
     list->Append(*CSSIdentifierValue::Create(CSSValueID::kBlink));
   }
 
@@ -3971,6 +3969,62 @@ CSSValueList* ComputedStyleUtils::ValuesForShorthandProperty(
   return list;
 }
 
+CSSValueList* ComputedStyleUtils::ValuesForGapDecorationRuleOutsetShorthand(
+    const StylePropertyShorthand& shorthand,
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style,
+    CSSValuePhase value_phase,
+    CSSGapDecorationPropertyDirection direction) {
+  CHECK_EQ(shorthand.length(), 4u);
+  CHECK(shorthand.properties()[0]->IDEquals(
+      CSSGapDecorationUtils::GetLonghandProperty(
+          direction, CSSGapDecorationPropertyType::kEdgeStartOutset)));
+  CHECK(shorthand.properties()[1]->IDEquals(
+      CSSGapDecorationUtils::GetLonghandProperty(
+          direction, CSSGapDecorationPropertyType::kEdgeEndOutset)));
+  CHECK(shorthand.properties()[2]->IDEquals(
+      CSSGapDecorationUtils::GetLonghandProperty(
+          direction, CSSGapDecorationPropertyType::kInteriorStartOutset)));
+  CHECK(shorthand.properties()[3]->IDEquals(
+      CSSGapDecorationUtils::GetLonghandProperty(
+          direction, CSSGapDecorationPropertyType::kInteriorEndOutset)));
+
+  const CSSValue* rule_edge_start_outset_value =
+      shorthand.properties()[0]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* rule_edge_end_outset_value =
+      shorthand.properties()[1]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* rule_interior_start_outset_value =
+      shorthand.properties()[2]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* rule_interior_end_outset_value =
+      shorthand.properties()[3]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+
+  // All 4 properties must be specified.
+  if (!rule_edge_start_outset_value || !rule_edge_end_outset_value ||
+      !rule_interior_start_outset_value || !rule_interior_end_outset_value) {
+    return nullptr;
+  }
+
+  CSSValueList* edge_values_list = CSSValueList::CreateSpaceSeparated();
+  CSSValueList* interior_values_list = CSSValueList::CreateSpaceSeparated();
+  CSSValueList* full_list = CSSValueList::CreateSlashSeparated();
+
+  edge_values_list->Append(*rule_edge_start_outset_value);
+  edge_values_list->Append(*rule_edge_end_outset_value);
+
+  interior_values_list->Append(*rule_interior_start_outset_value);
+  interior_values_list->Append(*rule_interior_end_outset_value);
+
+  full_list->Append(*edge_values_list);
+  full_list->Append(*interior_values_list);
+
+  return full_list;
+}
+
 CSSValueList* ComputedStyleUtils::ValueForGapDecorationRuleShorthand(
     const StylePropertyShorthand& shorthand,
     const ComputedStyle& style,
@@ -4300,6 +4354,66 @@ CSSValueList* ComputedStyleUtils::ValuesForGridTemplateShorthand(
           ? template_column_values
           : template_columns_computed,
       template_area_values);
+}
+
+const CSSValue*
+ComputedStyleUtils::ValuesForBidirectionalGapRuleOutsetShorthand(
+    const StylePropertyShorthand& shorthand,
+    const ComputedStyle& style,
+    const LayoutObject* layout_object,
+    bool allow_visited_style,
+    CSSValuePhase value_phase) {
+  DCHECK_EQ(shorthand.length(), 8u);
+  const CSSValue* column_rule_edge_start =
+      shorthand.properties()[0]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* column_rule_edge_end =
+      shorthand.properties()[1]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* column_rule_interior_start =
+      shorthand.properties()[2]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* column_rule_interior_end =
+      shorthand.properties()[3]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* row_rule_edge_start =
+      shorthand.properties()[4]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* row_rule_edge_end =
+      shorthand.properties()[5]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* row_rule_interior_start =
+      shorthand.properties()[6]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+  const CSSValue* row_rule_interior_end =
+      shorthand.properties()[7]->CSSValueFromComputedStyle(
+          style, layout_object, allow_visited_style, value_phase);
+
+  // The `rule-outset` shorthand is bi-directional, so the values should be
+  // equivalent.
+  //
+  // https://drafts.csswg.org/css-gaps-1/#outset
+  if (!base::ValuesEquivalent(column_rule_edge_start, row_rule_edge_start) ||
+      !base::ValuesEquivalent(column_rule_edge_end, row_rule_edge_end) ||
+      !base::ValuesEquivalent(column_rule_interior_start,
+                              row_rule_interior_start) ||
+      !base::ValuesEquivalent(column_rule_interior_end,
+                              row_rule_interior_end)) {
+    return nullptr;
+  }
+
+  CSSValueList* edge_values = CSSValueList::CreateSpaceSeparated();
+  CSSValueList* interior_values = CSSValueList::CreateSpaceSeparated();
+  CSSValueList* result = CSSValueList::CreateSlashSeparated();
+
+  edge_values->Append(*column_rule_edge_start);
+  edge_values->Append(*column_rule_edge_end);
+  interior_values->Append(*column_rule_interior_start);
+  interior_values->Append(*column_rule_interior_end);
+  result->Append(*edge_values);
+  result->Append(*interior_values);
+
+  return result;
 }
 
 const CSSValue* ComputedStyleUtils::ValuesForBidirectionalGapRuleShorthand(
@@ -4680,10 +4794,10 @@ CSSValueID PositionAreaSpanToCSSValueID(PositionAreaRegion span_start,
       return CSSValueID::kSpanXStart;
     case PositionAreaRegion::kXEnd:
       return CSSValueID::kSpanXEnd;
-    case PositionAreaRegion::kXSelfStart:
-      return CSSValueID::kSpanXSelfStart;
-    case PositionAreaRegion::kXSelfEnd:
-      return CSSValueID::kSpanXSelfEnd;
+    case PositionAreaRegion::kSelfXStart:
+      return CSSValueID::kSpanSelfXStart;
+    case PositionAreaRegion::kSelfXEnd:
+      return CSSValueID::kSpanSelfXEnd;
     case PositionAreaRegion::kTop:
       return CSSValueID::kSpanTop;
     case PositionAreaRegion::kBottom:
@@ -4692,10 +4806,10 @@ CSSValueID PositionAreaSpanToCSSValueID(PositionAreaRegion span_start,
       return CSSValueID::kSpanYStart;
     case PositionAreaRegion::kYEnd:
       return CSSValueID::kSpanYEnd;
-    case PositionAreaRegion::kYSelfStart:
-      return CSSValueID::kSpanYSelfStart;
-    case PositionAreaRegion::kYSelfEnd:
-      return CSSValueID::kSpanYSelfEnd;
+    case PositionAreaRegion::kSelfYStart:
+      return CSSValueID::kSpanSelfYStart;
+    case PositionAreaRegion::kSelfYEnd:
+      return CSSValueID::kSpanSelfYEnd;
     case PositionAreaRegion::kBlockStart:
       return CSSValueID::kSpanBlockStart;
     case PositionAreaRegion::kBlockEnd:

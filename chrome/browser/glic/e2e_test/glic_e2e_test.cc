@@ -9,6 +9,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/logging.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
@@ -33,6 +34,7 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/test/base/save_desktop_snapshot.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/signin/public/identity_manager/test_accounts.h"
 #include "components/sync/base/features.h"
@@ -78,15 +80,17 @@ const char kIgnoreCertificateErrorsSPKIListValue[] =
 }  // namespace
 
 GlicE2ETest::GlicE2ETest() {
-  // TODO(https://crbug.com/440578183): ZeroStateSuggestionsV2 is enabled here
+  // TODO(crbug.com/440578183): ZeroStateSuggestionsV2 is enabled here
   // due to the associated bug and should be removed here once fixed.
+  // TODO(crbug.com/453696965): Broken in multi-instance.
   scoped_feature_list_.InitWithFeatures(
       /*enabled_features=*/{features::kGlic, features::kTabstripComboButton,
                             features::kGlicKeyboardShortcutNewBadge,
                             features::kGlicRollout,
                             contextual_cueing::kContextualCueing,
                             mojom::features::kZeroStateSuggestionsV2},
-      /*disabled_features=*/{syncer::kReplaceSyncPromosWithSignInPromos});
+      /*disabled_features=*/{syncer::kReplaceSyncPromosWithSignInPromos,
+                             features::kGlicMultiInstance});
 }
 
 GlicE2ETest::~GlicE2ETest() = default;
@@ -188,6 +192,12 @@ void GlicE2ETest::SetUpInProcessBrowserTestFixture() {
 }
 
 void GlicE2ETest::TearDownOnMainThread() {
+  if (HasFailure()) {
+    base::FilePath snapshot_path = SaveDesktopSnapshot();
+    if (!snapshot_path.empty()) {
+      LOG(WARNING) << "Saved desktop snapshot to: " << snapshot_path;
+    }
+  }
   for (auto& client : devtools_clients_) {
     client.second->DetachProtocolClient();
   }
@@ -307,15 +317,17 @@ void GlicE2ETest::ThrottleWebContentsNetwork(
 }
 
 void GlicE2ETest::ThrottleGlicNetwork() {
-  auto* glic_view =
-      glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser()->profile())
-          ->window_controller()
-          .GetGlicView();
-  CHECK(glic_view);
-  content::WebContents* web_contents =
-      glic_view->GetWebContents()->GetInnerWebContents()[0];
-  CHECK(web_contents);
-  ThrottleWebContentsNetwork(web_contents);
+  auto* glic_service =
+      glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser()->profile());
+  for (auto* host : glic_service->host_manager().GetAllHosts()) {
+    auto* webui_contents = host->webui_contents();
+    if (webui_contents) {
+      content::WebContents* inner_contents =
+          webui_contents->GetInnerWebContents()[0];
+      CHECK(inner_contents);
+      ThrottleWebContentsNetwork(inner_contents);
+    }
+  }
 }
 
 }  // namespace glic::test

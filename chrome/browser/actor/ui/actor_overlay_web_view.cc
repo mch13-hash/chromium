@@ -9,9 +9,7 @@
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/chrome_features.h"
 #include "components/tabs/public/tab_interface.h"
-#include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/render_widget_host_view.h"
-#include "content/public/browser/scoped_accessibility_mode.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/controls/webview/web_contents_set_background_color.h"
@@ -25,6 +23,7 @@ ActorOverlayWebView::ActorOverlayWebView(BrowserWindowInterface* browser)
 
 ActorOverlayWebView::~ActorOverlayWebView() {
   CloseUI();
+  SetWebContents(nullptr);
 }
 
 void ActorOverlayWebView::ShowUI(tabs::TabInterface* tab) {
@@ -32,15 +31,11 @@ void ActorOverlayWebView::ShowUI(tabs::TabInterface* tab) {
   if (!web_contents()) {
     // Creates a new web contents if one doesn't exist.
     LoadInitialURL(GURL(chrome::kChromeUIActorOverlayURL));
-
-    // Disable mouse and keyboard inputs to underlying tab contents.
-    scoped_ignore_input_events_ =
-        tab->GetContents()->IgnoreInputEvents(std::nullopt);
   }
-  // Prevent assistive technologies from interacting with the underlying page.
-  scoped_ax_mode_ = content::BrowserAccessibilityState::GetInstance()
-                        ->CreateScopedModeForWebContents(tab->GetContents(),
-                                                         ui::AXMode::kNone);
+  // Disable mouse, keyboard, and a11y input events to underlying tab
+  // contents.
+  scoped_ignore_input_events_ = tab->GetContents()->IgnoreInputEvents(
+      std::nullopt, /*should_ignore_a11y_input=*/true);
   // Set the tab interface
   webui::SetTabInterface(web_contents(), tab);
 
@@ -58,13 +53,10 @@ void ActorOverlayWebView::ShowUI(tabs::TabInterface* tab) {
 void ActorOverlayWebView::CloseUI() {
   if (web_contents()) {
     SetVisible(false);
-    // Re-enable mouse and keyboard events to the underlying web contents by
-    // resetting the ScopedIgnoreInputEvents object.
+    // Re-enable mouse, keyboard, and a11y input events to the underlying web
+    // contents by resetting the ScopedIgnoreInputEvents object.
     scoped_ignore_input_events_.reset();
-    // Allow assistive technologies to interact with the underlying page.
-    scoped_ax_mode_.reset();
     web_contents()->WasHidden();
-    SetWebContents(nullptr);
   }
 }
 
@@ -75,6 +67,15 @@ void ActorOverlayWebView::SetOverlayBackground(bool is_visible) {
   }
 
   web_ui->SetOverlayBackground(is_visible);
+}
+
+void ActorOverlayWebView::SetBorderGlowVisibility(bool is_visible) {
+  actor::ui::ActorOverlayUI* web_ui = GetWebUi();
+  if (!web_ui) {
+    return;
+  }
+
+  web_ui->SetBorderGlowVisibility(is_visible);
 }
 
 actor::ui::ActorOverlayUI* ActorOverlayWebView::GetWebUi() {

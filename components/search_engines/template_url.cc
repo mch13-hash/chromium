@@ -51,6 +51,7 @@
 #include "google_apis/google_api_keys.h"
 #include "net/base/mime_util.h"
 #include "net/base/url_util.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "third_party/search_engines_data/resources/definitions/prepopulated_engines.h"
 #include "ui/base/device_form_factor.h"
@@ -1443,6 +1444,13 @@ std::string TemplateURLRef::HandleReplacements(
               break;
             }
 #endif
+            if (search_terms_args.page_classification ==
+                    metrics::OmniboxEventProto::NTP_REALBOX &&
+                search_terms_args.lens_overlay_suggest_inputs.has_value()) {
+              // No replacement. `gs_ri` is not recommended for contextual
+              // queries.
+              break;
+            }
             HandleReplacement(std::string(), "chrome-ext-ansg", replacement,
                               &url);
             break;
@@ -1888,10 +1896,12 @@ std::optional<std::u16string> TemplateURL::GetBuiltinMarketingSnippet() const {
   return std::nullopt;
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 std::u16string TemplateURL::GetMarketingSnippet() const {
   return GetBuiltinMarketingSnippet().value_or(l10n_util::GetStringFUTF16(
       IDS_SEARCH_ENGINE_FALLBACK_MARKETING_SNIPPET, short_name()));
 }
+#endif
 
 SearchEngineType TemplateURL::GetEngineType(
     const SearchTermsData& search_terms_data) const {

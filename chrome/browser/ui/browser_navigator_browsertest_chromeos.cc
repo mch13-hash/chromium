@@ -68,7 +68,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS,
   NavigateParams params(MakeNavigateParams(browser()));
   params.disposition = WindowOpenDisposition::NEW_WINDOW;
   params.url = url;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   Navigate(&params);
 
   // The page should not be opened, and the browser should still sit at the
@@ -91,10 +91,14 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS,
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
   EXPECT_EQ(GURL(url::kAboutBlankURL),
             browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
-  EXPECT_EQ(1, params.browser->tab_strip_model()->count());
   EXPECT_EQ(
-      GURL(chrome::kChromeUIVersionURL),
-      params.browser->tab_strip_model()->GetActiveWebContents()->GetURL());
+      1,
+      params.browser->GetBrowserForMigrationOnly()->tab_strip_model()->count());
+  EXPECT_EQ(GURL(chrome::kChromeUIVersionURL),
+            params.browser->GetBrowserForMigrationOnly()
+                ->tab_strip_model()
+                ->GetActiveWebContents()
+                ->GetURL());
 }
 
 // Verify that page navigation is allowed in locked fullscreen mode when locked
@@ -111,7 +115,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS,
   NavigateParams params(MakeNavigateParams(browser()));
   params.disposition = WindowOpenDisposition::NEW_WINDOW;
   params.url = kUrl;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   Navigate(&params);
 
   // The original browser should still be at the same page, but the newly
@@ -120,10 +124,13 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTestChromeOS,
   ASSERT_EQ(1, browser()->tab_strip_model()->count());
   EXPECT_EQ(GURL(url::kAboutBlankURL),
             browser()->tab_strip_model()->GetActiveWebContents()->GetURL());
-  ASSERT_EQ(1, params.browser->tab_strip_model()->count());
-  EXPECT_EQ(
-      kUrl,
-      params.browser->tab_strip_model()->GetActiveWebContents()->GetURL());
+  ASSERT_EQ(
+      1,
+      params.browser->GetBrowserForMigrationOnly()->tab_strip_model()->count());
+  EXPECT_EQ(kUrl, params.browser->GetBrowserForMigrationOnly()
+                      ->tab_strip_model()
+                      ->GetActiveWebContents()
+                      ->GetURL());
 }
 
 // Subclass that tests navigation while in the Guest session.
@@ -152,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(BrowserGuestSessionNavigatorTest,
   NavigateParams params(MakeNavigateParams(incognito_browser));
   params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   params.url = GURL("chrome://settings");
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
   Navigate(&params);
 
@@ -265,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorMultiUserTestChromeOS,
     NavigateParams params(MakeNavigateParams(browser));
     params.disposition = WindowOpenDisposition::NEW_POPUP;
     params.url = GURL("chrome://settings");
-    params.window_action = NavigateParams::SHOW_WINDOW;
+    params.window_action = NavigateParams::WindowAction::kShowWindow;
     params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
     params.browser = browser;
     auto navigated = Navigate(&params);
@@ -296,7 +303,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorMultiUserTestChromeOS,
     NavigateParams params(MakeNavigateParams(browser));
     params.disposition = WindowOpenDisposition::NEW_POPUP;
     params.url = GURL("chrome://settings");
-    params.window_action = NavigateParams::SHOW_WINDOW;
+    params.window_action = NavigateParams::WindowAction::kShowWindow;
     params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
     params.browser = browser;
     auto navigated = Navigate(&params);

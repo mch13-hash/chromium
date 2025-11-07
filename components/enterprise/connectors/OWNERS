@@ -1,3 +1,5 @@
+per-file core/connector_data_pipe_getter*=drubery@chromium.org
+
 domfc@chromium.org
 nancylanxiao@google.com
 
@@ -5,3 +7,5 @@ nancylanxiao@google.com
 # Sending code reviews to the alias allows the owners to distribute code review
 # loads.
 cep-review@google.com
+
+file://components/enterprise/CEP_OWNERS

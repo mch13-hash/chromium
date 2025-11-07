@@ -109,7 +109,8 @@ class VisitDatabase {
   //
   // The results will be in no particular order.  Also, no duplicate
   // detection is performed, so if `times` has duplicate times,
-  // `visits` may have duplicate visits.
+  // `visits` may have duplicate visits. Includes visits that result in 404
+  // error response codes.
   bool GetVisitsForTimes(const std::vector<base::Time>& times,
                          VisitVector* visits);
 
@@ -122,7 +123,8 @@ class VisitDatabase {
   // there are more results than that, the oldest ones will be returned. (This
   // is used for history expiration.)
   //
-  // The results will be in increasing order of date.
+  // The results will be in increasing order of date. Includes visits that
+  // result in 404 error response codes.
   bool GetAllVisitsInRange(base::Time begin_time,
                            base::Time end_time,
                            std::optional<std::string> app_id,
@@ -137,7 +139,8 @@ class VisitDatabase {
   // there are more results than that, the oldest ones will be returned. (This
   // is used for history expiration.)
   //
-  // The results will be in increasing order of date.
+  // The results will be in increasing order of date. Includes visits that
+  // result in 404 error response codes.
   bool GetVisitsInRangeForTransition(base::Time begin_time,
                                      base::Time end_time,
                                      int max_results,
@@ -147,6 +150,7 @@ class VisitDatabase {
   // Fills some foreign visits (i.e. with a non-empty `originator_cache_guid`)
   // into `visits` - at most `max_visits` of them, and only those with a (local)
   // visit_id <= `max_visit_id`. Returns true on success and false otherwise.
+  // Includes visits that result in 404 error response codes.
   // NOTE: This returns only redirect-chain-ends (including individual visits
   // without redirects).
   bool GetSomeForeignVisits(VisitID max_visit_id,
@@ -175,11 +179,14 @@ class VisitDatabase {
                                VisitVector* visits);
 
   // Returns the visit ID for the most recent visit of the given URL ID, or 0
-  // if there is no visit for the URL.
+  // if there is no visit for the URL. Includes or excludes 404 visits according
+  // to `policy_for_404_visits`.
   //
   // If non-NULL, the given visit row will be filled with the information of
   // the found visit. When no visit is found, the row will be unchanged.
-  VisitID GetMostRecentVisitForURL(URLID url_id, VisitRow* visit_row);
+  VisitID GetMostRecentVisitForURL(URLID url_id,
+                                   VisitRow* visit_row,
+                                   VisitQuery404sPolicy policy_for_404_visits);
 
   // Returns the `max_results` most recent visit sessions for `url_id`. Includes
   // or excludes visits with an HTTP response code of 404 according to
@@ -195,7 +202,9 @@ class VisitDatabase {
 
   // Finds a redirect coming from the given `from_visit`. If a redirect is
   // found, it fills the visit ID and URL into the out variables and returns
-  // true. If there is no redirect from the given visit, returns false.
+  // true. If there is no redirect from the given visit, returns false. Includes
+  // or excludes redirects that result in a 404 response based on
+  // `policy_for_404_visits`.
   //
   // If there is more than one redirect, this will compute a random one. But
   // duplicates should be very rare, and we don't actually care which one we
@@ -205,7 +214,8 @@ class VisitDatabase {
   // to_visit and to_url can be NULL in which case they are ignored.
   bool GetRedirectFromVisit(VisitID from_visit,
                             VisitID* to_visit,
-                            GURL* to_url);
+                            GURL* to_url,
+                            VisitQuery404sPolicy policy_for_404_visits);
 
   // Similar to the above function except finds a redirect going to a given
   // `to_visit`; or, if there is no such redirect, finds the referral going to
@@ -369,12 +379,15 @@ class VisitDatabase {
 };
 
 // Columns, in order, of the visit table.
-#define HISTORY_VISIT_ROW_FIELDS                                    \
-  " id,url,visit_time,from_visit,external_referrer_url,transition," \
-  "segment_id,visit_duration,incremented_omnibox_typed_score,"      \
-  "opener_visit,originator_cache_guid,originator_visit_id,"         \
-  "originator_from_visit,originator_opener_visit,is_known_to_sync," \
-  "consider_for_ntp_most_visited,visited_link_id,app_id "
+#define HISTORY_VISIT_ROW_FIELDS                                      \
+  " visits.id,visits.url,visits.visit_time,visits.from_visit,"        \
+  "visits.external_referrer_url,visits.transition,visits.segment_id," \
+  "visits.visit_duration,visits.incremented_omnibox_typed_score,"     \
+  "visits.opener_visit,visits.originator_cache_guid,"                 \
+  "visits.originator_visit_id,visits.originator_from_visit,"          \
+  "visits.originator_opener_visit,visits.is_known_to_sync,"           \
+  "visits.consider_for_ntp_most_visited,visits.visited_link_id,"      \
+  "visits.app_id "
 
 }  // namespace history
 

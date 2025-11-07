@@ -14,8 +14,8 @@
 #include "base/memory/safe_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
+#include "chrome/browser/ui/read_anything/read_anything_side_panel_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
-#include "chrome/browser/ui/views/side_panel/read_anything/read_anything_side_panel_controller.h"
 #include "chrome/browser/ui/webui/side_panel/read_anything/read_anything_screenshotter.h"
 #include "chrome/common/read_anything/read_anything.mojom.h"
 #include "components/translate/core/browser/translate_client.h"
@@ -104,7 +104,7 @@ class ReadAnythingWebContentsObserver : public content::WebContentsObserver {
 // ReadAnythingUntrustedPageHandler
 //
 //  A handler of the Read Anything app
-//  (chrome/browser/resources/side_panel/read_anything/app.ts).
+//  (chrome/browser/resources/side_panel/read_anything/app/app.ts).
 //  This class is created and owned by ReadAnythingUntrustedUI and has the same
 //  lifetime as the Side Panel view.
 //
@@ -125,7 +125,13 @@ class ReadAnythingUntrustedPageHandler :
       mojo::PendingReceiver<read_anything::mojom::UntrustedPageHandler>
           receiver,
       content::WebUI* web_ui,
-      bool use_screen_ai_service);
+      bool use_screen_ai_service
+#if BUILDFLAG(IS_CHROMEOS)
+      ,
+      std::unique_ptr<ChromeOsExtensionWrapper> extension_wrapper =
+          std::make_unique<ChromeOsExtensionWrapper>()
+#endif
+  );
   ReadAnythingUntrustedPageHandler(const ReadAnythingUntrustedPageHandler&) =
       delete;
   ReadAnythingUntrustedPageHandler& operator=(
@@ -181,8 +187,6 @@ class ReadAnythingUntrustedPageHandler :
 #if BUILDFLAG(IS_CHROMEOS)
   // ash::SessionObserver
   void OnLockStateChanged(bool locked) override;
-  void SetChromeOsExtensionWrapperForTesting(
-      std::unique_ptr<ChromeOsExtensionWrapper> wrapper);
 #endif
 
  protected:
@@ -218,10 +222,6 @@ class ReadAnythingUntrustedPageHandler :
     LanguageRequestType type;
   };
 
-  // The ChromeOS TTS engine gets put to sleep with a very short amount of
-  // inactivity, so we often need to wake it when requesting language
-  // installation. This is used as a callback when the engine is awake.
-  void OnTtsEngineAwake(bool success);
   void SendOrQueueLanguageRequest(LanguageRequest request);
   void SendNextLanguageRequest();
   void OnInstallPackResponse(const PackResult& pack_result);
@@ -311,6 +311,8 @@ class ReadAnythingUntrustedPageHandler :
 
   // The current language being used in the app.
   std::string current_language_code_ = "en-US";
+  const bool use_screen_ai_service_;
+
 #if BUILDFLAG(IS_CHROMEOS)
   // The ChromeOS language pack manager can't handle more than one language
   // request at a time. When we receive requests from the page, queue them up
@@ -325,8 +327,6 @@ class ReadAnythingUntrustedPageHandler :
   base::ScopedObservation<ui::AXActionHandlerRegistry,
                           ui::AXActionHandlerObserver>
       ax_action_handler_observer_{this};
-
-  const bool use_screen_ai_service_;
 
   // Whether the currently distilled page is recognized as a pdf. This allows
   // the page handler to trigger distillation if the page would now be

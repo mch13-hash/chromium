@@ -32,6 +32,12 @@ IOSGeminiFirstPromptSubmissionMethod ConvertBWGInputTypeToHistogramEnum(
       return IOSGeminiFirstPromptSubmissionMethod::kAskAboutPage;
     case BWGInputTypeCreateFaq:
       return IOSGeminiFirstPromptSubmissionMethod::kCreateFaq;
+    case BWGInputTypeZeroStateModelSuggestion:
+      return IOSGeminiFirstPromptSubmissionMethod::kZeroStateSuggestions;
+    case BWGInputTypeWhatCanGeminiDo:
+      return IOSGeminiFirstPromptSubmissionMethod::kWhatCanGeminiDo;
+    case BWGInputTypeDiscoveryCard:
+      return IOSGeminiFirstPromptSubmissionMethod::kDiscoveryCard;
     case BWGInputTypeUnknown:
     default:
       return IOSGeminiFirstPromptSubmissionMethod::kUnknown;
@@ -166,6 +172,10 @@ IOSGeminiFirstPromptSubmissionMethod ConvertBWGInputTypeToHistogramEnum(
 - (void)didSendQueryWithInputType:(BWGInputType)inputType
               pageContextAttached:(BOOL)pageContextAttached {
   _totalPromptsInSession++;
+
+  // Record user action for prompt sent.
+  RecordBWGPromptSent();
+
   // Check if this is the user's first prompt.
   if (!_hasSubmittedFirstPrompt) {
     _hasSubmittedFirstPrompt = YES;

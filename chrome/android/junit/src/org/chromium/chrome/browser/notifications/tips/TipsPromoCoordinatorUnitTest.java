@@ -8,8 +8,10 @@ import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.view.View;
 
 import androidx.test.filters.SmallTest;
@@ -26,10 +28,15 @@ import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.lens.LensController;
 import org.chromium.chrome.browser.notifications.scheduler.TipsNotificationsFeatureType;
 import org.chromium.chrome.browser.notifications.tips.TipsPromoProperties.ScreenType;
+import org.chromium.chrome.browser.quick_delete.QuickDeleteController;
+import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.settings.SettingsNavigation;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** Unit tests for {@link TipsPromoCoordinator}. */
@@ -38,6 +45,10 @@ import org.chromium.ui.modelutil.PropertyModel;
 public class TipsPromoCoordinatorUnitTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
     @Mock private BottomSheetController mBottomSheetController;
+    @Mock private QuickDeleteController mQuickDeleteController;
+    @Mock private SettingsNavigation mSettingsNavigation;
+    @Mock private WindowAndroid mWindowAndroid;
+    @Mock private LensController mLensController;
 
     private Activity mActivity;
     private TipsPromoCoordinator mTipsPromoCoordinator;
@@ -49,10 +60,18 @@ public class TipsPromoCoordinatorUnitTest {
     public void setUp() {
         mActivity = Robolectric.buildActivity(Activity.class).create().get();
         mActivity.setTheme(R.style.Theme_BrowserUI_DayNight);
-        mTipsPromoCoordinator = new TipsPromoCoordinator(mActivity, mBottomSheetController);
+        mTipsPromoCoordinator =
+                new TipsPromoCoordinator(
+                        mActivity,
+                        mBottomSheetController,
+                        mQuickDeleteController,
+                        mWindowAndroid,
+                        /* isIncognito= */ false);
         mPropertyModel = mTipsPromoCoordinator.getModelForTesting();
         mView = mTipsPromoCoordinator.getViewForTesting();
         mBottomSheetContent = mTipsPromoCoordinator.getBottomSheetContentForTesting();
+
+        SettingsNavigationFactory.setInstanceForTesting(mSettingsNavigation);
     }
 
     @SmallTest
@@ -63,8 +82,12 @@ public class TipsPromoCoordinatorUnitTest {
 
     @SmallTest
     @Test
-    public void testShowBottomSheet() {
+    public void testShowBottomSheet_EnhancedSafeBrowsing() {
+        when(mSettingsNavigation.createSettingsIntent(eq(mActivity), any(), any()))
+                .thenReturn(new Intent());
+
         mTipsPromoCoordinator.showBottomSheet(TipsNotificationsFeatureType.ENHANCED_SAFE_BROWSING);
+
         assertEquals(
                 ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
 
@@ -72,7 +95,113 @@ public class TipsPromoCoordinatorUnitTest {
         assertEquals(
                 ScreenType.DETAIL_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
 
+        mView.findViewById(R.id.details_page_back_button).performClick();
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+
+        assertEquals(
+                3,
+                mPropertyModel
+                        .get(TipsPromoProperties.FEATURE_TIP_PROMO_DATA)
+                        .detailPageSteps
+                        .size());
         verify(mBottomSheetController).requestShowContent(any(), eq(true));
+
+        mView.findViewById(R.id.tips_promo_settings_button).performClick();
+        verify(mBottomSheetController).hideContent(any(), eq(true));
+        verify(mSettingsNavigation).createSettingsIntent(eq(mActivity), any(), any());
+    }
+
+    @SmallTest
+    @Test
+    public void testShowBottomSheet_QuickDelete() {
+        mTipsPromoCoordinator.showBottomSheet(TipsNotificationsFeatureType.QUICK_DELETE);
+
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+        assertEquals(
+                ScreenType.DETAIL_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+
+        mView.findViewById(R.id.details_page_back_button).performClick();
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+
+        assertEquals(
+                3,
+                mPropertyModel
+                        .get(TipsPromoProperties.FEATURE_TIP_PROMO_DATA)
+                        .detailPageSteps
+                        .size());
+        verify(mBottomSheetController).requestShowContent(any(), eq(true));
+
+        mView.findViewById(R.id.tips_promo_settings_button).performClick();
+        verify(mBottomSheetController).hideContent(any(), eq(true));
+        verify(mQuickDeleteController).showDialog();
+    }
+
+    @SmallTest
+    @Test
+    public void testShowBottomSheet_GoogleLens() {
+        mTipsPromoCoordinator.setLensControllerForTesting(mLensController);
+        mTipsPromoCoordinator.showBottomSheet(TipsNotificationsFeatureType.GOOGLE_LENS);
+
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+        assertEquals(
+                ScreenType.DETAIL_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+
+        mView.findViewById(R.id.details_page_back_button).performClick();
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+
+        assertEquals(
+                3,
+                mPropertyModel
+                        .get(TipsPromoProperties.FEATURE_TIP_PROMO_DATA)
+                        .detailPageSteps
+                        .size());
+        verify(mBottomSheetController).requestShowContent(any(), eq(true));
+
+        mView.findViewById(R.id.tips_promo_settings_button).performClick();
+        verify(mBottomSheetController).hideContent(any(), eq(true));
+        verify(mLensController).startLens(eq(mWindowAndroid), any());
+    }
+
+    @SmallTest
+    @Test
+    public void testShowBottomSheet_BottomOmnibox() {
+        mTipsPromoCoordinator.showBottomSheet(TipsNotificationsFeatureType.BOTTOM_OMNIBOX);
+
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+        assertEquals(
+                ScreenType.DETAIL_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+
+        mView.findViewById(R.id.details_page_back_button).performClick();
+        assertEquals(
+                ScreenType.MAIN_SCREEN, mPropertyModel.get(TipsPromoProperties.CURRENT_SCREEN));
+        mView.findViewById(R.id.tips_promo_details_button).performClick();
+
+        assertEquals(
+                3,
+                mPropertyModel
+                        .get(TipsPromoProperties.FEATURE_TIP_PROMO_DATA)
+                        .detailPageSteps
+                        .size());
+        verify(mBottomSheetController).requestShowContent(any(), eq(true));
+
+        mView.findViewById(R.id.tips_promo_settings_button).performClick();
+        verify(mBottomSheetController).hideContent(any(), eq(true));
+        verify(mSettingsNavigation).startSettings(eq(mActivity), any());
     }
 
     @Test

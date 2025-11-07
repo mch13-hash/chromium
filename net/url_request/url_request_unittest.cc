@@ -442,7 +442,8 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& endpoint,
-      std::optional<GURL>* preserve_fragment_on_redirect_url) override;
+      std::optional<GURL>* preserve_fragment_on_redirect_url,
+      const std::optional<net::SSLInfo>& ssl_info) override;
 
   // Resets the callbacks and |stage_blocked_for_callback_|.
   void Reset();
@@ -549,13 +550,14 @@ int BlockingNetworkDelegate::OnHeadersReceived(
     const HttpResponseHeaders* original_response_headers,
     scoped_refptr<HttpResponseHeaders>* override_response_headers,
     const IPEndPoint& endpoint,
-    std::optional<GURL>* preserve_fragment_on_redirect_url) {
+    std::optional<GURL>* preserve_fragment_on_redirect_url,
+    const std::optional<net::SSLInfo>& ssl_info) {
   // TestNetworkDelegate always completes synchronously.
   CHECK_NE(ERR_IO_PENDING,
            TestNetworkDelegate::OnHeadersReceived(
                request, base::NullCallback(), original_response_headers,
                override_response_headers, endpoint,
-               preserve_fragment_on_redirect_url));
+               preserve_fragment_on_redirect_url, ssl_info));
 
   return MaybeBlockStage(ON_HEADERS_RECEIVED, std::move(callback));
 }
@@ -3685,7 +3687,8 @@ class FixedDateNetworkDelegate : public TestNetworkDelegate {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& endpoint,
-      std::optional<GURL>* preserve_fragment_on_redirect_url) override;
+      std::optional<GURL>* preserve_fragment_on_redirect_url,
+      const std::optional<net::SSLInfo>& ssl_info) override;
 
  private:
   std::string fixed_date_;
@@ -3697,7 +3700,8 @@ int FixedDateNetworkDelegate::OnHeadersReceived(
     const HttpResponseHeaders* original_response_headers,
     scoped_refptr<HttpResponseHeaders>* override_response_headers,
     const IPEndPoint& endpoint,
-    std::optional<GURL>* preserve_fragment_on_redirect_url) {
+    std::optional<GURL>* preserve_fragment_on_redirect_url,
+    const std::optional<net::SSLInfo>& ssl_info) {
   *override_response_headers = base::MakeRefCounted<HttpResponseHeaders>(
       original_response_headers->raw_headers());
 
@@ -3705,7 +3709,8 @@ int FixedDateNetworkDelegate::OnHeadersReceived(
 
   return TestNetworkDelegate::OnHeadersReceived(
       request, std::move(callback), original_response_headers,
-      override_response_headers, endpoint, preserve_fragment_on_redirect_url);
+      override_response_headers, endpoint, preserve_fragment_on_redirect_url,
+      ssl_info);
 }
 
 // Test that cookie expiration times are adjusted for server/client clock
@@ -5146,13 +5151,14 @@ class AsyncLoggingNetworkDelegate : public TestNetworkDelegate {
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       const IPEndPoint& endpoint,
-      std::optional<GURL>* preserve_fragment_on_redirect_url) override {
+      std::optional<GURL>* preserve_fragment_on_redirect_url,
+      const std::optional<net::SSLInfo>& ssl_info) override {
     // TestNetworkDelegate always completes synchronously.
     CHECK_NE(ERR_IO_PENDING,
              TestNetworkDelegate::OnHeadersReceived(
                  request, base::NullCallback(), original_response_headers,
                  override_response_headers, endpoint,
-                 preserve_fragment_on_redirect_url));
+                 preserve_fragment_on_redirect_url, ssl_info));
     return RunCallbackAsynchronously(request, std::move(callback));
   }
 
@@ -10341,6 +10347,8 @@ TEST_F(HTTPSSessionTest, DontResumeSessionsForInvalidCertificates) {
   }
 }
 
+#endif  // !BUILDFLAG(IS_IOS)
+
 // Interceptor to check that secure DNS has been disabled. Secure DNS should be
 // disabled for any network fetch triggered during certificate verification as
 // it could cause a deadlock.
@@ -10458,6 +10466,8 @@ class HTTPSCertNetFetchingTest : public HTTPSRequestTest {
   std::unique_ptr<URLRequestContext> context_;
   raw_ptr<CertVerifierWithUpdatableProc> updatable_cert_verifier_;
 };
+
+#if !BUILDFLAG(IS_IOS)
 
 // The test EV policy OID used for generated certs.
 static const char kEVTestCertPolicy[] = "1.3.6.1.4.1.11129.2.4.1";
@@ -11116,6 +11126,8 @@ INSTANTIATE_TEST_SUITE_P(OCSPVerify,
                          HTTPSOCSPVerifyTest,
                          testing::ValuesIn(kOCSPVerifyData));
 
+#endif  // !BUILDFLAG(IS_IOS)
+
 class HTTPSAIATest : public HTTPSCertNetFetchingTest {};
 
 TEST_F(HTTPSAIATest, AIAFetching) {
@@ -11147,6 +11159,8 @@ TEST_F(HTTPSAIATest, AIAFetching) {
   ASSERT_TRUE(r->ssl_info().unverified_cert);
   EXPECT_EQ(0u, r->ssl_info().unverified_cert->intermediate_buffers().size());
 }
+
+#if !BUILDFLAG(IS_IOS)
 
 class HTTPSHardFailTest : public HTTPSOCSPTest {
  protected:

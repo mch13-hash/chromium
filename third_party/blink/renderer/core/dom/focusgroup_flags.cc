@@ -59,7 +59,6 @@ constexpr FlagMapping kModifierMap[] = {
     {"row-flow", FocusgroupFlags::kRowFlow},
     {"col-flow", FocusgroupFlags::kColFlow},
     {"no-memory", FocusgroupFlags::kNoMemory},
-    // Deprecated: {"extend", FocusgroupFlags::kExtend},
 };
 
 // Returns true if a flag contains a modifier only meaningful for grid
@@ -137,17 +136,20 @@ FocusgroupBehavior FocusgroupBehaviorFromString(const AtomicString& token) {
 
 }  // namespace
 
-FocusgroupData FindNearestFocusgroupAncestorData(const Element* element) {
+Element* FindFocusgroupOwner(const Element* element) {
   Element* ancestor = FlatTreeTraversal::ParentElement(*element);
   while (ancestor) {
-    FocusgroupData ancestor_data = ancestor->GetFocusgroupData();
-    // When this is true, we found the focusgroup to extend.
-    if (IsActualFocusgroup(ancestor_data)) {
-      return ancestor_data;
+    if (ancestor->GetFocusgroupData().behavior == FocusgroupBehavior::kOptOut) {
+      // If we find a focusgroup opt-out before the actual focusgroup, then the
+      // element is opted out.
+      return nullptr;
+    }
+    if (IsActualFocusgroup(ancestor->GetFocusgroupData())) {
+      return ancestor;
     }
     ancestor = FlatTreeTraversal::ParentElement(*ancestor);
   }
-  return {};
+  return nullptr;
 }
 
 FocusgroupData ParseFocusgroup(const Element* element,

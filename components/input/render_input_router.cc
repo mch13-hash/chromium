@@ -262,6 +262,12 @@ void RenderInputRouter::OnStartStylusWriting() {
 }
 
 bool RenderInputRouter::IsWheelScrollInProgress() {
+  if (gsb_filtered_for_paint_holding_) {
+    // If the GestureScrollBegin was filtered for paint holding, report that we
+    // are not scrolling, so that the MouseWheelEventQueue will keep sending new
+    // GSB events until we're ready to handle it.
+    return false;
+  }
   return is_in_gesture_scroll_[static_cast<int>(
       blink::WebGestureDevice::kTouchpad)];
 }
@@ -306,6 +312,23 @@ gfx::Size RenderInputRouter::GetRootWidgetViewportSize() {
 blink::mojom::InputEventResultState RenderInputRouter::FilterInputEvent(
     const blink::WebInputEvent& event,
     const ui::LatencyInfo& latency_info) {
+  // Right after a navigation, RenderWidgetHost keeps the InputRouter inactive
+  // while browser paint-holding is active.  This is equivalent to a
+  // non-existent input event consumer.
+  bool filter_for_paint_holding =
+      base::FeatureList::IsEnabled(
+          blink::features::kDropInputEventsWhilePaintHolding) &&
+      input_router_ && !input_router_->IsActive();
+  if (event.GetType() == WebInputEvent::Type::kGestureScrollBegin) {
+    // If we filter a GSB for paint holding, we'd like to receive a new one -
+    // see IsWheelScrollInProgress. Note that we leave is_in_gesture_scroll_ set
+    // for bookkeeping.
+    gsb_filtered_for_paint_holding_ = filter_for_paint_holding;
+  }
+  if (filter_for_paint_holding) {
+    return blink::mojom::InputEventResultState::kNoConsumerExists;
+  }
+
   // Don't ignore touch cancel events, since they may be sent while input
   // events are being ignored in order to keep the renderer from getting
   // confused about how many touches are active.
@@ -613,8 +636,9 @@ void RenderInputRouter::SendGestureEventWithLatencyInfo(
     DispatchToRendererCallback& dispatch_callback) {
   const blink::WebGestureEvent& gesture_event = gesture_with_latency.event;
   if (gesture_event.GetType() == WebInputEvent::Type::kGestureScrollBegin) {
-    DCHECK(
-        !is_in_gesture_scroll_[static_cast<int>(gesture_event.SourceDevice())])
+    DCHECK(!is_in_gesture_scroll_[static_cast<int>(
+               gesture_event.SourceDevice())] ||
+           gsb_filtered_for_paint_holding_)
         << "kGestureScrollBegin should not be sent again when "
         << gesture_event.SourceDevice() << " is in gesture scroll";
     is_in_gesture_scroll_[static_cast<int>(gesture_event.SourceDevice())] =
@@ -628,6 +652,7 @@ void RenderInputRouter::SendGestureEventWithLatencyInfo(
     is_in_gesture_scroll_[static_cast<int>(gesture_event.SourceDevice())] =
         false;
     is_in_touchpad_gesture_fling_ = false;
+    gsb_filtered_for_paint_holding_ = false;
   } else if (gesture_event.GetType() ==
              WebInputEvent::Type::kGestureFlingStart) {
     if (gesture_event.SourceDevice() == blink::WebGestureDevice::kTouchpad) {

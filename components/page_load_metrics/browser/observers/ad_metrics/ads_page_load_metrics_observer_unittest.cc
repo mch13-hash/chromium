@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/byte_count.h"
-#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
@@ -1501,15 +1500,23 @@ TEST_P(AdsPageLoadMetricsObserverTest,
   ResourceDataUpdate(ad_frame, ResourceCached::kNotCached, base::KiB(10));
   ResourceDataUpdate(child_ad_frame, ResourceCached::kNotCached, base::KiB(10));
 
-  // Just delete the child frame this time.
-  content::RenderFrameHostTester::For(child_ad_frame)->Detach();
+  {
+    content::RenderFrameDeletedObserver observer(child_ad_frame);
+    // Just delete the child frame this time.
+    content::RenderFrameHostTester::For(child_ad_frame)->Detach();
+    observer.WaitUntilDeleted();
+  }
 
   // Verify per-frame histograms not recorded.
   histogram_tester().ExpectTotalCount(
       SuffixedHistogram("Bytes.AdFrames.PerFrame.Total2"), 0);
 
-  // Delete the root ad frame.
-  content::RenderFrameHostTester::For(ad_frame)->Detach();
+  {
+    content::RenderFrameDeletedObserver observer(ad_frame);
+    // Delete the root ad frame.
+    content::RenderFrameHostTester::For(ad_frame)->Detach();
+    observer.WaitUntilDeleted();
+  }
 
   // Verify per-frame histograms are recorded.
   histogram_tester().ExpectUniqueSample(
@@ -1577,7 +1584,9 @@ TEST_P(AdsPageLoadMetricsObserverTest, NonAdFrameDestroyed_FrameDeleted) {
 
   ResourceDataUpdate(main_frame, ResourceCached::kNotCached, base::KiB(10));
 
+  content::RenderFrameDeletedObserver observer(vanilla_frame);
   content::RenderFrameHostTester::For(vanilla_frame)->Detach();
+  observer.WaitUntilDeleted();
 
   NavigateMainFrame(kNonAdUrl);
 }

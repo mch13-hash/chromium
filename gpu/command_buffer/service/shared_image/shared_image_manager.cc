@@ -30,7 +30,6 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "gpu/command_buffer/service/dxgi_shared_handle_manager.h"
-#include "gpu/command_buffer/service/shared_image/gpu_memory_buffer_factory_dxgi.h"
 #include "ui/gfx/win/d3d_shared_fence.h"
 #include "ui/gl/direct_composition_support.h"
 #include "ui/gl/gl_angle_util_win.h"
@@ -40,10 +39,6 @@
 #include "components/viz/common/gpu/vulkan_context_provider.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "ui/ozone/public/ozone_platform.h"
-#endif
-
-#if BUILDFLAG(IS_ANDROID)
-#include "base/android/android_hardware_buffer_compat.h"
 #endif
 
 #if DCHECK_IS_ON()
@@ -258,8 +253,7 @@ SharedImageManager::SharedImageManager(
 #endif
 #if BUILDFLAG(IS_WIN)
       ,
-      gpu_memory_buffer_factory_(
-          std::make_unique<GpuMemoryBufferFactoryDXGI>(std::move(io_runner)))
+      io_runner_(std::move(io_runner))
 #endif
 {
   DCHECK(!display_context_on_another_thread || thread_safe);
@@ -774,7 +768,7 @@ bool SharedImageManager::SupportsScanoutImages() {
 #if BUILDFLAG(IS_APPLE)
   return true;
 #elif BUILDFLAG(IS_ANDROID)
-  return base::AndroidHardwareBufferCompat::IsSupportAvailable();
+  return true;
 #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
   return supports_overlays_on_ozone_;
 #elif BUILDFLAG(IS_WIN)

@@ -54,7 +54,6 @@
 #include "content/browser/devtools/network_service_devtools_observer.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/fenced_frame/fenced_frame_url_mapping.h"
-#include "content/browser/fingerprinting_protection/canvas_noise_token_data.h"
 #include "content/browser/interest_group/ad_auction_headers_util.h"
 #include "content/browser/loader/browser_initiated_resource_request.h"
 #include "content/browser/loader/cached_navigation_url_loader.h"
@@ -97,7 +96,6 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/scoped_view_transition_resources.h"
 #include "content/browser/renderer_host/subframe_history_navigation_throttle.h"
-#include "content/browser/renderer_host/system_entropy_utils.h"
 #include "content/browser/scoped_active_url.h"
 #include "content/browser/security/coop/cross_origin_opener_policy_reporter.h"
 #include "content/browser/service_worker/service_worker_client.h"
@@ -1151,8 +1149,8 @@ net::StorageAccessApiStatus ShouldLoadWithStorageAccess(
     bool did_encounter_cross_origin_redirect,
     const GURL response_url,
     const network::mojom::URLResponseHead* response) {
-  // Experimental: Storage Access API Headers
-  // (https://github.com/cfredric/storage-access-headers)
+  // Storage Access API Headers:
+  // https://github.com/privacycg/storage-access-headers
   //
   // A server can opt-in to provide storage access to a document by setting the
   // `Activate-Storage-Access: load` header, provided that the user has already
@@ -1452,11 +1450,8 @@ std::unique_ptr<NavigationRequest> NavigationRequest::CreateRendererInitiated(
           frame_tree_node->current_frame_host()->GetCachedPermissionStatuses(),
           /*should_skip_screenshot=*/false,
           /*force_new_document_sequence_number=*/false,
-          /*navigation_metrics_token=*/base::UnguessableToken::Create());
-
-  commit_params->navigation_timing->system_entropy_at_navigation_start =
-      SystemEntropyUtils::ComputeSystemEntropyForFrameTreeNode(
-          frame_tree_node, blink::mojom::SystemEntropy::kNormal);
+          /*navigation_metrics_token=*/base::UnguessableToken::Create(),
+          /*commit_target_frame_token=*/std::nullopt);
 
   // CreateRendererInitiated() should only be triggered when the navigation is
   // initiated by a frame in the same process.
@@ -1608,7 +1603,8 @@ NavigationRequest::CreateForSynchronousRendererCommit(
           render_frame_host->GetCachedPermissionStatuses(),
           /*should_skip_screenshot=*/false,
           /*force_new_document_sequence_number=*/false,
-          /*navigation_metrics_token=*/base::UnguessableToken::Create());
+          /*navigation_metrics_token=*/base::UnguessableToken::Create(),
+          /*commit_target_frame_token=*/std::nullopt);
   blink::mojom::BeginNavigationParamsPtr begin_params =
       blink::mojom::BeginNavigationParams::New();
   std::unique_ptr<NavigationRequest> navigation_request(new NavigationRequest(
@@ -1648,10 +1644,6 @@ NavigationRequest::CreateForSynchronousRendererCommit(
     navigation_request->commit_params_->storage_key =
         blink::StorageKey::Create(origin, top_level_site, ancestor_chain_bit);
   }
-  navigation_request->commit_params_->navigation_timing
-      ->system_entropy_at_navigation_start =
-      SystemEntropyUtils::ComputeSystemEntropyForFrameTreeNode(
-          frame_tree_node, blink::mojom::SystemEntropy::kNormal);
   navigation_request->render_frame_host_ = render_frame_host->GetSafeRef();
   navigation_request->coep_reporter_ = std::move(coep_reporter);
   navigation_request->dip_reporter_ = std::move(dip_reporter);
@@ -2074,9 +2066,8 @@ NavigationRequest::NavigationRequest(
 #if BUILDFLAG(IS_ANDROID)
   RenderWidgetHostImpl* host = RenderWidgetHostImpl::From(
       frame_tree_node_->current_frame_host()->GetRenderWidgetHost());
-  if (NeedsUrlLoader() && IsInPrimaryMainFrame() && host &&
-      !host->is_hidden() && host->GetView() &&
-      host->GetView()->GetNativeView() &&
+  if (NeedsUrlLoader() && IsInPrimaryMainFrame() && host && !host->IsHidden() &&
+      host->GetView() && host->GetView()->GetNativeView() &&
       host->GetView()->GetNativeView()->GetWindowAndroid()) {
     // If the compositor changes, we will just let the lock timeout instead of
     // trying to deal with it explicitly.
@@ -2571,10 +2562,16 @@ bool NavigationRequest::MaybeStartPrerenderingActivationChecks() {
   // Post a task to run the conditions in case BeginNavigation() is not expected
   // to run synchronously. OnPrerenderingActivationChecksComplete() will be
   // called after all the deferring conditions finish.
+  auto commit_deferring_conditions_complete_callback = base::BindOnce(
+      &NavigationRequest::OnPrerenderingActivationChecksComplete,
+      weak_factory_.GetWeakPtr(),
+      CommitDeferringCondition::NavigationType::kPrerenderedPageActivation,
+      candidate_prerender_frame_tree_node_id);
   base::SequencedTaskRunner::GetCurrentDefault()->PostNonNestableTask(
       FROM_HERE,
       base::BindOnce(&NavigationRequest::RunCommitDeferringConditions,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr(),
+                     std::move(commit_deferring_conditions_complete_callback)));
   return true;
 }
 
@@ -3019,7 +3016,29 @@ void NavigationRequest::SetWaitingForRendererResponse() {
 }
 
 bool NavigationRequest::ShouldAddCookieChangeListener() {
-  // The `CookieChangeListener` will only be set up if all of these are true:
+  // Cookies can only be set for http/http(s) URLs, so only create listeners
+  // for those navigations. Also only create for non-activation cross-document
+  // primary main frame navigations (or if
+  // `ShouldAddDeviceBoundSessionObserver()` returns true, which allows
+  // prerenders).
+  return (!IsPageActivation() && !IsSameDocument() && IsInPrimaryMainFrame() &&
+          common_params_->url.SchemeIsHTTPOrHTTPS()) ||
+         ShouldAddDeviceBoundSessionObserver();
+}
+
+bool NavigationRequest::DidCookiesChangeAfterStart(
+    bool exclude_http_only) const {
+  CHECK(HasCookieChangeListener());
+  if (exclude_http_only) {
+    return cookie_change_listener_->cookie_change_info()
+        .non_http_only_cookie_modification_count;
+  }
+  return cookie_change_listener_->cookie_change_info()
+      .cookie_modification_count;
+}
+
+bool NavigationRequest::ShouldAddDeviceBoundSessionObserver() {
+  // Only add if all of these are true:
   // (1) the navigation's protocol is HTTP(s).
   // (2) we allow a document with `Cache-control: no-store` header to
   // enter back/forward.
@@ -3028,9 +3047,9 @@ bool NavigationRequest::ShouldAddCookieChangeListener() {
   // used, and it would already have an existing listener, so we should skip the
   // initialization.
   // (4) the navigation is a primary main frame navigation or it's for
-  // prerendering a main frame, as the cookie change information will only be
-  // used to determined if a page can be restored from back/forward cache, so
-  // subframe navigation can be ignored.
+  // prerendering a main frame, as the device-bound session change information
+  // will only be used to determine if a page can be restored from back/forward
+  // cache, so subframe navigation can be ignored.
   return frame_tree_node_->navigator()
              .controller()
              .GetBackForwardCache()
@@ -3038,12 +3057,6 @@ bool NavigationRequest::ShouldAddCookieChangeListener() {
          !IsPageActivation() && !IsSameDocument() &&
          (IsInPrimaryMainFrame() || IsInPrerenderedMainFrame()) &&
          common_params_->url.SchemeIsHTTPOrHTTPS();
-}
-
-bool NavigationRequest::ShouldAddDeviceBoundSessionObserver() {
-  // Device bound session expiry should evict pages from the BFCache in
-  // the exact same circumstances as cookie expiry.
-  return ShouldAddCookieChangeListener();
 }
 
 void NavigationRequest::StartNavigation() {
@@ -3074,6 +3087,10 @@ void NavigationRequest::StartNavigation() {
   // document that this navigation will load should be eligible for BFCache.
   // The listener eventually will be transferred over to the committed
   // `RenderFrameHost`.
+  // The listener should receive the change events of the cookies from the
+  // the domain of the main-frame navigation url.
+  // If the navigation gets redirected, it will be reset with the new URL when
+  // `NavigationRequest::OnRequestRedirected()` is called.
   if (ShouldAddCookieChangeListener()) {
     // The listener should receive the change events of the cookies from the
     // the domain of the main-frame navigation url.
@@ -4398,6 +4415,12 @@ UrlInfo NavigationRequest::GetUrlInfo() {
     url_info_init.WithCrossSitePrefetchContamination(true);
   }
 
+  if (base::FeatureList::IsEnabled(
+          features::kProcessSelectionDeferringConditions)) {
+    url_info_init.WithProcessSelectionUserData(
+        GetProcessSelectionUserData().GetSafeRef());
+  }
+
   return UrlInfo(url_info_init);
 }
 
@@ -5331,7 +5354,7 @@ void NavigationRequest::SelectFrameHostForOnRequestFailedInternal(
   if (skip_throttles) {
     // The NavigationHandle shouldn't be notified about renderer-debug URLs.
     // They will be handled by the renderer process.
-    CommitErrorPage(error_page_content);
+    PrepareToCommitErrorPage(error_page_content);
   } else {
     // Check if the navigation should be allowed to proceed.
     WillFailRequest();
@@ -5964,9 +5987,9 @@ void NavigationRequest::OnFailureChecksComplete(
   // deferred to WillFailRequest(), which has called through to here, and
   // now we are finally ready to commit the error page. This will be committed
   // to the RenderFrameHost previously chosen in OnRequestFailedInternal().
-  CommitErrorPage(result.error_page_content());
-  // DO NOT ADD CODE after this. The previous call to CommitErrorPage()
-  // caused the destruction of the NavigationRequest.
+  PrepareToCommitErrorPage(result.error_page_content());
+  // DO NOT ADD CODE after this. The previous call may have caused the
+  // destruction of the NavigationRequest.
 }
 
 void NavigationRequest::OnWillProcessResponseChecksComplete(
@@ -6155,7 +6178,8 @@ void NavigationRequest::OnWillProcessResponseChecksComplete(
     return;
   }
 
-  RunCommitDeferringConditions();
+  RunCommitDeferringConditions(base::BindOnce(
+      &NavigationRequest::CommitNavigation, weak_factory_.GetWeakPtr()));
   // DO NOT ADD CODE after this. The previous call to
   // RunCommitDeferringConditions may have caused the destruction of the
   // NavigationRequest.
@@ -6233,7 +6257,11 @@ void NavigationRequest::InheritServiceWorkerControllerFromParentIfNeeded() {
       *parent_service_worker_client, net::SimplifyUrlForRequest(GetURL()));
 }
 
-void NavigationRequest::RunCommitDeferringConditions() {
+void NavigationRequest::RunCommitDeferringConditions(
+    base::OnceClosure on_commit_deferring_conditions_complete_callback) {
+  CHECK(!commit_deferring_conditions_complete_closure_);
+  commit_deferring_conditions_complete_closure_ =
+      std::move(on_commit_deferring_conditions_complete_callback);
   commit_deferrer_->RegisterDeferringConditions(*this);
   commit_deferrer_->ProcessChecks();
   // DO NOT ADD CODE after this. The previous call to ProcessChecks may have
@@ -6243,21 +6271,22 @@ void NavigationRequest::RunCommitDeferringConditions() {
 void NavigationRequest::OnCommitDeferringConditionChecksComplete(
     CommitDeferringCondition::NavigationType navigation_type,
     std::optional<FrameTreeNodeId> candidate_prerender_frame_tree_node_id) {
-  switch (navigation_type) {
-    case CommitDeferringCondition::NavigationType::kPrerenderedPageActivation:
-      OnPrerenderingActivationChecksComplete(
-          navigation_type, candidate_prerender_frame_tree_node_id);
-      // DO NOT ADD CODE after this. The previous call to
-      // OnPrerenderingActivationChecksComplete caused the destruction of the
-      // NavigationRequest.
-      return;
-    case CommitDeferringCondition::NavigationType::kOther:
-      DCHECK_LT(state_, READY_TO_COMMIT);
-      CommitNavigation();
-      // DO NOT ADD CODE after this. The previous call to CommitNavigation
-      // caused the destruction of the NavigationRequest.
-      return;
-  }
+  // CommitDeferringConditions could have been triggered for prerender
+  // activation, a normal navigation commit or an error page commit.
+  // Running this closure will continue the commit on the appropriate path.
+  CHECK(commit_deferring_conditions_complete_closure_);
+  std::move(commit_deferring_conditions_complete_closure_).Run();
+  // DO NOT ADD CODE after this. The previous call could cause the
+  // destruction of the NavigationRequest.
+}
+
+void NavigationRequest::PrepareToCommitErrorPage(
+    const std::optional<std::string>& error_page_content) {
+  RunCommitDeferringConditions(
+      base::BindOnce(&NavigationRequest::CommitErrorPage,
+                     weak_factory_.GetWeakPtr(), error_page_content));
+  //  DO NOT ADD CODE after this. The previous call may have caused the
+  //  destruction of the NavigationRequest.
 }
 
 void NavigationRequest::CommitErrorPage(
@@ -6274,18 +6303,7 @@ void NavigationRequest::CommitErrorPage(
   // Don't pass the base url in a failed navigation.
   common_params_->initiator_base_url = std::nullopt;
 
-  if (request_navigation_client_.is_bound()) {
-    if (GetRenderFrameHost() ==
-        RenderFrameHostImpl::FromID(
-            current_render_frame_host_id_at_construction_)) {
-      // Reuse the request NavigationClient for commit.
-      commit_navigation_client_ = std::move(request_navigation_client_);
-    } else {
-      // This navigation is cross-RenderFrameHost: the original document should
-      // no longer be able to cancel it.
-      IgnoreInterfaceDisconnection();
-    }
-  }
+  ReuseRequestNavigationClientForCommitIfNeeded();
 
   topics_eligible_ = false;
 
@@ -6520,18 +6538,7 @@ void NavigationRequest::CommitNavigation() {
          GetRenderFrameHost() ==
              frame_tree_node_->render_manager()->speculative_frame_host());
 
-  if (request_navigation_client_.is_bound()) {
-    if (GetRenderFrameHost() ==
-        RenderFrameHostImpl::FromID(
-            current_render_frame_host_id_at_construction_)) {
-      // Reuse the request NavigationClient for commit.
-      commit_navigation_client_ = std::move(request_navigation_client_);
-    } else {
-      // This navigation is cross-RenderFrameHost: the original document should
-      // no longer be able to cancel it.
-      IgnoreInterfaceDisconnection();
-    }
-  }
+  ReuseRequestNavigationClientForCommitIfNeeded();
 
   CreateCoepReporter(GetRenderFrameHost()->GetProcess()->GetStoragePartition());
   coop_status_.UpdateReporterStoragePartition(
@@ -7205,7 +7212,7 @@ bool NavigationRequest::IsAllowedByCSPDirective(
   network::CSPCheckResult result = context->IsAllowedByCsp(
       policies, directive, url, commit_params_->original_url,
       has_followed_redirect, common_params_->source_location, disposition,
-      begin_params_->is_form_submission, is_opaque_fenced_frame);
+      is_opaque_fenced_frame);
   if (result.WouldBlockIfWildcardDoesNotMatchWs()) {
     GetContentClient()->browser()->LogWebFeatureForCurrentPage(
         GetParentFrame(),
@@ -7669,7 +7676,10 @@ void NavigationRequest::OnNavigationClientDisconnected(
                                                    discard_reason.value());
   } else if (GetRenderFrameHost() ==
                  frame_tree_node_->render_manager()->current_frame_host() ||
-             !GetRenderFrameHost()->IsRenderFrameLive()) {
+             !GetRenderFrameHost()->IsRenderFrameLive() ||
+             (base::FeatureList::IsEnabled(
+                  features::kSkipRendererCancellationThrottle) &&
+              commit_params_->commit_target_frame_token.has_value())) {
     // If the NavigationRequest has already reached READY_TO_COMMIT,
     // `render_frame_host_` owns `this`. Cache any needed state in stack
     // variables to avoid a use-after-free.
@@ -7682,6 +7692,40 @@ void NavigationRequest::OnNavigationClientDisconnected(
   }
 
   // Do not add code after this, NavigationRequest might have been destroyed.
+}
+
+void NavigationRequest::ReuseRequestNavigationClientForCommitIfNeeded() {
+  if (!request_navigation_client_.is_bound()) {
+    return;
+  }
+  auto* rfh_at_construction = RenderFrameHostImpl::FromID(
+      current_render_frame_host_id_at_construction_);
+  if (GetRenderFrameHost() == rfh_at_construction) {
+    // Reuse the request NavigationClient for commit.
+    commit_navigation_client_ = std::move(request_navigation_client_);
+  } else if (base::FeatureList::IsEnabled(
+                 features::kSkipRendererCancellationThrottle) &&
+             rfh_at_construction &&
+             (rfh_at_construction == frame_tree_node_->current_frame_host()) &&
+             rfh_at_construction->GetSiteInstance()->group() ==
+                 GetRenderFrameHost()->GetSiteInstance()->group()) {
+    // When doing a local RenderFrame swap, to ensure navigation cancellation
+    // behavior is the same with what it used to be if we didn't do a
+    // RenderFrame swap, reuse `request_navigation_client_` for commit.
+    // This allows last-minute navigation cancellations from the requester
+    // to still take effect, even if the commit is in-flight to the renderer.
+    // If the navigation is not cancelled, when doing the commit in the
+    // renderer, the NavigationClient that is currently owned by the old
+    // RenderFrame will later be moved to be owned by the new RenderFrame.
+    commit_params_->commit_target_frame_token =
+        GetRenderFrameHost()->GetFrameToken();
+    commit_navigation_client_ = std::move(request_navigation_client_);
+    HandleInterfaceDisconnection(commit_navigation_client_);
+  } else {
+    // This navigation is cross-RenderFrameHost: the original document should
+    // no longer be able to cancel it.
+    IgnoreInterfaceDisconnection();
+  }
 }
 
 void NavigationRequest::HandleInterfaceDisconnection(
@@ -8484,6 +8528,7 @@ void NavigationRequest::UpdatePrivateNetworkRequestPolicy() {
       frame_tree_node_->navigator().controller().GetBrowserContext();
 
   url::Origin origin = GetOriginToCommit().value();
+  // TODO(crbug.com/452389539): Centralize these policy overrides.
   ContentBrowserClient::PrivateNetworkRequestPolicyOverride policy_override =
       client->ShouldOverridePrivateNetworkRequestPolicy(context, origin);
 
@@ -8705,23 +8750,6 @@ void NavigationRequest::ReadyToCommitNavigation(bool is_error) {
           GetParentFrameOrOuterDocument()->GetPermissionsPolicy(),
           GetParentFrameOrOuterDocument()->GetLastCommittedOrigin());
     }
-  }
-
-  // Populate the canvas noise token if this is a main frame navigation. Canvas
-  // noise tokens should be generated based on the resolved origin, which is
-  // available at |ReadyToCommit| time. Eventually, prior to commit, this value
-  // will be used to sync blink::Pages with this token value, and subsequent
-  // subframe navigations will inherit this token to populate their
-  // blink::Pages.
-  if (IsInMainFrame()) {
-    BrowserContext* browser_context =
-        frame_tree_node()->navigator().controller().GetBrowserContext();
-    canvas_noise_token_ =
-        GetContentClient()->browser()->ShouldEnableCanvasNoise(
-            browser_context, origin_to_commit->GetURL())
-            ? std::optional(CanvasNoiseTokenData::GetToken(
-                  browser_context, origin_to_commit.value()))
-            : std::nullopt;
   }
 
   if (ready_to_commit_callback_for_testing_)
@@ -10030,6 +10058,22 @@ NavigationRequest::BuildClientSecurityStateForNavigationFetch() {
           *policy_container_builder_->InitiatorPolicies(),
           PrivateNetworkRequestContext::kSubframeNavigation);
 
+      // Check for policy overrides on LNA. For subframe navigations, we apply
+      // policy overrides based on the initiator.
+      // TODO(crbug.com/452389539): Centralize these policy overrides.
+      if (GetInitiatorOrigin()) {
+        ContentBrowserClient* client = GetContentClient()->browser();
+        BrowserContext* context =
+            frame_tree_node_->navigator().controller().GetBrowserContext();
+        url::Origin origin = GetInitiatorOrigin().value();
+        ContentBrowserClient::PrivateNetworkRequestPolicyOverride
+            policy_override = client->ShouldOverridePrivateNetworkRequestPolicy(
+                context, origin);
+        state->private_network_request_policy =
+            OverrideLocalNetworkAccessPolicy(
+                state->private_network_request_policy, policy_override);
+      }
+
       // Remove the initiator's COEP, it is unused. For iframes, the parent's
       // COEP should be used: that is checked in `EnforceCOEP()`. The value
       // in `ClientSecurityState` is used for subresources only, in which case
@@ -10326,6 +10370,17 @@ void NavigationRequest::ComputePoliciesToCommit() {
           "LocalNetworkAccessNonSecureContextAllowed", base::Time::Now())) {
     policy_container_builder_->SetLocalNetworkAccessNonSecureContextAllowed(
         true);
+  }
+
+  if (response_head_) {
+    CHECK(base::FeatureList::IsEnabled(
+              network::features::kConnectionAllowlists) ||
+          (!response_head_->parsed_headers->connection_allowlists.enforced
+                .has_value() &&
+           !response_head_->parsed_headers->connection_allowlists.report_only
+                .has_value()));
+    policy_container_builder_->SetConnectionAllowlists(
+        std::move(response_head_->parsed_headers->connection_allowlists));
   }
 
   if (!devtools_instrumentation::ShouldBypassCSP(*this)) {
@@ -11116,6 +11171,10 @@ NavigationRequest::GetMutableRuntimeFeatureStateContext() {
 const blink::RuntimeFeatureStateContext&
 NavigationRequest::GetRuntimeFeatureStateContext() {
   return runtime_feature_state_context_;
+}
+
+ProcessSelectionUserData& NavigationRequest::GetProcessSelectionUserData() {
+  return process_selection_user_data_;
 }
 
 // The NavigationDownloadPolicy is currently computed by the renderer process.

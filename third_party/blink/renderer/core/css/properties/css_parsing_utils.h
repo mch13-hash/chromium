@@ -281,6 +281,8 @@ CSSIdentifierValue* ConsumeVisualBox(CSSParserTokenStream&);
 CSSIdentifierValue* ConsumeCoordBox(CSSParserTokenStream&);
 
 CSSIdentifierValue* ConsumeGeometryBox(CSSParserTokenStream&);
+CSSIdentifierValue* ConsumeGeometryBoxForBorderShape(
+    CSSParserTokenStream& stream);
 
 enum class IsImplicitProperty { kNotImplicit, kImplicit };
 
@@ -582,6 +584,15 @@ CSSValue* ParseMasonryTemplateAreasValue(const String& masonry_template_areas,
 
 CSSValue* ConsumeItemTolerance(CSSParserTokenStream&, const CSSParserContext&);
 
+bool ConsumeGapDecorationsRuleOutsetShorthand(
+    bool important,
+    const CSSParserContext& context,
+    CSSParserTokenStream& stream,
+    CSSValue*& rule_edge_start_outset,
+    CSSValue*& rule_edge_end_outset,
+    CSSValue*& rule_interior_start_outset,
+    CSSValue*& rule_interior_end_outset);
+
 bool ConsumeGapDecorationsRuleShorthand(bool important,
                                         const CSSParserContext& context,
                                         CSSParserTokenStream& stream,
@@ -686,8 +697,8 @@ bool ShouldLowerCaseCounterStyleNameOnParse(const AtomicString&,
                                             const CSSParserContext&);
 
 // https://drafts.csswg.org/css-anchor-position-1/#typedef-position-area
-CSSValue* ConsumePositionArea(CSSParserTokenStream&,
-                              bool allow_any_keyword = false);
+CORE_EXPORT CSSValue* ConsumePositionArea(CSSParserTokenStream&,
+                                          bool allow_any_keyword = false);
 
 // https://drafts.csswg.org/css-anchor-position-2/#anchored
 CSSValue* ConsumeAnchoredFallbackQueryValue(CSSParserTokenStream&,
@@ -708,6 +719,9 @@ CSSValue* ConsumeSingleTimelineTriggerName(CSSParserTokenStream& stream,
                                            const CSSParserContext& context);
 
 // https://drafts.csswg.org/css-animations-2/#animation-trigger
+CSSIdentifierValue* ConsumeAnimationTriggerBehavior(
+    CSSParserTokenStream& stream,
+    const CSSParserContext& context);
 CSSValue* ConsumeSingleAnimationTriggerAttachment(
     CSSParserTokenStream& stream,
     const CSSParserContext& context);

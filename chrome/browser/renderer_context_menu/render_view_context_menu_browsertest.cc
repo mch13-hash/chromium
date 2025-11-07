@@ -19,6 +19,7 @@
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
@@ -78,6 +79,8 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/generated_resources.h"
+#include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chrome/test/base/search_test_utils.h"
@@ -150,6 +153,7 @@
 #include "third_party/libwebp/src/src/webp/decode.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/emoji/emoji_panel_helper.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/mojom/menu_source_type.mojom.h"
 #include "ui/base/ui_base_types.h"
@@ -369,7 +373,7 @@ class ContextMenuBrowserTestBase : public MixinBasedInProcessBrowserTest {
       chrome::mojom::ImageFormat request_image_format,
       gfx::Size expected_original_size,
       gfx::Size expected_size,
-      std::string expected_extension) {
+      std::string expected_mime_type) {
     mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame>
         chrome_render_frame;
     browser()
@@ -382,17 +386,16 @@ class ContextMenuBrowserTestBase : public MixinBasedInProcessBrowserTest {
     auto callback =
         [](std::vector<uint8_t>* response_image_data,
            gfx::Size* response_original_size,
-           gfx::Size* response_downscaled_size,
-           std::string* response_file_extension,
+           gfx::Size* response_downscaled_size, std::string* response_mime_type,
            std::vector<lens::mojom::LatencyLogPtr>* response_log_data,
            base::OnceClosure quit, const std::vector<uint8_t>& image_data,
            const gfx::Size& original_size, const gfx::Size& downscaled_size,
-           const std::string& file_extension,
+           const std::string& mime_type,
            std::vector<lens::mojom::LatencyLogPtr> log_data) {
           *response_image_data = image_data;
           *response_original_size = original_size;
           *response_downscaled_size = downscaled_size;
-          *response_file_extension = file_extension;
+          *response_mime_type = mime_type;
           *response_log_data = std::move(log_data);
           std::move(quit).Run();
         };
@@ -401,12 +404,12 @@ class ContextMenuBrowserTestBase : public MixinBasedInProcessBrowserTest {
     std::vector<uint8_t> response_image_data;
     gfx::Size response_original_size;
     gfx::Size response_downscaled_size;
-    std::string response_file_extension;
+    std::string response_mime_type;
     std::vector<lens::mojom::LatencyLogPtr> response_log_data;
     chrome_render_frame->RequestImageForContextNode(
         0, request_size, request_image_format, chrome::mojom::kDefaultQuality,
         base::BindOnce(callback, &response_image_data, &response_original_size,
-                       &response_downscaled_size, &response_file_extension,
+                       &response_downscaled_size, &response_mime_type,
                        &response_log_data, run_loop.QuitClosure()));
     run_loop.Run();
 
@@ -414,20 +417,20 @@ class ContextMenuBrowserTestBase : public MixinBasedInProcessBrowserTest {
     ASSERT_EQ(expected_original_size.height(), response_original_size.height());
     ASSERT_EQ(expected_size.width(), response_downscaled_size.width());
     ASSERT_EQ(expected_size.height(), response_downscaled_size.height());
-    ASSERT_EQ(expected_extension, response_file_extension);
+    ASSERT_EQ(expected_mime_type, response_mime_type);
 
     SkBitmap decoded_bitmap;
-    if (response_file_extension == ".png") {
+    if (response_mime_type == "image/png") {
       decoded_bitmap = gfx::PNGCodec::Decode(response_image_data);
       ASSERT_FALSE(decoded_bitmap.isNull());
       ASSERT_EQ(expected_size.width(), decoded_bitmap.width());
       ASSERT_EQ(expected_size.height(), decoded_bitmap.height());
-    } else if (response_file_extension == ".jpg") {
+    } else if (response_mime_type == "image/jpeg") {
       decoded_bitmap = gfx::JPEGCodec::Decode(response_image_data);
       ASSERT_FALSE(decoded_bitmap.isNull());
       ASSERT_EQ(expected_size.width(), decoded_bitmap.width());
       ASSERT_EQ(expected_size.height(), decoded_bitmap.height());
-    } else if (response_file_extension == ".webp") {
+    } else if (response_mime_type == "image/webp") {
       int width;
       int height;
       EXPECT_TRUE(WebPGetInfo(&response_image_data.front(),
@@ -531,7 +534,7 @@ class PdfPluginContextMenuBrowserTest : public PDFExtensionTestBase {
   std::unique_ptr<TestRenderViewContextMenu> SetupAndCreateMenuWithPdfInfo(
       const PdfInfo& info) {
     // Load a pdf page.
-    GURL page_url = ui_test_utils::GetTestUrl(
+    GURL page_url = chrome_test_utils::GetTestUrl(
         base::FilePath(FILE_PATH_LITERAL("pdf")),
         base::FilePath(FILE_PATH_LITERAL("test.pdf")));
     EXPECT_TRUE(LoadPdf(page_url));
@@ -599,7 +602,7 @@ class PdfPluginContextMenuBrowserTest : public PDFExtensionTestBase {
   void TestContextMenuOfPdfInsideWebPage(
       const base::FilePath::CharType* file_name) {
     // Load a page with pdf file inside.
-    GURL page_url = ui_test_utils::GetTestUrl(
+    GURL page_url = chrome_test_utils::GetTestUrl(
         base::FilePath(FILE_PATH_LITERAL("pdf")), base::FilePath(file_name));
     ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), page_url));
 
@@ -729,9 +732,17 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
   EXPECT_TRUE(menu3->IsCommandIdVisible(IDC_CONTENT_CONTEXT_COPYLINKTEXT));
 }
 
+// TODO(crbug.com/455524503): De-flake and re-enable on ChromeOS.
+#if BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_SaveLinkAsEntryIsDisabledForBlockedUrls \
+  DISABLED_SaveLinkAsEntryIsDisabledForBlockedUrls
+#else
+#define MAYBE_SaveLinkAsEntryIsDisabledForBlockedUrls \
+  SaveLinkAsEntryIsDisabledForBlockedUrls
+#endif
 // Verifies "Save link as" is not enabled for links blocked via policy.
 IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
-                       SaveLinkAsEntryIsDisabledForBlockedUrls) {
+                       MAYBE_SaveLinkAsEntryIsDisabledForBlockedUrls) {
   base::Value::List list;
   list.Append("google.com");
   browser()->profile()->GetPrefs()->SetList(policy::policy_prefs::kUrlBlocklist,
@@ -789,9 +800,17 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
   EXPECT_TRUE(menu->IsCommandIdEnabled(IDC_SAVE_PAGE));
 }
 
+// TODO(crbug.com/455524503): De-flake and re-enable on ChromeOS.
+#if BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_SaveImageAsEntryIsDisabledForBlockedUrls \
+  DISABLED_SaveImageAsEntryIsDisabledForBlockedUrls
+#else
+#define MAYBE_SaveImageAsEntryIsDisabledForBlockedUrls \
+  SaveImageAsEntryIsDisabledForBlockedUrls
+#endif
 // Verifies "Save image as" is not enabled for links blocked via policy.
 IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
-                       SaveImageAsEntryIsDisabledForBlockedUrls) {
+                       MAYBE_SaveImageAsEntryIsDisabledForBlockedUrls) {
   base::Value::List list;
   list.Append("url.com");
   browser()->profile()->GetPrefs()->SetList(policy::policy_prefs::kUrlBlocklist,
@@ -2847,9 +2866,9 @@ class OopifPdfExtensionContextMenuBrowserTest : public PDFExtensionTestBase {
 
 IN_PROC_BROWSER_TEST_F(OopifPdfExtensionContextMenuBrowserTest,
                        DeveloperItems) {
-  GURL page_url =
-      ui_test_utils::GetTestUrl(base::FilePath(FILE_PATH_LITERAL("pdf")),
-                                base::FilePath(FILE_PATH_LITERAL("test.pdf")));
+  GURL page_url = chrome_test_utils::GetTestUrl(
+      base::FilePath(FILE_PATH_LITERAL("pdf")),
+      base::FilePath(FILE_PATH_LITERAL("test.pdf")));
   content::RenderFrameHost* pdf_extension = LoadPdfGetExtensionHost(page_url);
   ASSERT_TRUE(pdf_extension);
 
@@ -3215,14 +3234,15 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, GifImageShare) {
   OpenImagePageAndContextMenu("/google/logo.gif");
   RequestImageAndVerifyResponse(
       gfx::Size(2048, 2048), chrome::mojom::ImageFormat::ORIGINAL,
-      gfx::Size(276, 110), gfx::Size(276, 110), ".gif");
+      gfx::Size(276, 110), gfx::Size(276, 110), "image/gif");
 }
 
 IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, GifImageDownscaleToJpeg) {
   OpenImagePageAndContextMenu("/google/logo.gif");
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::ORIGINAL,
-      gfx::Size(276, 110), gfx::Size(100, /* 100 / 480 * 320 =  */ 39), ".jpg");
+      gfx::Size(276, 110), gfx::Size(100, /* 100 / 480 * 320 =  */ 39),
+      "image/jpeg");
 }
 
 // TODO(crbug.com/40273673): Enable the test.
@@ -3235,7 +3255,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_RequestPngForGifImage) {
   OpenImagePageAndContextMenu("/google/logo.gif");
   RequestImageAndVerifyResponse(
       gfx::Size(2048, 2048), chrome::mojom::ImageFormat::PNG,
-      gfx::Size(276, 110), gfx::Size(276, 110), ".png");
+      gfx::Size(276, 110), gfx::Size(276, 110), "image/png");
 }
 
 // TODO(crbug.com/40273673): Enable the test.
@@ -3248,14 +3268,14 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_PngImageDownscaleToPng) {
   OpenImagePageAndContextMenu("/image_search/valid.png");
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::PNG, gfx::Size(200, 100),
-      gfx::Size(100, 50), ".png");
+      gfx::Size(100, 50), "image/png");
 }
 
 IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, PngImageOriginalDownscaleToPng) {
   OpenImagePageAndContextMenu("/image_search/valid.png");
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::ORIGINAL,
-      gfx::Size(200, 100), gfx::Size(100, 50), ".png");
+      gfx::Size(200, 100), gfx::Size(100, 50), "image/png");
 }
 
 // TODO(crbug.com/40273673): Enable the test.
@@ -3268,7 +3288,8 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_JpgImageDownscaleToJpg) {
   OpenImagePageAndContextMenu("/android/watch.jpg");
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::ORIGINAL,
-      gfx::Size(480, 320), gfx::Size(100, /* 100 / 480 * 320 =  */ 66), ".jpg");
+      gfx::Size(480, 320), gfx::Size(100, /* 100 / 480 * 320 =  */ 66),
+      "image/jpeg");
 }
 
 IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, JpgImageDownscaleToWebp) {
@@ -3276,7 +3297,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, JpgImageDownscaleToWebp) {
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::WEBP,
       gfx::Size(480, 320), gfx::Size(100, /* 100 / 480 * 320 =  */ 66),
-      ".webp");
+      "image/webp");
 }
 
 // TODO(crbug.com/40273673): Enable the test.
@@ -3289,7 +3310,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_PngImageDownscaleToWebp) {
   OpenImagePageAndContextMenu("/image_search/valid.png");
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::WEBP,
-      gfx::Size(200, 100), gfx::Size(100, 50), ".webp");
+      gfx::Size(200, 100), gfx::Size(100, 50), "image/webp");
 }
 
 // TODO(crbug.com/40273673): Enable the test.
@@ -3303,7 +3324,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_GifImageDownscaleToWebp) {
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::WEBP,
       gfx::Size(276, 110), gfx::Size(100, /* 100 / 275 * 110 =  */ 39),
-      ".webp");
+      "image/webp");
 }
 
 // TODO(crbug.com/40273673): Enable the test.
@@ -3316,7 +3337,7 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, MAYBE_WebpImageDownscaleToWebp) {
   OpenImagePageAndContextMenu("/banners/webp-icon.webp");
   RequestImageAndVerifyResponse(
       gfx::Size(100, 100), chrome::mojom::ImageFormat::WEBP,
-      gfx::Size(192, 192), gfx::Size(100, 100), ".webp");
+      gfx::Size(192, 192), gfx::Size(100, 100), "image/webp");
 }
 
 IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest,
@@ -3663,10 +3684,38 @@ IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenLinkInExistingSplitTab) {
       CreateContextMenuMediaTypeNone(test_url, test_url);
 
   EXPECT_TRUE(menu->IsItemPresent(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW));
+  size_t index = 0;
+  raw_ptr<ui::MenuModel> model = nullptr;
+  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(
+      IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, &model, &index));
+  EXPECT_EQ(model->GetLabelAt(index),
+            l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKRIGHTVIEW));
   menu->ExecuteCommand(IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 0);
   ASSERT_EQ(tab_strip_model->count(), 2);
   EXPECT_TRUE(tab_strip_model->GetTabAtIndex(0)->IsSplit());
   EXPECT_EQ(tab_strip_model->GetWebContentsAt(1)->GetURL(), test_url);
+}
+
+IN_PROC_BROWSER_TEST_P(ContextMenuBrowserTest, OpenLinkInExistingSplitTabRTL) {
+  base::i18n::SetRTLForTesting(true);
+
+  const GURL test_url("http://www.example.com/");
+  TabStripModel* const tab_strip_model = browser()->tab_strip_model();
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), test_url));
+  chrome::NewSplitTab(browser(),
+                      split_tabs::SplitTabCreatedSource::kLinkContextMenu);
+  tab_strip_model->ActivateTabAt(0);
+  ASSERT_NE(tab_strip_model->GetWebContentsAt(1)->GetURL(), test_url);
+
+  std::unique_ptr<TestRenderViewContextMenu> menu =
+      CreateContextMenuMediaTypeNone(test_url, test_url);
+
+  size_t index = 0;
+  raw_ptr<ui::MenuModel> model = nullptr;
+  ASSERT_TRUE(menu->GetMenuModelAndItemIndex(
+      IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, &model, &index));
+  EXPECT_EQ(model->GetLabelAt(index),
+            l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKLEFTVIEW));
 }
 
 }  // namespace

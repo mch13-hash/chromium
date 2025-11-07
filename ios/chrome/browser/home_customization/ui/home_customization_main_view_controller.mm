@@ -10,6 +10,7 @@
 #import "base/strings/sys_string_conversions.h"
 #import "ios/chrome/browser/home_customization/ui/background_collection_configuration.h"
 #import "ios/chrome/browser/home_customization/ui/background_customization_configuration.h"
+#import "ios/chrome/browser/home_customization/ui/home_customization_accessibility_identifiers.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_cell.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_configuration_mutator.h"
 #import "ios/chrome/browser/home_customization/ui/home_customization_background_picker_cell.h"
@@ -26,11 +27,25 @@
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_trait.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/public/snackbar/snackbar_constants.h"
+#import "ios/chrome/browser/shared/public/snackbar/snackbar_message.h"
+#import "ios/chrome/browser/shared/public/snackbar/snackbar_message_action.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/util/custom_ui_trait_accessor.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util.h"
+
+// Wrapper class for user-uploaded images.
+@interface HomeCustomizationUserUploadedThumbnailData : NSObject
+@property(nonatomic, strong) UIImage* preparedImage;
+@property(nonatomic, strong)
+    HomeCustomizationFramingCoordinates* framingCoordinates;
+@end
+
+@implementation HomeCustomizationUserUploadedThumbnailData
+@end
 
 @interface HomeCustomizationMainViewController () <
     HomeCustomizationViewControllerProtocol,
@@ -39,6 +54,14 @@
 // Contains the types of HomeCustomizationToggleCells that should be shown, with
 // a BOOL indicating if each one is enabled.
 @property(nonatomic, assign) std::map<CustomizationToggleType, BOOL> toggleMap;
+
+// Cache for prepared user-uploaded thumbnails.
+@property(nonatomic, strong)
+    NSCache<NSString*, HomeCustomizationUserUploadedThumbnailData*>*
+        userThumbnailCache;
+
+// Contains the identifiers for background image loads that have failed.
+@property(nonatomic, strong) NSMutableSet<NSString*>* failedPresetImageLoads;
 
 @end
 
@@ -61,23 +84,37 @@
   // Registration for the enterprise management info cell.
   UICollectionViewCellRegistration* _enterprisePolicyCellRegistration;
 
-  // The id of the selected background cell.
-  NSString* _selectedBackgroundId;
-
   // The number of times a background is selected from the recently used
   // section.
   int _recentBackgroundClickCount;
+
+  // Last handled height. Used so detents are only invalidated when the content
+  // height actually changes.
+  CGFloat _lastSeenViewContentHeight;
+
+  // The background cell identifier that should be selected initially. Stored
+  // temporarily because the initial data load can happen in multiple different
+  // places.
+  NSString* _initialSelectedBackgroundID;
+
+  // Cache for loaded preset images.
+  NSMutableDictionary<NSString*, UIImage*>* _presetImageCache;
 }
 
 // Synthesized from HomeCustomizationViewControllerProtocol.
 @synthesize collectionView = _collectionView;
 @synthesize diffableDataSource = _diffableDataSource;
 @synthesize page = _page;
+@synthesize additionalViewWillTransitionToSizeHandler =
+    _additionalViewWillTransitionToSizeHandler;
 
 - (instancetype)init {
   self = [super init];
   if (self) {
     self.backgroundCustomizationUserInteractionEnabled = YES;
+    _userThumbnailCache = [[NSCache alloc] init];
+    _failedPresetImageLoads = [[NSMutableSet alloc] init];
+    _presetImageCache = [[NSMutableDictionary alloc] init];
   }
   return self;
 }
@@ -93,12 +130,19 @@
   [_collectionConfigurator configureCollectionView];
 
   // Sets initial data.
+  __weak __typeof(self) weakSelf = self;
   [_diffableDataSource applySnapshot:[self dataSnapshot]
-                animatingDifferences:NO];
+                animatingDifferences:NO
+                          completion:^() {
+                            [weakSelf selectInitialItemAfterDataLoad];
+                          }];
 
   // The primary view is set as the collection view for better integration with
   // the UISheetPresentationController which presents it.
   self.view = _collectionView;
+
+  _collectionView.accessibilityIdentifier =
+      kHomeCustomizationMainViewAccessibilityIdentifier;
 
   [_collectionConfigurator configureNavigationBar];
 }
@@ -108,6 +152,28 @@
       "IOS.HomeCustomization.Background.RecentlyUsed.ClickCount",
       _recentBackgroundClickCount);
   [super viewWillDisappear:animated];
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:
+           (id<UIViewControllerTransitionCoordinator>)coordinator {
+  if (_additionalViewWillTransitionToSizeHandler) {
+    _additionalViewWillTransitionToSizeHandler(size, coordinator);
+  }
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+
+  if (_lastSeenViewContentHeight != self.viewContentHeight) {
+    _lastSeenViewContentHeight = self.viewContentHeight;
+    [self.sheetPresentationController invalidateDetents];
+  }
+}
+
+- (CGFloat)viewContentHeight {
+  return self.navigationController.navigationBar.frame.size.height +
+         self.collectionView.contentSize.height;
 }
 
 #pragma mark - Private
@@ -221,8 +287,10 @@
         verticalListSectionForLayoutEnvironment:layoutEnvironment];
   } else if (sectionIndex == backgroundCustomizationIdentifier) {
     CHECK(IsNTPBackgroundCustomizationEnabled());
+    CGSize windowSize = self.view.window.bounds.size;
     return [_collectionConfigurator
-        backgroundCellSectionForLayoutEnvironment:layoutEnvironment];
+        backgroundCellSectionForLayoutEnvironment:layoutEnvironment
+                                       windowSize:windowSize];
   } else if (sectionIndex == enterpriseIdentifier) {
     return [_collectionConfigurator
         verticalListSectionForLayoutEnvironment:layoutEnvironment];
@@ -286,6 +354,8 @@
                                                    previewProvider:nil
                                                     actionProvider:nil];
   }
+  UICollectionViewCell* cell =
+      [collectionView cellForItemAtIndexPath:indexPath];
 
   __weak __typeof(self) weakSelf = self;
 
@@ -296,30 +366,45 @@
           ? UIMenuElementAttributesDisabled
           : UIMenuElementAttributesDestructive;
 
+  UIActionHandler deleteHandler = ^(UIAction* action) {
+    [weakSelf handleDeleteBackgroundActionAtIndexPath:indexPath];
+  };
+
+  UIAction* deleteAction = [UIAction
+      actionWithTitle:
+          l10n_util::GetNSString(
+              IDS_IOS_HOME_CUSTOMIZATION_CONTEXT_MENU_DELETE_RECENT_BACKGROUND_TITLE)
+                image:DefaultSymbolWithPointSize(
+                          kTrashSymbol,
+                          [[UIFont
+                              preferredFontForTextStyle:UIFontTextStyleBody]
+                              pointSize])
+           identifier:nil
+              handler:^(UIAction* action) {
+                [weakSelf handleDeleteBackgroundActionAtIndexPath:indexPath];
+              }];
+  deleteAction.attributes = actionAttributes;
+
+  UIAccessibilityCustomAction* accessibilityDeleteAction =
+      [[UIAccessibilityCustomAction alloc]
+           initWithName:deleteAction.title
+          actionHandler:^BOOL(UIAccessibilityCustomAction* _customAction) {
+            deleteHandler(deleteAction);
+            return YES;
+          }];
+
+  NSArray<UIAction*>* actions = @[ deleteAction ];
+  NSArray<UIAccessibilityCustomAction*>* accessibilityCustomActions =
+      @[ accessibilityDeleteAction ];
+
+  cell.accessibilityCustomActions = accessibilityCustomActions;
+
   return [UIContextMenuConfiguration
       configurationWithIdentifier:indexPath
                   previewProvider:nil
                    actionProvider:^UIMenu*(
                        NSArray<UIMenuElement*>* suggestedActions) {
-                     UIAction* deleteAction = [UIAction
-                         actionWithTitle:
-                             l10n_util::GetNSString(
-                                 IDS_IOS_HOME_CUSTOMIZATION_CONTEXT_MENU_DELETE_RECENT_BACKGROUND_TITLE)
-                                   image:DefaultSymbolWithPointSize(
-                                             kTrashSymbol,
-                                             [[UIFont preferredFontForTextStyle:
-                                                          UIFontTextStyleBody]
-                                                 pointSize])
-                              identifier:nil
-                                 handler:^(UIAction* action) {
-                                   [weakSelf
-                                       handleDeleteBackgroundActionAtIndexPath:
-                                           indexPath];
-                                 }];
-                     deleteAction.attributes = actionAttributes;
-
-                     return [UIMenu menuWithTitle:@""
-                                         children:@[ deleteAction ]];
+                     return [UIMenu menuWithTitle:@"" children:actions];
                    }];
 }
 
@@ -330,9 +415,24 @@
   NSString* itemIdentifier =
       [self.diffableDataSource itemIdentifierForIndexPath:indexPath];
 
-  return [section isEqualToString:kCustomizationSectionBackground] &&
-         self.backgroundCustomizationUserInteractionEnabled &&
-         ![itemIdentifier isEqualToString:kBackgroundPickerCellIdentifier];
+  // Only the backgrounds section can be selected.
+  if (![section isEqualToString:kCustomizationSectionBackground]) {
+    return false;
+  }
+
+  // If interaction is disabled, prevent selection.
+  if (!self.backgroundCustomizationUserInteractionEnabled) {
+    return false;
+  }
+
+  // The background picker cell cannot be selected. It handles taps itself.
+  if ([itemIdentifier isEqualToString:kBackgroundPickerCellIdentifier]) {
+    return false;
+  }
+
+  // The currently selected item cannot be selected again. This prevents the
+  // background when the current background is set again.
+  return _collectionView.indexPathsForSelectedItems.firstObject != indexPath;
 }
 
 - (void)collectionView:(UICollectionView*)collectionView
@@ -340,18 +440,14 @@
   NSString* itemIdentifier =
       [self.diffableDataSource itemIdentifierForIndexPath:indexPath];
 
-  // Prevent background updates when a user clicks on an already selected cell.
-  if (_selectedBackgroundId == itemIdentifier) {
-    return;
-  }
-
-  _selectedBackgroundId = itemIdentifier;
-
   id<BackgroundCustomizationConfiguration> backgroundConfiguration =
       _backgroundCollectionConfiguration.configurations[itemIdentifier];
 
   [self.customizationMutator
       applyBackgroundForConfiguration:backgroundConfiguration];
+  // Main menu does not have Cancel/Done buttons, so save the background
+  // immediately.
+  [self.customizationMutator saveBackground];
 
   _recentBackgroundClickCount += 1;
 
@@ -394,19 +490,20 @@
 
   if (backgroundConfiguration.backgroundStyle ==
       HomeCustomizationBackgroundStyle::kPreset) {
-    void (^imageHandler)(UIImage*, NSError*) =
-        ^(UIImage* image, NSError* error) {
-          if (!error) {
-            // TODO(crbug.com/444505682): Handle error loading thumbnail image.
-          }
-          [backgroundCell updateBackgroundImage:image framingCoordinates:nil];
-        };
-    [self.customizationMutator
-        fetchBackgroundCustomizationThumbnailURLImage:backgroundConfiguration
-                                                          .thumbnailURL
-                                           completion:imageHandler];
+    [self fetchPresetImageForCell:backgroundCell
+                    configuration:backgroundConfiguration
+                   itemIdentifier:itemIdentifier];
   } else if (backgroundConfiguration.backgroundStyle ==
              HomeCustomizationBackgroundStyle::kUserUploaded) {
+    NSString* imagePath = backgroundConfiguration.userUploadedImagePath;
+    HomeCustomizationUserUploadedThumbnailData* cachedData =
+        [self.userThumbnailCache objectForKey:imagePath];
+    if (cachedData) {
+      [backgroundCell updateBackgroundImage:cachedData.preparedImage
+                         framingCoordinates:cachedData.framingCoordinates];
+      return;
+    }
+
     HomeCustomizationFramingCoordinates* framingCoordinates =
         backgroundConfiguration.userUploadedFramingCoordinates;
     __weak __typeof(self) weakSelf = self;
@@ -414,7 +511,8 @@
         UIImage* image, UserUploadedImageError error) {
       [weakSelf handleLoadedUserUploadedImage:image
                            framingCoordinates:framingCoordinates
-                               backgroundCell:backgroundCell];
+                               backgroundCell:backgroundCell
+                                    imagePath:imagePath];
       if (!image) {
         base::UmaHistogramEnumeration(
             "IOS.HomeCustomization.Background.RecentlyUsed."
@@ -444,7 +542,12 @@
   [snapshot
       reconfigureItemsWithIdentifiers:[self identifiersForToggleMap:toggleMap]];
 
-  [_diffableDataSource applySnapshot:snapshot animatingDifferences:YES];
+  __weak __typeof(self) weakSelf = self;
+  [_diffableDataSource applySnapshot:snapshot
+                animatingDifferences:YES
+                          completion:^() {
+                            [weakSelf selectInitialItemAfterDataLoad];
+                          }];
 }
 
 #pragma mark - HomeCustomizationBackgroundConfigurationConsumer
@@ -457,7 +560,6 @@
 
   _backgroundCollectionConfiguration =
       backgroundCollectionConfigurations.firstObject;
-  _selectedBackgroundId = selectedBackgroundId;
 
   // Recreate the snapshot with the new items to take into account all the
   // changes of items presence (add/remove).
@@ -469,7 +571,26 @@
   [snapshot
       reconfigureItemsWithIdentifiers:[self identifiersForBackgroundCells]];
 
-  [_diffableDataSource applySnapshot:snapshot animatingDifferences:YES];
+  _initialSelectedBackgroundID = selectedBackgroundId;
+
+  __weak __typeof(self) weakSelf = self;
+  [_diffableDataSource applySnapshot:snapshot
+                animatingDifferences:YES
+                          completion:^() {
+                            [weakSelf selectInitialItemAfterDataLoad];
+                          }];
+}
+
+- (void)currentBackgroundConfigurationChanged:
+    (id<BackgroundCustomizationConfiguration>)currentConfiguration {
+  NSString* currentItemID = currentConfiguration.configurationID;
+  NSIndexPath* currentItemIndexPath =
+      [_diffableDataSource indexPathForItemIdentifier:currentItemID];
+
+  [self.collectionView
+      selectItemAtIndexPath:currentItemIndexPath
+                   animated:NO
+             scrollPosition:UICollectionViewScrollPositionNone];
 }
 
 #pragma mark - Helpers
@@ -516,6 +637,29 @@
 
 #pragma mark - Private
 
+// Helper method to crop a UIImage based on a rectangle in pixel coordinates.
+- (UIImage*)cropImage:(UIImage*)originalImage toPixelRect:(CGRect)pixelRect {
+  CGImageRef imageRef = originalImage.CGImage;
+  if (!imageRef) {
+    return nil;
+  }
+
+  // Perform the crop. CGImageCreateWithImageInRect handles clipping.
+  CGImageRef croppedImageRef =
+      CGImageCreateWithImageInRect(imageRef, pixelRect);
+  if (!croppedImageRef) {
+    return nil;
+  }
+
+  UIImage* croppedImage =
+      [UIImage imageWithCGImage:croppedImageRef
+                          scale:originalImage.scale
+                    orientation:originalImage.imageOrientation];
+  CGImageRelease(croppedImageRef);
+
+  return croppedImage;
+}
+
 // Configures a `HomeCustomizationBackgroundCell` with the provided background
 // configuration and logo view, and selects it if it matches the currently
 // selected background ID.
@@ -541,14 +685,12 @@
 
   [cell configureWithBackgroundOption:backgroundConfiguration
              searchEngineLogoMediator:searchEngineLogoMediator];
-
-  if ([itemIdentifier isEqualToString:_selectedBackgroundId]) {
-    [self.collectionView
-        selectItemAtIndexPath:indexPath
-                     animated:NO
-               scrollPosition:UICollectionViewScrollPositionNone];
-  }
   cell.mutator = self.mutator;
+
+  UIImage* cachedImage = _presetImageCache[itemIdentifier];
+  if (cachedImage) {
+    [cell updateBackgroundImage:cachedImage framingCoordinates:nil];
+  }
 }
 
 // Handles the "Delete Background" context menu action for the given index path.
@@ -577,44 +719,193 @@
 
 // Handles a loaded user-uploaded image, including optimizations for displaying
 // large images in the small menu thumbnails.
-//
-// TODO(crbug.com/441181385): Improve optimization logic. Some possible options:
-// - Cache prepared image so scrolling the carousel doesn't take time to re-load
-// image.
-// - pre-crop larger images, possibly to a square around the framing
-// coordinates, as highly zoomed in images look even worse when made into a low
-// resolution thumbnail.
-// - pick thumbnail sized based on a combination of view size and frame size.
 - (void)handleLoadedUserUploadedImage:(UIImage*)image
                    framingCoordinates:
                        (HomeCustomizationFramingCoordinates*)framingCoordinates
                        backgroundCell:
-                           (HomeCustomizationBackgroundCell*)backgroundCell {
-  // This thumnail size gives a good balance between quality and responsiveness.
-  CGFloat thumbnailDimension =
-      3 * MAX(self.view.bounds.size.width, self.view.bounds.size.height);
-  CGSize thumbnailSize = CGSize(thumbnailDimension, thumbnailDimension);
-  CGFloat originalImageHeight = image.size.height;
+                           (HomeCustomizationBackgroundCell*)backgroundCell
+                            imagePath:(NSString*)imagePath {
+  UIImage* imageToPrepare = image;
+  CGRect visibleRect = framingCoordinates.visibleRect;
 
+  // Crop to a square centered on the visible rect to avoid losing data on
+  // rotation.
+  CGFloat side = MAX(visibleRect.size.width, visibleRect.size.height);
+  CGRect squareCropRect =
+      CGRectMake(CGRectGetMidX(visibleRect) - side / 2,
+                 CGRectGetMidY(visibleRect) - side / 2, side, side);
+
+  // `CGImageCreateWithImageInRect` has undefined behavior if the crop rect
+  // extends beyond the image bounds. To be safe, intersect the desired crop
+  // rect with the image's bounds.
+  CGImageRef cgImage = image.CGImage;
+  if (!cgImage) {
+    return;
+  }
+  CGRect imagePixelBounds =
+      CGRectMake(0, 0, CGImageGetWidth(cgImage), CGImageGetHeight(cgImage));
+  CGRect cropPixelRect = CGRectIntersection(squareCropRect, imagePixelBounds);
+
+  UIImage* croppedImage = [self cropImage:image toPixelRect:cropPixelRect];
+
+  if (croppedImage) {
+    // If cropping succeeds, update the image to use and keep visibleRect in
+    // sync with the updated image.
+    imageToPrepare = croppedImage;
+    visibleRect = CGRectMake((visibleRect.origin.x - cropPixelRect.origin.x),
+                             (visibleRect.origin.y - cropPixelRect.origin.y),
+                             visibleRect.size.width, visibleRect.size.height);
+  }
+
+  CGFloat screenScale = [UIScreen mainScreen].scale;
+  // Calculate the maximum pixel dimension needed for the cell's display.
+  CGFloat thumbnailDimension =
+      MAX(backgroundCell.bounds.size.width, backgroundCell.bounds.size.height) *
+      screenScale;
+  CGSize thumbnailSize = CGSizeMake(thumbnailDimension, thumbnailDimension);
+
+  __weak __typeof(self) weakSelf = self;
   void (^thumbnailHandler)(UIImage*) = ^(UIImage* preparedImage) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      // Scale the framing coordinates down to the size of the prepared image.
-      CGFloat scale = preparedImage.size.height / originalImageHeight;
-      CGRect visibleRect = framingCoordinates.visibleRect;
-      CGRect scaledVisibleRect = CGRectMake(
+      if (!preparedImage) {
+        return;
+      }
+
+      // Calculate the new framing rect for the user's selection within the
+      // prepared square thumbnail so the preview accurately represent the
+      // user's selection.
+      CGFloat scale = preparedImage.size.width / cropPixelRect.size.width;
+      CGRect finalVisibleRect = CGRectMake(
           visibleRect.origin.x * scale, visibleRect.origin.y * scale,
           visibleRect.size.width * scale, visibleRect.size.height * scale);
-      HomeCustomizationFramingCoordinates* newFramingCoordinates =
-          [[HomeCustomizationFramingCoordinates alloc]
-              initWithVisibleRect:scaledVisibleRect];
 
+      HomeCustomizationFramingCoordinates* finalFraming =
+          [[HomeCustomizationFramingCoordinates alloc]
+              initWithVisibleRect:finalVisibleRect];
+
+      // Cache the prepared thumbnail and its framing.
+      HomeCustomizationUserUploadedThumbnailData* cachedData =
+          [[HomeCustomizationUserUploadedThumbnailData alloc] init];
+      cachedData.preparedImage = preparedImage;
+      cachedData.framingCoordinates = finalFraming;
+      [weakSelf.userThumbnailCache setObject:cachedData forKey:imagePath];
+
+      // Update the cell with the thumbnail.
       [backgroundCell updateBackgroundImage:preparedImage
-                         framingCoordinates:newFramingCoordinates];
+                         framingCoordinates:finalFraming];
     });
   };
 
-  [image prepareThumbnailOfSize:thumbnailSize
-              completionHandler:thumbnailHandler];
+  [imageToPrepare prepareThumbnailOfSize:thumbnailSize
+                       completionHandler:thumbnailHandler];
+}
+
+// Selects the initially selected item when new data is loaded.
+- (void)selectInitialItemAfterDataLoad {
+  if (!_initialSelectedBackgroundID) {
+    return;
+  }
+
+  NSIndexPath* indexPath = [_diffableDataSource
+      indexPathForItemIdentifier:_initialSelectedBackgroundID];
+  _initialSelectedBackgroundID = nil;
+  [self.collectionView
+      selectItemAtIndexPath:indexPath
+                   animated:NO
+             scrollPosition:UICollectionViewScrollPositionNone];
+}
+
+- (void)presentImageLoadFailSnackbarWithRetryBlock:(ProceduralBlock)retryBlock {
+  SnackbarMessage* message = [[SnackbarMessage alloc]
+      initWithTitle:l10n_util::GetNSString(
+                        IDS_IOS_HOME_CUSTOMIZATION_BACKGROUND_LOAD_FAIL)];
+  message.duration = DBL_MAX;
+
+  SnackbarMessageAction* action = [[SnackbarMessageAction alloc] init];
+  action.title = l10n_util::GetNSString(
+      IDS_IOS_HOME_CUSTOMIZATION_BACKGROUND_LOAD_TRY_AGAIN);
+  action.handler = ^{
+    if (retryBlock) {
+      // Dispatching to the main queue with a delay to allow for the snackbar to
+      // be dismissed before retrying the image load.
+      dispatch_after(
+          dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+          dispatch_get_main_queue(), ^{
+            retryBlock();
+          });
+    }
+  };
+  message.action = action;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self.snackbarCommandHandler showSnackbarMessage:message];
+  });
+}
+
+#pragma mark - Private
+
+// Retries fetching preset images for all backgrounds that previously failed to
+// load.
+- (void)retryFailedImageLoads {
+  NSSet<NSString*>* identifiersToRetry = [self.failedPresetImageLoads copy];
+  NSDiffableDataSourceSnapshot* snapshot = [self.diffableDataSource snapshot];
+  for (NSString* identifier in identifiersToRetry) {
+    [snapshot reloadItemsWithIdentifiers:@[ identifier ]];
+  }
+  [self.diffableDataSource applySnapshot:snapshot animatingDifferences:NO];
+}
+
+// Handles the completion of a preset image fetch request. If the fetch was
+// successful, it updates the cell's background. If it failed, it presents a
+// snackbar with a retry option.
+- (void)onFetchPresetImageCompleteWithImage:(UIImage*)image
+                                      error:(NSError*)error
+                             itemIdentifier:(NSString*)itemIdentifier {
+  if (error) {
+    [self.failedPresetImageLoads addObject:itemIdentifier];
+    __weak __typeof(self) weakSelf = self;
+    [self presentImageLoadFailSnackbarWithRetryBlock:^{
+      [weakSelf retryFailedImageLoads];
+    }];
+    return;
+  }
+
+  _presetImageCache[itemIdentifier] = image;
+
+  if ([self.failedPresetImageLoads containsObject:itemIdentifier]) {
+    [self.failedPresetImageLoads removeObject:itemIdentifier];
+    if (self.failedPresetImageLoads.count == 0) {
+      [self.snackbarCommandHandler dismissAllSnackbars];
+    }
+  }
+
+  // Reconfigure the item to apply the new image and ensure the rest of the cell
+  // is loaded.
+  NSDiffableDataSourceSnapshot* snapshot = [self.diffableDataSource snapshot];
+  if ([[snapshot itemIdentifiers] containsObject:itemIdentifier]) {
+    [snapshot reconfigureItemsWithIdentifiers:@[ itemIdentifier ]];
+    [self.diffableDataSource applySnapshot:snapshot animatingDifferences:YES];
+  }
+}
+
+// Fetches the preset image for a given cell and configuration.
+- (void)fetchPresetImageForCell:(HomeCustomizationBackgroundCell*)cell
+                  configuration:
+                      (id<BackgroundCustomizationConfiguration>)configuration
+                 itemIdentifier:(NSString*)itemIdentifier {
+  if (_presetImageCache[itemIdentifier]) {
+    return;
+  }
+  __weak __typeof(self) weakSelf = self;
+
+  void (^imageHandler)(UIImage*, NSError*) = ^(UIImage* image, NSError* error) {
+    [weakSelf onFetchPresetImageCompleteWithImage:image
+                                            error:error
+                                   itemIdentifier:itemIdentifier];
+  };
+
+  [self.customizationMutator
+      fetchBackgroundCustomizationThumbnailURLImage:configuration.thumbnailURL
+                                         completion:imageHandler];
 }
 
 @end

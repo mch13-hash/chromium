@@ -193,6 +193,12 @@ bool MockRenderProcessHost::GetIntersectsViewport() {
   return true;
 }
 
+#if !BUILDFLAG(IS_ANDROID)
+bool MockRenderProcessHost::IsForInitialWebUI() const {
+  return false;
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
+
 bool MockRenderProcessHost::IsForGuestsOnly() {
   return is_for_guests_only_;
 }
@@ -266,8 +272,6 @@ bool MockRenderProcessHost::FastShutdownStarted() {
 }
 
 const base::Process& MockRenderProcessHost::GetProcess() {
-  // Return the current-process handle for the IPC::GetPlatformFileForTransit
-  // function.
   if (process.IsValid())
     return process;
 
@@ -277,11 +281,6 @@ const base::Process& MockRenderProcessHost::GetProcess() {
 
 bool MockRenderProcessHost::IsReady() {
   return is_ready_;
-}
-
-bool MockRenderProcessHost::Send(IPC::Message* msg) {
-  delete msg;
-  return true;
 }
 
 ChildProcessId MockRenderProcessHost::GetID() const {
@@ -322,6 +321,10 @@ void MockRenderProcessHost::Cleanup() {
     return;
   }
   delayed_cleanup_ = false;
+
+  if (pending_reuse_ref_count_ > 0) {
+    return;
+  }
 
   if (listeners_.IsEmpty() && !deletion_callback_called_ &&
       !pending_view_count_) {
@@ -375,9 +378,14 @@ bool MockRenderProcessHost::HasPriorityOverride() {
 void MockRenderProcessHost::ClearPriorityOverride() {}
 #endif  // !BUILDFLAG(IS_ANDROID)
 
+#if BUILDFLAG(IS_ANDROID)
 void MockRenderProcessHost::GraduateSpareToNormalRendererPriority() {}
 
-#if BUILDFLAG(IS_ANDROID)
+bool MockRenderProcessHost::
+    ShouldThrottleNavigationForSpareRendererGraduation() {
+  return false;
+}
+
 ChildProcessImportance MockRenderProcessHost::GetEffectiveImportance() {
   NOTIMPLEMENTED();
   return ChildProcessImportance::NORMAL;
@@ -637,13 +645,6 @@ MockRenderProcessHost::StartRtpDump(bool incoming,
                                     bool outgoing,
                                     WebRtcRtpPacketCallback packet_callback) {
   return base::NullCallback();
-}
-
-bool MockRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
-  IPC::Listener* listener = listeners_.Lookup(msg.routing_id());
-  if (listener)
-    return listener->OnMessageReceived(msg);
-  return false;
 }
 
 void MockRenderProcessHost::OnChannelConnected(int32_t peer_pid) {}

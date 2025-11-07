@@ -248,17 +248,39 @@ void OpaqueBrowserFrameView::InitViews() {
 
 BrowserLayoutParams OpaqueBrowserFrameView::GetBrowserLayoutParams() const {
   BrowserLayoutParams params = BrowserFrameView::GetBrowserLayoutParams();
-  if (ShouldShowWindowIcon() && !CaptionButtonsOnLeadingEdge()) {
-    const auto icon_bounds = GetIconBounds();
-    params.leading_exclusion.content =
-        gfx::SizeF(icon_bounds.right() - params.visual_client_area.x(),
-                   icon_bounds.bottom() - params.visual_client_area.y());
-    params.leading_exclusion.vertical_padding =
-        std::max(0, icon_bounds.y() - params.visual_client_area.y());
-    // There is (for historical reasons) no horizontal padding on the window
-    // icon.
-  }
+  MaybeAddAppIconToLayoutParams(params);
   return params;
+}
+
+void OpaqueBrowserFrameView::MaybeAddAppIconToLayoutParams(
+    BrowserLayoutParams& params) const {
+  if (ShouldShowWindowIcon()) {
+    // Icon is always on the leading edge of the window, after any caption
+    // buttons. Adjust the leading exclusion to account for it.
+    const auto icon_bounds = GetIconBounds();
+    const float icon_right =
+        icon_bounds.right() - params.visual_client_area.x();
+    const float icon_bottom =
+        icon_bounds.bottom() - params.visual_client_area.y();
+    const float old_bottom = params.leading_exclusion.content.height();
+
+    // The icon may extend the size of the exclusion area.
+    params.leading_exclusion.content.set_width(
+        std::max(params.leading_exclusion.content.width(), icon_right));
+    params.leading_exclusion.content.set_height(
+        std::max(params.leading_exclusion.content.height(), icon_bottom));
+
+    // There is (for historical reasons) no horizontal padding on the window
+    // icon. Maybe this should be changed?
+    params.leading_exclusion.horizontal_padding = 0.f;
+
+    // Update the bottom of the vertical padding as well to the max of that
+    // previously required and what the icon would prefer.
+    const float extra_padding = icon_bounds.y() - params.visual_client_area.y();
+    const float new_bottom = std::max(old_bottom, icon_bottom + extra_padding);
+    params.leading_exclusion.vertical_padding =
+        std::max(0.f, new_bottom - params.leading_exclusion.content.height());
+  }
 }
 
 gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStripRegion(
@@ -581,10 +603,6 @@ bool OpaqueBrowserFrameView::IsFrameCondensed() const {
   return BrowserFrameView::IsFrameCondensed() || !ShouldShowCaptionButtons();
 }
 
-bool OpaqueBrowserFrameView::EverHasVisibleBackgroundTabShapes() const {
-  return BrowserFrameView::EverHasVisibleBackgroundTabShapes();
-}
-
 OpaqueBrowserFrameView::FrameButtonStyle
 OpaqueBrowserFrameView::GetFrameButtonStyle() const {
 #if BUILDFLAG(IS_LINUX)
@@ -904,24 +922,23 @@ void OpaqueBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) const {
     return;
   }
 
-  int y = client_bounds.y();
-  const gfx::Rect toolbar_bounds = browser_view()->toolbar()->bounds();
-  if (tabstrip_visible) {
-    // The client edges start at the top of the toolbar.
-    y += toolbar_bounds.y();
+  if (tabstrip_visible || !IsToolbarVisible()) {
+    // Do nothing.
+    return;
   }
 
   // For popup windows, draw location bar sides.
   static constexpr int kLocationBarBorderThickness = 1;
   const SkColor location_bar_border_color =
       GetColorProvider()->GetColor(kColorLocationBarBorderOpaque);
-  if (!tabstrip_visible && IsToolbarVisible()) {
-    gfx::Rect side(client_bounds.x() - kLocationBarBorderThickness, y,
-                   kLocationBarBorderThickness, toolbar_bounds.height());
-    canvas->FillRect(side, location_bar_border_color);
-    side.Offset(client_bounds.width() + kLocationBarBorderThickness, 0);
-    canvas->FillRect(side, location_bar_border_color);
-  }
+  const int toolbar_height = browser_view()->toolbar()->height();
+
+  gfx::Rect side(client_bounds.x() - kLocationBarBorderThickness,
+                 client_bounds.y(), kLocationBarBorderThickness,
+                 toolbar_height);
+  canvas->FillRect(side, location_bar_border_color);
+  side.Offset(client_bounds.width() + kLocationBarBorderThickness, 0);
+  canvas->FillRect(side, location_bar_border_color);
 }
 
 void OpaqueBrowserFrameView::

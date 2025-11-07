@@ -60,6 +60,7 @@
 #include "media/base/picture_in_picture_events_info.h"
 #include "media/mojo/mojom/media_service.mojom-forward.h"
 #include "media/mojo/mojom/remoting.mojom-forward.h"
+#include "media/mojo/mojom/speech_recognizer.mojom.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -85,6 +86,7 @@
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/ai/ai_manager.mojom-forward.h"
 #include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom-forward.h"
+#include "third_party/blink/public/mojom/cpu_performance.mojom-forward.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_cloud_identifier.mojom-forward.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_error.mojom-forward.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-forward.h"
@@ -166,11 +168,16 @@ namespace network {
 class SharedURLLoaderFactory;
 class URLLoaderFactoryBuilder;
 namespace mojom {
+enum class AttributionSupport : int32_t;
 class TrustedHeaderClient;
 class URLLoader;
 class URLLoaderClient;
 }  // namespace mojom
 }  // namespace network
+
+namespace optimization_guide {
+class ModelBrokerClient;
+}  // namespace optimization_guide
 
 namespace service_manager {
 template <typename...>
@@ -784,6 +791,12 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual bool ShouldUrlUseApplicationIsolationLevel(
       BrowserContext* browser_context,
       const GURL& url);
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Returns true if the given |url| is for the initial WebUI scheme used
+  // by features like the WebUI reload button.
+  virtual bool IsInitialWebUIScheme(const GURL& url);
+#endif  // !BUILDFLAG(IS_ANDROID)
 
   // Allows the embedder to enable access to Isolated Context Web APIs for the
   // given |lock_url| -- the URL to which the renderer process is locked.
@@ -1457,6 +1470,15 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual SpeechRecognitionManagerDelegate*
   CreateSpeechRecognitionManagerDelegate();
 
+  // Allows the embedder to create a ModelBrokerClient.
+  virtual std::unique_ptr<optimization_guide::ModelBrokerClient>
+  CreateModelBrokerClient(BrowserContext* browser_context);
+
+  // Returns whether on-device speech recognition is available.
+  virtual media::mojom::AvailabilityStatus
+  GetOnDeviceSpeechRecognitionAvailabilityStatus(BrowserContext* context,
+                                                 const std::string& language);
+
 #if BUILDFLAG(IS_CHROMEOS)
   // Allows the embedder to return a delegate for the TtsController.
   virtual TtsControllerDelegate* GetTtsControllerDelegate();
@@ -1922,9 +1944,8 @@ class CONTENT_EXPORT ContentBrowserClient {
   //
   // This is called on the UI thread.
   virtual std::vector<std::unique_ptr<blink::URLLoaderThrottle>>
-  CreateURLLoaderThrottlesForKeepAlive(
-      BrowserContext* browser_context,
-      FrameTreeNodeId frame_tree_node_id);
+  CreateURLLoaderThrottlesForKeepAlive(BrowserContext* browser_context,
+                                       FrameTreeNodeId frame_tree_node_id);
 
   // Allows the embedder to register per-scheme URLLoaderFactory implementations
   // to handle navigation URL requests for schemes not handled by the Network
@@ -2733,6 +2754,13 @@ class CONTENT_EXPORT ContentBrowserClient {
       uint64_t column,
       std::optional<LegacyTechCookieIssueDetails> cookie_issue_details);
 
+  // Get the desired URL for clipboard source/destination reporting, if one
+  // exists, from a non-null RenderFrameHost. For example, given chrome://print
+  // and its rfh, return the URL of the page being printed.
+  virtual std::optional<GURL> MaybeOverrideSourceURLForClipboardAccess(
+      RenderFrameHost* render_frame_host,
+      const GURL& original_url);
+
   // Check whether paste is allowed. To paste, an implementation may require
   // a `render_frame_host` to have user activation or various permissions.
   // Primary checks should be done in the renderer, to allow for errors to
@@ -3046,10 +3074,18 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual bool IsTransientActivationRequiredForShowFileOrDirectoryPicker(
       WebContents* web_contents);
 
+  // Checks if the file picker from the file system access web API should be
+  // blocked.
+  virtual bool IsFileSystemAccessApiFilePickerAllowed(
+      WebContents* web_contents);
+
   // Checks if `origin` should always receive a first-party StorageKey
   // in RenderFrameHostImpl. Currently in Chrome, this is true for all
   // extension origins.
   virtual bool ShouldUseFirstPartyStorageKey(const url::Origin& origin);
+
+  // Checks if the BeforeUnload Dialog event should be skipped.
+  virtual bool ShouldSkipBeforeUnloadDialog(content::RenderFrameHost* rfh);
 
   // Allows the embedder to return a delegate for the responsiveness calculator.
   // The default implementation returns nullptr.
@@ -3308,12 +3344,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   GetClipboardTypesIfPolicyApplied(
       const ui::ClipboardSequenceNumberToken& seqno);
 
-  // Returns true if CanvasNoise should be enabled for `origin`'s navigation.
-  // Enablement depends on corresponding feature flag values, and whether the
-  // origin has an exception from Canvas noising. Default returns false.
-  virtual bool ShouldEnableCanvasNoise(BrowserContext* browser_context,
-                                       const GURL& origin);
-
   // Returns true if PrefetchPrerenderIntegration should be allowed, this
   // allows a prerender fall back to prefetch if available.
   virtual bool UsePrefetchPrerenderIntegration();
@@ -3330,6 +3360,38 @@ class CONTENT_EXPORT ContentBrowserClient {
   // experiments. For more details, see
   // https://docs.google.com/document/d/1bBhfhO7BotUB7Myy_8mtFF_4lI5N8hUyNayV_gI019Y/edit?tab=t.0#heading=h.9osmajzfan4b
   virtual bool UsePreloadServingMetrics();
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Gives the content embedder a chance to disallow a credential request,
+  // for example if there's an active actor task in the tab associated with
+  // `web_contents`.
+  virtual bool ShouldDisallowCredentialRequest(WebContents* web_contents);
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+  // Whether to animate back-forward transition gestures with a screenshot of
+  // the destination.
+  virtual bool ShouldAnimateBackForwardTransitions();
+
+  // Returns the CPU performance tier, which exposes some information about how
+  // powerful the user device is.
+  virtual blink::mojom::PerformanceTier GetCpuPerformanceTier();
+
+  // Describes the type of logins assisted by the browser via passkeys or
+  // federation.
+  enum class AssistedLoginType {
+    kFedCmPassive,
+    kFedCmActive,
+    kPasskeyStoredInGPM,
+    kPasskeyStoredInWindowsHello,
+    kPasskeyStoredInICloudKeychain,
+    kPasskeyStoredInChromeProfile,
+    kPasskeyHybrid,
+    kPasskeySecurityKey,
+  };
+
+  // Records a browser-assisted login. This is used to record metrics in the
+  // embedder. This covers federated and webauthn assisted logins.
+  virtual void RecordAssistedLogin(AssistedLoginType login_type);
 };
 
 }  // namespace content

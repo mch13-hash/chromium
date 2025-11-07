@@ -37,6 +37,7 @@
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/ash/input_method/assistive_window_controller.h"
 #include "chrome/browser/ash/input_method/candidate_window_controller.h"
+#include "chrome/browser/ash/input_method/input_method_persistence.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_ash.h"
 #include "chrome/browser/lifetime/termination_notification.h"
@@ -1074,6 +1075,7 @@ InputMethodManagerImpl::InputMethodManagerImpl(
     : local_state_(CHECK_DEREF(local_state)),
       application_locale_storage_(CHECK_DEREF(application_locale_storage)),
       delegate_(std::move(delegate)),
+      persistence_(std::make_unique<InputMethodPersistence>(local_state, this)),
       util_(delegate_.get()),
       keyboard_(std::move(ime_keyboard)),
       enable_extension_loading_(enable_extension_loading),
@@ -1226,6 +1228,8 @@ void InputMethodManagerImpl::NotifyInputMethodChanged(bool show_message,
     LOG(ERROR) << "Failed to change keyboard layout to "
                << state_->GetCurrentInputMethod().keyboard_layout();
   }
+
+  persistence_->PersistInputMethod(state_->GetProfile());
 
   // Update input method indicators (e.g. "US", "DV") in Chrome windows.
   for (auto& observer : observers_) {

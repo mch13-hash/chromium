@@ -1003,8 +1003,11 @@ document.addEventListener('DOMContentLoaded', function() {
 class QuitBrowserWhenKeysStored : public EnclaveManager::Observer {
  public:
   explicit QuitBrowserWhenKeysStored(Browser* browser) : browser_(browser) {
-    EnclaveManagerFactory::GetAsEnclaveManagerForProfile(browser_->profile())
-        ->AddObserver(this);
+    EnclaveManager* const enclave_manager =
+        EnclaveManagerFactory::GetAsEnclaveManagerForProfile(
+            browser_->profile());
+    enclave_manager->AddObserver(this);
+    store_keys_lock_ = enclave_manager->GetStoreKeysLock();
   }
 
   // EnclaveManager::Observer
@@ -1018,8 +1021,12 @@ class QuitBrowserWhenKeysStored : public EnclaveManager::Observer {
         FROM_HERE, base::BindOnce(&chrome::AttemptExit));
   }
 
+  // EnclaveManager::Observer
+  void OnStateUpdated() override {}
+
  private:
   raw_ptr<Browser> browser_;
+  std::unique_ptr<EnclaveManager::StoreKeysLock> store_keys_lock_;
 };
 
 IN_PROC_BROWSER_TEST_F(AuthenticatorWindowTest, RecoverSecurityDomain) {

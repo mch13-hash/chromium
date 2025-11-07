@@ -13,6 +13,7 @@
 #include <GLES2/gl2extchromium.h>
 
 #include <optional>
+#include <utility>
 
 #include "base/check_is_test.h"
 #include "base/containers/contains.h"
@@ -31,10 +32,8 @@
 #include "gpu/command_buffer/common/shared_image_capabilities.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/common/sync_token.h"
-#include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "third_party/dawn/include/dawn/wire/client/webgpu_cpp.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/buffer_usage_util.h"
 
@@ -50,6 +49,10 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "gpu/command_buffer/client/internal/mappable_buffer_dxgi.h"
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
+#include "gpu/command_buffer/client/internal/mappable_buffer_ahb.h"
 #endif
 
 namespace gpu {
@@ -152,6 +155,20 @@ base::span<uint8_t> ClientSharedImage::ScopedMapping::GetMemoryForPlane(
   // include any bytes beyond the actual end of the final row.
   size_t span_length =
       Stride(plane_index) * (height_in_pixels - 1) + row_size_in_bytes;
+#if BUILDFLAG(IS_OZONE)
+  // We are currently prevented from doing this tightening for
+  // NativePixmap-backed MappableBuffers by the fact that
+  // VideoFrame requires that the buffer returned from this method be of size
+  // that is equal to the size in its internal layout, which for NativePixmap is
+  // overridden to be the size of the plane stored in the GMB handle
+  // (https://source.chromium.org/chromium/chromium/src/+/main:media/base/video_frame.cc;drc=21e6d1583d1b5683f21556f6125b340d25a6b937;l=527).
+  // TODO(crbug.com/404905709): Eliminate that VideoFrame override and do
+  // tightening here for NativePixmap.
+  if (buffer_->GetType() == gfx::GpuMemoryBufferType::NATIVE_PIXMAP) {
+    span_length =
+        buffer_->CloneHandle().native_pixmap_handle().planes[plane_index].size;
+  }
+#endif
 
   // SAFETY: The underlying platform-specific buffer generation mechanisms
   // guarantee that the buffer contains at least `span_length` bytes following
@@ -232,7 +249,9 @@ ClientSharedImage::CreateMappableBufferFromHandle(
 #endif
 #if BUILDFLAG(IS_ANDROID)
     case gfx::ANDROID_HARDWARE_BUFFER:
-      return nullptr;
+      return MappableBufferAHB::CreateFromHandle(
+          std::move(handle), size, format,
+          std::move(copy_native_buffer_to_shmem_callback), std::move(pool));
 #endif
     default:
       // TODO(dcheng): Remove default case (https://crbug.com/676224).
@@ -1003,8 +1022,8 @@ WebGPUBufferScopedAccess::WebGPUBufferScopedAccess(
       device.Get(), &static_cast<const WGPUBufferDescriptor&>(desc));
   DCHECK(reservation.buffer);
 
-  wire_buffer_id_ = reservation.id;
-  wire_buffer_generation_ = reservation.id;
+  buffer_id_ = reservation.id;
+  buffer_generation_ = reservation.generation;
 
   // We currently only use storage buffers. Which are always read-write.
   shared_image_->BeginAccess(false);
@@ -1013,8 +1032,8 @@ WebGPUBufferScopedAccess::WebGPUBufferScopedAccess(
       new wgpu::Buffer(wgpu::Buffer::Acquire(reservation.buffer)));
 
   webgpu_->AssociateMailboxForBuffer(
-      reservation.deviceId, reservation.deviceGeneration, wire_buffer_id_,
-      wire_buffer_generation_, static_cast<uint64_t>(desc.usage),
+      reservation.deviceId, reservation.deviceGeneration, buffer_id_,
+      buffer_generation_, static_cast<uint64_t>(desc.usage),
       shared_image_->mailbox());
 }
 
@@ -1024,8 +1043,8 @@ SyncToken WebGPUBufferScopedAccess::EndAccess(
     std::unique_ptr<WebGPUBufferScopedAccess> scoped_access) {
   webgpu::WebGPUInterface* webgpu = scoped_access->webgpu_;
   SyncToken finished_access_token;
-  webgpu->DissociateMailboxForBuffer(scoped_access->wire_buffer_id_,
-                                     scoped_access->wire_buffer_generation_);
+  webgpu->DissociateMailboxForBuffer(scoped_access->buffer_id_,
+                                     scoped_access->buffer_generation_);
   scoped_access->shared_image_->EndAccess(false);
 
   // SyncToken must be verified to allow use from another pipe.

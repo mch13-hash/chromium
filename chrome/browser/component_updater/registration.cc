@@ -7,7 +7,6 @@
 #include "afp_blocked_domain_list_component_installer.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/metrics/histogram_functions.h"
@@ -25,13 +24,13 @@
 #include "chrome/browser/component_updater/desktop_sharing_hub_component_remover.h"
 #include "chrome/browser/component_updater/first_party_sets_component_installer.h"
 #include "chrome/browser/component_updater/hyphenation_component_installer.h"
-#include "chrome/browser/component_updater/masked_domain_list_component_installer.h"
+#include "chrome/browser/component_updater/masked_domain_list_component_remover.h"
 #include "chrome/browser/component_updater/mei_preload_component_installer.h"
 #include "chrome/browser/component_updater/open_cookie_database_component_installer.h"
 #include "chrome/browser/component_updater/pki_metadata_component_installer.h"
 #include "chrome/browser/component_updater/pnacl_component_installer.h"
 #include "chrome/browser/component_updater/privacy_sandbox_attestations_component_installer.h"
-#include "chrome/browser/component_updater/probabilistic_reveal_token_component_installer.h"
+#include "chrome/browser/component_updater/probabilistic_reveal_token_component_remover.h"
 #include "chrome/browser/component_updater/ssl_error_assistant_component_installer.h"
 #include "chrome/browser/component_updater/subresource_filter_component_installer.h"
 #include "chrome/browser/component_updater/tpcd_metadata_component_installer.h"
@@ -69,6 +68,7 @@
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/component_updater/actor_safety_lists_component_installer.h"
 #include "chrome/browser/component_updater/iwa_key_distribution_component_installer.h"
 #include "chrome/browser/component_updater/zxcvbn_data_component_installer.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
@@ -143,7 +143,6 @@ void RegisterComponentsForUpdate() {
   RegisterOptimizationHintsComponent(cus);
   RegisterTrustTokenKeyCommitmentsComponentIfTrustTokensEnabled(cus);
   RegisterFirstPartySetsComponent(cus);
-  RegisterMaskedDomainListComponent(cus);
   RegisterPrivacySandboxAttestationsComponent(cus);
   RegisterAntiFingerprintingBlockedDomainListComponent(cus);
   if (history_embeddings::IsHistoryEmbeddingsFeatureEnabled()) {
@@ -154,6 +153,11 @@ void RegisterComponentsForUpdate() {
   if (base::PathService::Get(chrome::DIR_USER_DATA, &path)) {
     // Clean up any remaining desktop sharing hub state.
     component_updater::DeleteDesktopSharingHub(path);
+    // TODO: crbug.com/457391753 - Remove this cleanup code in M146+.
+    component_updater::DeleteMaskedDomainList(path);
+
+    // TODO: crbug.com/456742487 - Remove this after M148.
+    DeleteProbabilisticRevealTokenRegistry(path);
 
     if (!history_embeddings::IsHistoryEmbeddingsFeatureEnabled()) {
       DeleteHistorySearchStringsComponent(path);
@@ -213,6 +217,7 @@ void RegisterComponentsForUpdate() {
 #if !BUILDFLAG(IS_ANDROID)
   RegisterIwaKeyDistributionComponent(cus);
   RegisterZxcvbnDataComponent(cus);
+  RegisterActorSafetyListsComponent(cus, base::OnceClosure());
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_ANDROID)
@@ -260,8 +265,6 @@ void RegisterComponentsForUpdate() {
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
   RegisterWasmTtsEngineComponent(cus, g_browser_process->local_state());
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
-
-  RegisterProbabilisticRevealTokenComponent(cus);
 }
 
 }  // namespace component_updater

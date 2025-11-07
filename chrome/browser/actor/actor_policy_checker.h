@@ -1,0 +1,75 @@
+// Copyright 2025 The Chromium Authors
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef CHROME_BROWSER_ACTOR_ACTOR_POLICY_CHECKER_H_
+#define CHROME_BROWSER_ACTOR_ACTOR_POLICY_CHECKER_H_
+
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/actor/site_policy.h"
+#include "chrome/common/actor/task_id.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
+#include "url/origin.h"
+
+class GURL;
+class Profile;
+
+namespace tabs {
+class TabInterface;
+}
+
+namespace actor {
+
+class ActorKeyedService;
+class AggregatedJournal;
+
+// The central hub for checking various policies that determine whether Actor is
+// enabled for the profile, or is Actor allowed to act on a given tab or URL.
+class ActorPolicyChecker {
+ public:
+  explicit ActorPolicyChecker(ActorKeyedService& service);
+  ActorPolicyChecker(const ActorPolicyChecker&) = delete;
+  ActorPolicyChecker& operator=(const ActorPolicyChecker&) = delete;
+  ~ActorPolicyChecker();
+
+  // See site_policy.h.
+  void MayActOnTab(const tabs::TabInterface& tab,
+                   AggregatedJournal& journal,
+                   TaskId task_id,
+                   const absl::flat_hash_set<url::Origin>& allowed_origins,
+                   DecisionCallbackWithReason callback);
+  void MayActOnUrl(const GURL& url,
+                   bool allow_insecure_http,
+                   Profile* profile,
+                   AggregatedJournal& journal,
+                   TaskId task_id,
+                   DecisionCallbackWithReason callback);
+
+  void SetActOnWebForTesting(bool enabled) {
+    can_act_on_web_for_testing_ = enabled;
+  }
+
+  bool can_act_on_web() const {
+    return can_act_on_web_for_testing_ || can_act_on_web_;
+  }
+
+ private:
+  void OnPrefChanged();
+
+  // Owns `this`.
+  base::raw_ref<ActorKeyedService> service_;
+
+  PrefChangeRegistrar pref_change_registrar_;
+
+  bool can_act_on_web_ = true;
+
+  bool can_act_on_web_for_testing_ = false;
+
+  base::WeakPtrFactory<ActorPolicyChecker> weak_ptr_factory_{this};
+};
+
+}  // namespace actor
+
+#endif  // CHROME_BROWSER_ACTOR_ACTOR_POLICY_CHECKER_H_

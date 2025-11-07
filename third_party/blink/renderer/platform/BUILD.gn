@@ -6,7 +6,6 @@ import("//base/trace_event/tracing.gni")
 import("//build/buildflag_header.gni")
 import("//build/compiled_action.gni")
 import("//build/config/compiler/compiler.gni")
-import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//build/nocompile.gni")
 import("//media/media_options.gni")
@@ -621,7 +620,6 @@ component("platform") {
     "exported/web_string.cc",
     "exported/web_surface_layer_bridge.cc",
     "exported/web_text_input_info.cc",
-    "exported/web_text_run.cc",
     "exported/web_thread_safe_data.cc",
     "exported/web_time_range.cc",
     "exported/web_url.cc",
@@ -755,10 +753,6 @@ component("platform") {
     "fonts/script_run_iterator.h",
     "fonts/segmented_font_data.cc",
     "fonts/segmented_font_data.h",
-    "fonts/shaping/caching_word_shape_iterator.cc",
-    "fonts/shaping/caching_word_shape_iterator.h",
-    "fonts/shaping/caching_word_shaper.cc",
-    "fonts/shaping/caching_word_shaper.h",
     "fonts/shaping/case_mapping_harfbuzz_buffer_filler.cc",
     "fonts/shaping/case_mapping_harfbuzz_buffer_filler.h",
     "fonts/shaping/font_features.cc",
@@ -791,8 +785,6 @@ component("platform") {
     "fonts/shaping/shape_result.h",
     "fonts/shaping/shape_result_bloberizer.cc",
     "fonts/shaping/shape_result_bloberizer.h",
-    "fonts/shaping/shape_result_buffer.cc",
-    "fonts/shaping/shape_result_buffer.h",
     "fonts/shaping/shape_result_cursor.cc",
     "fonts/shaping/shape_result_cursor.h",
     "fonts/shaping/shape_result_run.h",
@@ -1511,6 +1503,8 @@ component("platform") {
     "text/hyphenation.h",
     "text/icu_error.cc",
     "text/icu_error.h",
+    "text/justification_opportunity.cc",
+    "text/justification_opportunity.h",
     "text/layout_locale.cc",
     "text/layout_locale.h",
     "text/locale_icu.cc",
@@ -1537,6 +1531,7 @@ component("platform") {
     "text/text_direction.h",
     "text/text_encoding_detector.cc",
     "text/text_encoding_detector.h",
+    "text/text_justify.h",
     "text/text_run.cc",
     "text/text_run.h",
     "text/truncation.h",
@@ -2237,8 +2232,8 @@ source_set("blink_platform_unittests_sources") {
     "fonts/orientation_iterator_test.cc",
     "fonts/palette_interpolation_test.cc",
     "fonts/plain_text_node_test.cc",
+    "fonts/plain_text_painter_test.cc",
     "fonts/script_run_iterator_test.cc",
-    "fonts/shaping/caching_word_shaper_test.cc",
     "fonts/shaping/font_features_test.cc",
     "fonts/shaping/frame_shape_cache_test.cc",
     "fonts/shaping/han_kerning_test.cc",
@@ -2380,6 +2375,7 @@ source_set("blink_platform_unittests_sources") {
     "storage/blink_storage_key_test.cc",
     "text/bidi_paragraph_test.cc",
     "text/capitalize_test.cc",
+    "text/character_break_iterator_test.cc",
     "text/character_test.cc",
     "text/date_time_format_test.cc",
     "text/hyphenation_test.cc",
@@ -2391,7 +2387,6 @@ source_set("blink_platform_unittests_sources") {
     "text/suffix_tree_test.cc",
     "text/text_break_iterator_test.cc",
     "text/text_encoding_detector_test.cc",
-    "text/text_run_test.cc",
     "text/unicode_utilities_test.cc",
     "text/writing_direction_mode_test.cc",
     "text/writing_mode_utils_test.cc",

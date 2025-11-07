@@ -4,43 +4,131 @@
 
 #include "chrome/browser/android/tab_storage_packager_android.h"
 
+#include <jni.h>
+
 #include <memory>
 #include <utility>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_bytebuffer.h"
 #include "base/android/jni_string.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/token.h"
 #include "chrome/browser/android/tab_android.h"
+#include "chrome/browser/android/tab_group_android.h"
+#include "chrome/browser/android/tab_group_features.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab/android_tab_package.h"
-#include "chrome/browser/tab/collection_storage_package.h"
+#include "chrome/browser/tab/payload.h"
+#include "chrome/browser/tab/protocol/tab_group_collection_state.pb.h"
+#include "chrome/browser/tab/protocol/tab_strip_collection_state.pb.h"
+#include "chrome/browser/tab/storage_id_mapping.h"
+#include "chrome/browser/tab/storage_package.h"
 #include "chrome/browser/tab/tab_storage_package.h"
 #include "chrome/browser/tab/tab_storage_packager.h"
+#include "components/tabs/public/android/jni_conversion.h"
+#include "components/tabs/public/direct_child_walker.h"
+#include "components/tabs/public/tab_strip_collection.h"
 
 // Must come after all headers that specialize FromJniType() / ToJniType().
-#include "chrome/browser/tab/jni_headers/TabStoragePackager_jni.h"
+#include "chrome/android/chrome_jni_headers/TabStoragePackager_jni.h"
 
 namespace tabs {
-static const int kTabStoragePackagerAndroidVersion = 1;
+// TODO(crbug.com/430996004): Reference a shared constant for the web content
+// state.
+static const int kTabStoragePackagerAndroidVersion = 2;
 
-TabStoragePackagerAndroid::TabStoragePackagerAndroid() {
+// A payload of data representing TabStripCollection.
+class TabStripCollectionStorageData : public Payload {
+ public:
+  explicit TabStripCollectionStorageData(tabs_pb::TabStripCollectionState state)
+      : state_(std::move(state)) {}
+
+  ~TabStripCollectionStorageData() override = default;
+
+  std::string SerializePayload() const override {
+    return state_.SerializeAsString();
+  }
+
+ private:
+  tabs_pb::TabStripCollectionState state_;
+};
+
+// A wrapper around TabStripCollectionState that has not had a StorageIdMapping
+// applied to it so the data is still unmapped (i.e. we have references to
+// objects that need to be converted to storage ids).
+class UnmappedTabStripCollectionStorageData {
+ public:
+  UnmappedTabStripCollectionStorageData(TabAndroid* active_tab,
+                                        tabs_pb::TabStripCollectionState state)
+      : active_tab_(active_tab), state_(std::move(state)) {}
+
+  ~UnmappedTabStripCollectionStorageData() = default;
+
+  TabAndroid* active_tab() const { return active_tab_.get(); }
+
+  // Moves the state out of this object. This should only be called once.
+  tabs_pb::TabStripCollectionState TakeState() {
+    CHECK(is_valid_) << "Attempting to take state multiple times.";
+    is_valid_ = false;
+    return std::move(state_);
+  }
+
+ private:
+  bool is_valid_{true};
+  // May be nullptr if there is no active tab in the collection (i.e. there are
+  // no tabs in the tab strip).
+  raw_ptr<TabAndroid> active_tab_;
+  tabs_pb::TabStripCollectionState state_;
+};
+
+// Consumes `unmapped_data` and applies the `mapping` to it. The `unmapped_data`
+// is deleted in this function and should not be used after this function
+// returns. The returned TabStripCollectionStorageData is a valid payload that
+// can be packaged into the database.
+std::unique_ptr<TabStripCollectionStorageData>
+MapAndConsumeUnmappedTabStripCollectionStorageData(
+    UnmappedTabStripCollectionStorageData* unmapped_data,
+    StorageIdMapping& mapping) {
+  tabs_pb::TabStripCollectionState state = unmapped_data->TakeState();
+  TabAndroid* active_tab = unmapped_data->active_tab();
+  if (active_tab) {
+    state.set_active_tab_storage_id(mapping.GetStorageId(active_tab));
+  }
+  delete unmapped_data;
+  return std::make_unique<TabStripCollectionStorageData>(std::move(state));
+}
+
+TabStoragePackagerAndroid::TabStoragePackagerAndroid(Profile* profile)
+    : profile_(profile) {
   JNIEnv* env = base::android::AttachCurrentThread();
   java_obj_.Reset(
       Java_TabStoragePackager_create(env, reinterpret_cast<intptr_t>(this)));
 }
 
-void TabStoragePackagerAndroid::Package(const TabInterface* tab) {
+std::unique_ptr<StoragePackage> TabStoragePackagerAndroid::Package(
+    const TabInterface* tab) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_TabStoragePackager_packageTab(env, java_obj_,
-                                     static_cast<const TabAndroid*>(tab));
+  long ptr_value = Java_TabStoragePackager_packageTab(
+      env, java_obj_, static_cast<const TabAndroid*>(tab));
+  TabStoragePackage* data = reinterpret_cast<TabStoragePackage*>(ptr_value);
+
+  return base::WrapUnique(data);
 }
 
-void TabStoragePackagerAndroid::Package(const TabCollection* collection) {
-  // TODO(https://crbug.com/448875689): Fill this package with relevant data.
-  package_ = std::make_unique<CollectionStoragePackage>();
+std::unique_ptr<Payload>
+TabStoragePackagerAndroid::PackageTabStripCollectionData(
+    const TabStripCollection* collection,
+    StorageIdMapping& mapping) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  long ptr_value = Java_TabStoragePackager_packageTabStripCollection(
+      env, java_obj_, profile_, collection);
+  return MapAndConsumeUnmappedTabStripCollectionStorageData(
+      reinterpret_cast<UnmappedTabStripCollectionStorageData*>(ptr_value),
+      mapping);
 }
 
-void TabStoragePackagerAndroid::ConsolidatePackageData(
+long TabStoragePackagerAndroid::ConsolidateTabData(
     JNIEnv* env,
     jlong timestamp_millis,
     const jni_zero::JavaParamRef<jobject>& web_contents_state_buffer,
@@ -49,8 +137,6 @@ void TabStoragePackagerAndroid::ConsolidatePackageData(
     jlong last_navigation_committed_timestamp_millis,
     jboolean tab_has_sensitive_content,
     TabAndroid* tab) {
-  DCHECK(!package_) << "Previous package was not released.";
-
   std::unique_ptr<std::string> web_contents_state_bytes;
   if (web_contents_state_buffer) {
     base::span<const uint8_t> span =
@@ -73,14 +159,26 @@ void TabStoragePackagerAndroid::ConsolidatePackageData(
           last_navigation_committed_timestamp_millis, tab_has_sensitive_content,
           tab->GetTabLaunchTypeAtCreation());
 
-  package_ = std::make_unique<TabStoragePackage>(
-      tab->GetUserAgent(), std::move(tab_group_id), tab->IsPinned(),
-      std::move(android_package));
+  TabStoragePackage* package_ptr =
+      new TabStoragePackage(tab->GetUserAgent(), std::move(tab_group_id),
+                            tab->IsPinned(), std::move(android_package));
+
+  return reinterpret_cast<long>(package_ptr);
 }
 
-std::unique_ptr<StoragePackage> TabStoragePackagerAndroid::ReleasePackage() {
-  DCHECK(package_) << "Package was not instantiated.";
-  return std::move(package_);
+long TabStoragePackagerAndroid::ConsolidateTabStripCollectionData(
+    JNIEnv* env,
+    jint window_id,
+    jint j_tab_model_type,
+    TabAndroid* active_tab) {
+  tabs_pb::TabStripCollectionState state;
+
+  state.set_window_id(window_id);
+  state.set_tab_model_type(j_tab_model_type);
+
+  UnmappedTabStripCollectionStorageData* data =
+      new UnmappedTabStripCollectionStorageData(active_tab, std::move(state));
+  return reinterpret_cast<long>(data);
 }
 
 TabStoragePackagerAndroid::~TabStoragePackagerAndroid() = default;

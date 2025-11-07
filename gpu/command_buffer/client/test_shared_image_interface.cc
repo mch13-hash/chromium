@@ -26,7 +26,6 @@
 #include "gpu/command_buffer/client/client_shared_image.h"
 #include "gpu/command_buffer/common/shared_image_capabilities.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/gpu_fence.h"
 #include "ui/gfx/gpu_memory_buffer_handle.h"
 
@@ -369,32 +368,6 @@ void TestSharedImageInterface::DestroySharedImage(
   CHECK(client_shared_image->HasOneRef());
   client_shared_image->UpdateDestructionSyncToken(sync_token);
 }
-
-SharedImageInterface::SwapChainSharedImages
-TestSharedImageInterface::CreateSwapChain(viz::SharedImageFormat format,
-                                          const gfx::Size& size,
-                                          const gfx::ColorSpace& color_space,
-                                          GrSurfaceOrigin surface_origin,
-                                          SkAlphaType alpha_type,
-                                          gpu::SharedImageUsageSet usage,
-                                          std::string_view debug_label) {
-  auto front_buffer = Mailbox::Generate();
-  auto back_buffer = Mailbox::Generate();
-  SyncToken sync_token = GenUnverifiedSyncToken();
-  shared_images_.insert(front_buffer);
-  shared_images_.insert(back_buffer);
-  SharedImageMetadata metadata(format, size, color_space, surface_origin,
-                               alpha_type, usage);
-  SharedImageInfo info(metadata, debug_label);
-  return {base::MakeRefCounted<ClientSharedImage>(
-              front_buffer, info, sync_token, holder_, gfx::EMPTY_BUFFER),
-          base::MakeRefCounted<ClientSharedImage>(back_buffer, info, sync_token,
-                                                  holder_, gfx::EMPTY_BUFFER)};
-}
-
-void TestSharedImageInterface::PresentSwapChain(
-    const SyncToken& sync_token,
-    const Mailbox& mailbox) {}
 
 #if BUILDFLAG(IS_FUCHSIA)
 void TestSharedImageInterface::RegisterSysmemBufferCollection(

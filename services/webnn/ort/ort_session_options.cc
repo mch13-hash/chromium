@@ -4,20 +4,37 @@
 
 #include "services/webnn/ort/ort_session_options.h"
 
+#include <string_view>
+
 #include "base/command_line.h"
+#include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
 #include "services/webnn/ort/environment.h"
+#include "services/webnn/ort/logging.h"
 #include "services/webnn/ort/ort_status.h"
 #include "services/webnn/ort/platform_functions_ort.h"
+#include "services/webnn/public/cpp/execution_providers_info.h"
 #include "services/webnn/public/cpp/webnn_trace.h"
 #include "services/webnn/public/mojom/webnn_device.mojom.h"
 #include "services/webnn/public/mojom/webnn_error.mojom.h"
 #include "services/webnn/webnn_switches.h"
-#include "third_party/onnxruntime_headers/src/include/onnxruntime/core/session/onnxruntime_session_options_config_keys.h"
+#include "third_party/windows_app_sdk_headers/src/inc/abi/winml/winml/onnxruntime_session_options_config_keys.h"
 
 namespace webnn::ort {
 
 namespace {
+
+// Helper to convert `mojom::Device` to string for logging.
+std::string_view WebNNDeviceTypeToString(mojom::Device device_type) {
+  switch (device_type) {
+    case mojom::Device::kCpu:
+      return "CPU";
+    case mojom::Device::kGpu:
+      return "GPU";
+    case mojom::Device::kNpu:
+      return "NPU";
+  }
+}
 
 // Execution Provider selection delegate function that selects EPs based on
 // WebNN device type.
@@ -55,6 +72,16 @@ EpSelectionPolicyDelegate(const OrtEpDevice** ep_devices,
   CHECK_LE(selected_devices.size(), max_selected)
       << "Selected device count (" << selected_devices.size()
       << ") exceeds maximum allowed (" << max_selected << ")";
+
+  OrtLoggingLevel ort_logging_level = GetOrtLoggingLevel();
+  if (ort_logging_level == ORT_LOGGING_LEVEL_VERBOSE ||
+      ort_logging_level == ORT_LOGGING_LEVEL_INFO) {
+    // Logs selected EP devices for the given WebNN device type.
+    const OrtApi* ort_api = PlatformFunctions::GetInstance()->ort_api();
+    LogEpDevices(ort_api, selected_devices,
+                 base::StrCat({"Selected OrtEpDevice for WebNN ",
+                               WebNNDeviceTypeToString(device_type)}));
+  }
 
   for (size_t i = 0; i < selected_devices.size(); ++i) {
     // SAFETY: ORT guarantees that `selected` is valid and contains
@@ -127,6 +154,12 @@ scoped_refptr<SessionOptions> SessionOptions::Create(
                                           profile_prefix.c_str()));
   }
 
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kWebNNOrtDisableCpuFallback)) {
+    CHECK_STATUS(ort_api->AddSessionConfigEntry(
+        session_options.get(), kOrtSessionOptionsDisableCPUEPFallback, "1"));
+  }
+
   // Enable strict shape type inference check. All inconsistencies encountered
   // will expose errors during session creation. For example, if the graph
   // output shape set by WebNN is different from ONNX shape inference result,
@@ -150,7 +183,7 @@ scoped_refptr<SessionOptions> SessionOptions::Create(
     }
   }
 
-  std::vector<Environment::SessionConfigEntry> ep_config_entries =
+  std::vector<SessionConfigEntry> ep_config_entries =
       env->GetEpConfigEntries(device_type);
   for (const auto& config_entry : ep_config_entries) {
     CHECK_STATUS(ort_api->AddSessionConfigEntry(

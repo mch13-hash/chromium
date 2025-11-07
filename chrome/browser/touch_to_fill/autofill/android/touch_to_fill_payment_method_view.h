@@ -11,7 +11,11 @@
 
 namespace autofill {
 
-class BnplIssuer;
+namespace payments {
+struct BnplIssuerContext;
+struct BnplIssuerTosDetail;
+}  // namespace payments
+
 class Iban;
 class LoyaltyCard;
 struct Suggestion;
@@ -34,17 +38,24 @@ class TouchToFillPaymentMethodView {
       base::span<const LoyaltyCard> affiliated_loyalty_cards,
       base::span<const LoyaltyCard> all_loyalty_cards,
       bool first_time_usage) = 0;
-  virtual bool UpdateBnplPaymentMethod(std::optional<uint64_t> extracted_amount,
-                                       bool is_amount_supported_by_any_issuer);
+  virtual bool UpdateBnplPaymentMethod(
+      std::optional<int64_t> extracted_amount,
+      bool is_amount_supported_by_any_issuer) = 0;
   virtual bool ShowProgressScreen(
       TouchToFillPaymentMethodViewController* controller) = 0;
   virtual bool ShowBnplIssuers(
-      base::span<const BnplIssuer> bnpl_issuers_to_suggest) = 0;
+      const TouchToFillPaymentMethodViewController& controller,
+      base::span<const payments::BnplIssuerContext> bnpl_issuer_contexts,
+      const std::string& app_locale) = 0;
   virtual bool ShowErrorScreen(
       TouchToFillPaymentMethodViewController* controller,
       const std::u16string& title,
       const std::u16string& description) = 0;
+  virtual bool ShowBnplIssuerTos(
+      const TouchToFillPaymentMethodViewController& controller,
+      const payments::BnplIssuerTosDetail& bnpl_issuer_tos_detail) = 0;
   virtual void Hide() = 0;
+  virtual void SetVisible(bool visible) = 0;
 };
 
 }  // namespace autofill

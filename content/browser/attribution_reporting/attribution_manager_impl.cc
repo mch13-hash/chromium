@@ -95,7 +95,6 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "services/network/public/mojom/network_change_manager.mojom-forward.h"
 #include "storage/browser/quota/special_storage_policy.h"
 #include "third_party/abseil-cpp/absl/functional/overload.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
@@ -147,11 +146,6 @@ enum class ConversionReportSendRetryCount {
 
 constexpr base::TimeDelta kReportDeliveryFirstRetryDelay = base::Minutes(5);
 constexpr base::TimeDelta kReportDeliverySecondRetryDelay = base::Minutes(15);
-
-#if BUILDFLAG(IS_ANDROID)
-BASE_FEATURE(kAttributionReportObserveAppState,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
 
 }  // namespace
 
@@ -326,25 +320,6 @@ ConversionReportSendOutcome ConvertToConversionReportSendOutcome(
     case SendResult::Status::kAssemblyFailure:
     case SendResult::Status::kTransientAssemblyFailure:
       return ConversionReportSendOutcome::kFailedToAssemble;
-  }
-}
-
-void RecordNetworkConnectionTypeOnFailure(
-    AttributionReport::Type report_type,
-    network::mojom::ConnectionType connection_type) {
-  switch (report_type) {
-    case AttributionReport::Type::kEventLevel:
-      base::UmaHistogramEnumeration(
-          "Conversions.EventLevelReport.NetworkConnectionTypeOnFailure2",
-          connection_type);
-      break;
-    case AttributionReport::Type::kAggregatableAttribution:
-      base::UmaHistogramEnumeration(
-          "Conversions.AggregatableReport.NetworkConnectionTypeOnFailure2",
-          connection_type);
-      break;
-    case AttributionReport::Type::kNullAggregatable:
-      break;
   }
 }
 
@@ -751,12 +726,7 @@ AttributionManagerImpl::AttributionManagerImpl(
   CHECK(os_level_manager_);
 
   scheduler_timer_ = std::make_unique<ReportSchedulerTimer>(
-      std::make_unique<ReportScheduler>(weak_factory_.GetWeakPtr())
-#if BUILDFLAG(IS_ANDROID)
-          ,
-      base::FeatureList::IsEnabled(kAttributionReportObserveAppState)
-#endif
-  );
+      std::make_unique<ReportScheduler>(weak_factory_.GetWeakPtr()));
 }
 
 AttributionManagerImpl::~AttributionManagerImpl() {
@@ -1276,13 +1246,11 @@ void AttributionManagerImpl::SendReport(AttributionReport report,
   report_sender_->SendReport(
       std::move(report), is_debug_report,
       base::BindOnce(
-          [](ReportSentCallback callback,
-             network::mojom::ConnectionType connection_type,
-             const AttributionReport& report, SendResult::Sent sent) {
-            sent.connection_type = connection_type;
+          [](ReportSentCallback callback, const AttributionReport& report,
+             SendResult::Sent sent) {
             std::move(callback).Run(report, SendResult(std::move(sent)));
           },
-          std::move(callback), scheduler_timer_->connection_type()));
+          std::move(callback)));
 }
 
 void AttributionManagerImpl::OnReportSent(base::OnceClosure done,
@@ -1300,12 +1268,8 @@ void AttributionManagerImpl::OnReportSent(base::OnceClosure done,
                            LogMetricsOnReportSent(report);
                            return std::nullopt;
                          case SendResult::Sent::Result::kTransientFailure:
-                           RecordNetworkConnectionTypeOnFailure(
-                               report.GetReportType(), sent.connection_type);
                            return HandleTransientFailureOnSendReport(report);
                          case SendResult::Sent::Result::kFailure:
-                           RecordNetworkConnectionTypeOnFailure(
-                               report.GetReportType(), sent.connection_type);
                            return std::nullopt;
                        }
                      },

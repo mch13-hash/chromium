@@ -6457,8 +6457,6 @@ void GLES2Implementation::QueryCounterEXT(GLuint id, GLenum target) {
                      << GLES2Util::GetStringQueryTarget(target) << ")");
 
   switch (target) {
-    case GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM:
-      break;
     case GL_TIMESTAMP_EXT:
       if (!gl_capabilities_.timer_queries) {
         SetGLError(GL_INVALID_OPERATION, "glQueryCounterEXT",
@@ -6516,7 +6514,6 @@ void GLES2Implementation::GetQueryivEXT(GLenum target,
         // instead of disabling it directly.
         *params = 0;
         break;
-      case GL_COMMANDS_ISSUED_TIMESTAMP_CHROMIUM:
       case GL_TIME_ELAPSED_EXT:
         // We convert all queries to CPU time so we support 64 bits.
         *params = 64;
@@ -6880,19 +6877,6 @@ void GLES2Implementation::DeleteTransferCacheEntry(uint32_t type, uint32_t id) {
 }
 
 unsigned int GLES2Implementation::GetTransferBufferFreeSize() const {
-  NOTREACHED();
-}
-
-bool GLES2Implementation::IsJpegDecodeAccelerationSupported() const {
-  NOTREACHED();
-}
-
-bool GLES2Implementation::IsWebPDecodeAccelerationSupported() const {
-  NOTREACHED();
-}
-
-bool GLES2Implementation::CanDecodeWithHardwareAcceleration(
-    const cc::ImageHeaderMetadata* image_metadata) const {
   NOTREACHED();
 }
 

@@ -763,11 +763,11 @@ IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest, OpenPopupOnPopup) {
   NavigateParams params(browser(), GURL("http://www.google.com/"),
                         ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_POPUP;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   ui_test_utils::NavigateToURL(&params);
-  Browser* popup_browser = params.browser;
+  ASSERT_TRUE(params.browser);
+  Browser* popup_browser = params.browser->GetBrowserForMigrationOnly();
   // Verify it is a popup, and it is the active window.
-  ASSERT_TRUE(popup_browser);
   // The window isn't considered "active" on MacOSX for odd reasons. The more
   // important test is that it *is* considered the last active browser, since
   // that's what we check when we try to open the popup.
@@ -779,7 +779,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest, OpenPopupOnPopup) {
   EXPECT_TRUE(popup_browser->window()->IsActive());
 #endif
   EXPECT_FALSE(browser()->window()->IsActive());
-  EXPECT_FALSE(popup_browser->SupportsWindowFeature(Browser::FEATURE_TOOLBAR));
+  EXPECT_FALSE(popup_browser->SupportsWindowFeature(
+      Browser::WindowFeature::kFeatureToolbar));
   EXPECT_EQ(popup_browser,
             chrome::FindLastActiveWithProfile(browser()->profile()));
 

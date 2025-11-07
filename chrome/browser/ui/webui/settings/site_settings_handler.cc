@@ -56,6 +56,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/page_info/page_info_infobar_delegate.h"
 #include "chrome/browser/ui/safety_hub/notification_permission_review_service_factory.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/url_identity.h"
 #include "chrome/browser/ui/webui/settings/recent_site_settings_helper.h"
@@ -91,6 +92,7 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "components/privacy_sandbox/privacy_sandbox_features.h"
+#include "components/safe_browsing/core/browser/safe_browsing_metrics_collector.h"
 #include "components/services/app_service/public/cpp/app_registry_cache.h"
 #include "components/services/app_service/public/cpp/app_types.h"
 #include "components/services/app_service/public/cpp/app_update.h"
@@ -586,6 +588,34 @@ base::Value::Dict CreateZoomLevelException(
       static_cast<int>(blink::ZoomLevelToZoomFactor(zoom) * 100 + 0.5);
   exception.Set(kZoom, base::FormatPercent(zoom_percent));
   return exception;
+}
+
+void MaybeLogSafeBrowsingNotificationRevocationSource(
+    ContentSettingsType permission_type,
+    ContentSetting previous_setting_value,
+    ContentSetting new_setting_value) {
+  // If notification permission changes from allowed to not allowed, log the
+  // histogram.
+  if (permission_type == ContentSettingsType::NOTIFICATIONS &&
+      previous_setting_value == CONTENT_SETTING_ALLOW &&
+      (new_setting_value == CONTENT_SETTING_BLOCK ||
+       new_setting_value == CONTENT_SETTING_DEFAULT ||
+       new_setting_value == CONTENT_SETTING_ASK)) {
+    safe_browsing::SafeBrowsingMetricsCollector::
+        LogSafeBrowsingNotificationRevocationSourceHistogram(
+            safe_browsing::NotificationRevocationSource::
+                kUserManuallyChangedSiteSetting);
+  }
+}
+
+void ResetHeuristicData(Profile* profile,
+                        const GURL& url,
+                        ContentSettingsType permission) {
+  if (base::FeatureList::IsEnabled(
+          permissions::features::kPermissionHeuristicAutoGrant)) {
+    PermissionActionsHistoryFactory::GetForProfile(profile)->ResetHeuristicData(
+        url, permission);
+  }
 }
 
 }  // namespace
@@ -1112,6 +1142,8 @@ void SiteSettingsHandler::HandleSetDefaultValueForContentType(
   ContentSetting previous_setting =
       map->GetDefaultContentSetting(type, nullptr);
   map->SetDefaultContentSetting(type, default_setting);
+
+  content_settings_uma_util::RecordContentSettingChange(default_setting, type);
 
   if (type == ContentSettingsType::SOUND &&
       previous_setting != default_setting) {
@@ -1654,8 +1686,7 @@ void SiteSettingsHandler::HandleSetOriginPermissions(
 
     // Clear heuristic data if the new setting isn't allow.
     if (setting != CONTENT_SETTING_ALLOW) {
-      PermissionActionsHistoryFactory::GetForProfile(profile_)
-          ->ResetHeuristicData(origin, content_type);
+      ResetHeuristicData(profile_, origin, content_type);
     }
 
     content_settings::ContentSettingConstraints constraints;
@@ -1670,6 +1701,12 @@ void SiteSettingsHandler::HandleSetOriginPermissions(
             content_type, content_settings::ContentSettingToValue(setting))) {
       constraints.set_track_last_visit_for_autoexpiration(true);
     }
+
+    MaybeLogSafeBrowsingNotificationRevocationSource(
+        content_type, /*previous_setting_value=*/
+        map->GetContentSetting(origin, origin,
+                               ContentSettingsType::NOTIFICATIONS),
+        /*new_setting_value=*/setting);
 
     map->SetContentSettingDefaultScope(origin, origin, content_type, setting,
                                        constraints);
@@ -1739,24 +1776,22 @@ void SiteSettingsHandler::HandleSetOriginPermissions(
   // Info bar should only be shown on pages with the same origin and
   // on the same profile, or on any pages where changes to a double-keyed
   // setting occurred.
-  for (Browser* it : *BrowserList::GetInstance()) {
-    TabStripModel* tab_strip = it->tab_strip_model();
-    for (int i = 0; i < tab_strip->count(); ++i) {
-      content::WebContents* web_contents = tab_strip->GetWebContentsAt(i);
-      GURL tab_url = web_contents->GetLastCommittedURL();
-      const bool tab_is_same_origin = url::IsSameOriginWith(origin, tab_url);
-      const bool tab_might_embed_origin = std::ranges::any_of(
-          additional_patterns_for_infobar, [&](const auto& additional_pattern) {
-            return additional_pattern.Matches(tab_url);
-          });
+  auto& all_tabs = AllTabContentses();
+  for (auto it = all_tabs.begin(); it != all_tabs.end(); ++it) {
+    content::WebContents* const web_contents = *it;
+    const GURL tab_url = web_contents->GetLastCommittedURL();
+    const bool tab_is_same_origin = url::IsSameOriginWith(origin, tab_url);
+    const bool tab_might_embed_origin = std::ranges::any_of(
+        additional_patterns_for_infobar, [&](const auto& additional_pattern) {
+          return additional_pattern.Matches(tab_url);
+        });
 
-      if ((tab_is_same_origin || tab_might_embed_origin) &&
-          it->profile()->GetOriginalProfile() ==
-              profile_->GetOriginalProfile()) {
-        infobars::ContentInfoBarManager* infobar_manager =
-            infobars::ContentInfoBarManager::FromWebContents(web_contents);
-        PageInfoInfoBarDelegate::Create(infobar_manager);
-      }
+    if ((tab_is_same_origin || tab_might_embed_origin) &&
+        it.browser()->profile()->GetOriginalProfile() ==
+            profile_->GetOriginalProfile()) {
+      infobars::ContentInfoBarManager* const infobar_manager =
+          infobars::ContentInfoBarManager::FromWebContents(web_contents);
+      PageInfoInfoBarDelegate::Create(infobar_manager);
     }
   }
 }
@@ -1786,6 +1821,15 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
 
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
+
+  GURL origin(primary_pattern_string);
+  if (origin.is_valid()) {
+    MaybeLogSafeBrowsingNotificationRevocationSource(
+        content_type, /*previous_setting_value=*/
+        map->GetContentSetting(origin, origin,
+                               ContentSettingsType::NOTIFICATIONS),
+        CONTENT_SETTING_DEFAULT);
+  }
 
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromString(primary_pattern_string);
@@ -1818,8 +1862,7 @@ void SiteSettingsHandler::HandleResetCategoryPermissionForPattern(
   if (url.is_valid()) {
     PermissionDecisionAutoBlockerFactory::GetForProfile(profile)
         ->RemoveEmbargoAndResetCounts(url, content_type);
-    PermissionActionsHistoryFactory::GetForProfile(profile_)
-        ->ResetHeuristicData(url, content_type);
+    ResetHeuristicData(profile_, url, content_type);
   }
 
   if (content_type == ContentSettingsType::NOTIFICATIONS) {
@@ -1875,6 +1918,16 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
           ? ContentSettingsPattern::Wildcard()
           : ContentSettingsPattern::FromString(secondary_pattern_string);
 
+  GURL primary_url(primary_pattern.ToString());
+  if (primary_url.is_valid()) {
+    MaybeLogSafeBrowsingNotificationRevocationSource(
+        content_type,
+        /*previous_setting_value=*/
+        map->GetContentSetting(primary_url, primary_url,
+                               ContentSettingsType::NOTIFICATIONS),
+        /*new_setting_value=*/setting);
+  }
+
   // Clear any existing embargo status if the new setting isn't block.
   if (setting != CONTENT_SETTING_BLOCK) {
     GURL url(primary_pattern.ToString());
@@ -1888,8 +1941,7 @@ void SiteSettingsHandler::HandleSetCategoryPermissionForPattern(
   if (setting != CONTENT_SETTING_ALLOW) {
     GURL url(primary_pattern.ToString());
     if (url.is_valid()) {
-      PermissionActionsHistoryFactory::GetForProfile(target_profile)
-          ->ResetHeuristicData(url, content_type);
+      ResetHeuristicData(target_profile, url, content_type);
     }
   }
 
@@ -2334,6 +2386,16 @@ void SiteSettingsHandler::StopObservingSourcesForProfile(Profile* profile) {
           file_system_access_permission_context);
     }
   }
+
+#if BUILDFLAG(IS_CHROMEOS)
+  if (base::FeatureList::IsEnabled(blink::features::kSmartCard)) {
+    auto& smart_card_context =
+        SmartCardPermissionContextFactory::GetForProfile(*profile);
+    if (chooser_observations_.IsObservingSource(&smart_card_context)) {
+      chooser_observations_.RemoveObservation(&smart_card_context);
+    }
+  }
+#endif
 
   observed_profiles_.RemoveObservation(profile);
 }

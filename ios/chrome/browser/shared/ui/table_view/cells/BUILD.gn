@@ -36,8 +36,6 @@ source_set("cells") {
     "table_view_illustrated_item.mm",
     "table_view_image_item.h",
     "table_view_image_item.mm",
-    "table_view_info_button_cell.h",
-    "table_view_info_button_cell.mm",
     "table_view_info_button_item.h",
     "table_view_info_button_item.mm",
     "table_view_info_button_item_delegate.h",
@@ -117,6 +115,7 @@ source_set("unit_tests") {
     "//base",
     "//base/test:test_support",
     "//components/url_formatter",
+    "//ios/chrome/app/strings",
     "//ios/chrome/browser/net/model:crurl",
     "//ios/chrome/browser/shared/ui/symbols",
     "//ios/chrome/browser/shared/ui/table_view:styler",
@@ -126,5 +125,6 @@ source_set("unit_tests") {
     "//net",
     "//testing/gtest",
     "//third_party/ocmock",
+    "//ui/base",
   ]
 }

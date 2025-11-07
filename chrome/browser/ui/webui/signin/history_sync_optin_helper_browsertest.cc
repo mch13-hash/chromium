@@ -6,14 +6,17 @@
 
 #include <memory>
 
+#include "base/metrics/histogram_base.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/enterprise/signin/profile_management_disclaimer_service.h"
 #include "chrome/browser/enterprise/signin/profile_management_disclaimer_service_factory.h"
+#include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #include "chrome/browser/policy/cloud/user_policy_signin_service_test_util.h"
@@ -49,7 +52,9 @@ class MockHistorySyncOptinHelperDelegate
  public:
   MOCK_METHOD(void,
               ShowHistorySyncOptinScreen,
-              (Profile*, base::OnceClosure history_optin_completed_closure),
+              (Profile*,
+               HistorySyncOptinHelper::FlowCompletedCallback
+                   history_optin_completed_callback),
               (override));
   MOCK_METHOD(void,
               ShowAccountManagementScreen,
@@ -100,8 +105,6 @@ class HistorySyncOptinHelperTestObserver
   base::raw_ref<base::test::TestFuture<void>> future_;
 };
 
-// TODO(crbug.com/434964019): When management screen support is implemented
-// for the browser case, make this test parametrizable.
 class HistorySyncOptinHelperBrowserTest
     : public SigninBrowserTestBase,
       public testing::WithParamInterface<
@@ -146,6 +149,7 @@ class HistorySyncOptinHelperBrowserTest
 
  protected:
   base::UserActionTester user_action_tester_;
+  base::HistogramTester histogram_tester_;
 
  private:
   void OnWillCreateBrowserContextServices(
@@ -202,6 +206,29 @@ IN_PROC_BROWSER_TEST_P(
             1);
   EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Skipped"),
             0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Aborted"),
+            0);
+  EXPECT_EQ(
+      user_action_tester_.GetActionCount("Signin_HistorySync_AlreadyOptedIn"),
+      0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Completed"),
+            0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Declined"),
+            0);
+  histogram_tester_.ExpectBucketCount(
+      "Signin.HistorySyncOptIn.Started",
+      /*sample=*/signin_metrics::AccessPoint::kSettings,
+      /*expected_count=*/1);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Skipped",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Aborted",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.AlreadyOptedIn",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Completed",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Declined",
+                                     /*expected_count=*/0);
 }
 
 IN_PROC_BROWSER_TEST_P(
@@ -223,6 +250,9 @@ IN_PROC_BROWSER_TEST_P(
           .WillOnce(
               [&](const CoreAccountId&, signin_metrics::AccessPoint,
                   base::OnceCallback<void(Profile*, bool)> callback) {
+                // Mark management as accepted.
+                enterprise_util::SetUserAcceptedAccountManagement(GetProfile(),
+                                                                  true);
                 // The callback is executed asynchronously, to better reflect
                 // the production implementation.
                 base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
@@ -240,7 +270,8 @@ IN_PROC_BROWSER_TEST_P(
 
   EXPECT_CALL(delegate, ShowHistorySyncOptinScreen)
       .WillOnce([&](Profile* profile,
-                    base::OnceClosure history_optin_completed_closure) {
+                    HistorySyncOptinHelper::FlowCompletedCallback
+                        history_optin_completed_callback) {
         future.SetValue(profile);
       });
 
@@ -305,9 +336,33 @@ IN_PROC_BROWSER_TEST_P(
   UpdateAccountManagementInfo(account_info, /*is_managed=*/true);
 
   EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Started"),
-            1);
+            0);
   EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Skipped"),
             1);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Aborted"),
+            0);
+  EXPECT_EQ(
+      user_action_tester_.GetActionCount("Signin_HistorySync_AlreadyOptedIn"),
+      0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Completed"),
+            0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Declined"),
+            0);
+
+  histogram_tester_.ExpectBucketCount(
+      "Signin.HistorySyncOptIn.Skipped",
+      /*sample=*/signin_metrics::AccessPoint::kSettings,
+      /*expected_count=*/1);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Started",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Aborted",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.AlreadyOptedIn",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Completed",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Declined",
+                                     /*expected_count=*/0);
 }
 
 IN_PROC_BROWSER_TEST_P(
@@ -369,6 +424,34 @@ IN_PROC_BROWSER_TEST_P(HistorySyncOptinHelperBrowserTest,
   GetTestSyncService()->SetMaxTransportState(
       syncer::SyncService::TransportState::ACTIVE);
   GetTestSyncService()->FireStateChanged();
+
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Started"),
+            1);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Skipped"),
+            0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Aborted"),
+            0);
+  EXPECT_EQ(
+      user_action_tester_.GetActionCount("Signin_HistorySync_AlreadyOptedIn"),
+      0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Completed"),
+            0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Declined"),
+            0);
+  histogram_tester_.ExpectBucketCount(
+      "Signin.HistorySyncOptIn.Started",
+      /*sample=*/signin_metrics::AccessPoint::kSettings,
+      /*expected_count=*/1);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Skipped",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Aborted",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.AlreadyOptedIn",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Completed",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Declined",
+                                     /*expected_count=*/0);
 }
 
 IN_PROC_BROWSER_TEST_P(HistorySyncOptinHelperBrowserTest,
@@ -389,9 +472,33 @@ IN_PROC_BROWSER_TEST_P(HistorySyncOptinHelperBrowserTest,
   history_sync_optin_helper->StartHistorySyncOptinFlow();
 
   EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Started"),
-            1);
+            0);
   EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Skipped"),
             1);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Aborted"),
+            0);
+  EXPECT_EQ(
+      user_action_tester_.GetActionCount("Signin_HistorySync_AlreadyOptedIn"),
+      0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Completed"),
+            0);
+  EXPECT_EQ(user_action_tester_.GetActionCount("Signin_HistorySync_Declined"),
+            0);
+
+  histogram_tester_.ExpectBucketCount(
+      "Signin.HistorySyncOptIn.Skipped",
+      /*sample=*/signin_metrics::AccessPoint::kSettings,
+      /*expected_count=*/1);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Started",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Aborted",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.AlreadyOptedIn",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Completed",
+                                     /*expected_count=*/0);
+  histogram_tester_.ExpectTotalCount("Signin.HistorySyncOptIn.Declined",
+                                     /*expected_count=*/0);
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -11,7 +11,6 @@
 
 #include "base/containers/flat_map.h"
 #include "gpu/command_buffer/common/gpu_command_buffer_common_export.h"
-#include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/surface_origin.h"
 
@@ -55,7 +54,6 @@ struct GPU_COMMAND_BUFFER_COMMON_EXPORT Capabilities {
   bool disable_one_component_textures = false;
   bool gpu_rasterization = false;
   bool avoid_stencil_buffers = false;
-  bool angle_rgbx_internal_format = false;
 
   bool disable_2d_canvas_copy_on_write = false;
 
@@ -71,7 +69,7 @@ struct GPU_COMMAND_BUFFER_COMMON_EXPORT Capabilities {
 
   bool using_vulkan_context = false;
 
-  GpuMemoryBufferFormatSet gpu_memory_buffer_formats = {
+  gfx::GpuMemoryBufferFormatSet gpu_memory_buffer_formats = {
       gfx::BufferFormat::BGR_565,   gfx::BufferFormat::RGBA_4444,
       gfx::BufferFormat::RGBA_8888, gfx::BufferFormat::RGBX_8888,
       gfx::BufferFormat::YVU_420,

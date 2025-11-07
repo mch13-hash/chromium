@@ -565,20 +565,6 @@ gn_args.config(
     },
 )
 
-gn_args.config(
-    name = "enable_rust_mojo",
-    args = {
-        "enable_rust_mojo": True,
-    },
-)
-
-gn_args.config(
-    name = "enable_rust_mojom_bindings",
-    args = {
-        "enable_rust_mojom_bindings": True,
-    },
-)
-
 # TODO(crbug.com/40101527): Explicitly enable DirectX 12.
 gn_args.config(
     name = "dx12vk",
@@ -1508,14 +1494,6 @@ gn_args.config(
     name = "webview_google",
     args = {
         "system_webview_package_name": "com.google.android.webview",
-    },
-)
-
-# For Android N-P, only userdebug/eng
-gn_args.config(
-    name = "webview_monochrome",
-    args = {
-        "system_webview_package_name": "com.google.android.apps.chrome",
     },
 )
 

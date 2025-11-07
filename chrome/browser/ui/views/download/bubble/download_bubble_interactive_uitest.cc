@@ -145,10 +145,10 @@ class TestDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
 };
 
 class DownloadBubbleInteractiveUiTest
-    : public InteractiveFeaturePromoTestT<DownloadTestBase> {
+    : public InteractiveFeaturePromoTestMixin<DownloadTestBase> {
  public:
   DownloadBubbleInteractiveUiTest()
-      : InteractiveFeaturePromoTestT(UseDefaultTrackerAllowingPromos(
+      : InteractiveFeaturePromoTestMixin(UseDefaultTrackerAllowingPromos(
             {feature_engagement::kIPHDownloadEsbPromoFeature})) {
 #if BUILDFLAG(IS_MAC)
     // TODO(chlily): Add test coverage for immersive fullscreen disabled on Mac.
@@ -157,7 +157,7 @@ class DownloadBubbleInteractiveUiTest
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    InteractiveFeaturePromoTestT::SetUpInProcessBrowserTestFixture();
+    InteractiveFeaturePromoTestMixin::SetUpInProcessBrowserTestFixture();
     policy_provider_.SetDefaultReturns(
         /*is_initialization_complete_return=*/true,
         /*is_first_policy_load_complete_return=*/true);
@@ -166,7 +166,7 @@ class DownloadBubbleInteractiveUiTest
   }
 
   void SetUpOnMainThread() override {
-    InteractiveFeaturePromoTestT::SetUpOnMainThread();
+    InteractiveFeaturePromoTestMixin::SetUpOnMainThread();
     embedded_test_server()->ServeFilesFromDirectory(GetTestDataDirectory());
     ASSERT_TRUE(embedded_test_server()->Start());
   }
@@ -266,7 +266,7 @@ class DownloadBubbleInteractiveUiTest
     return base::BindLambdaForTesting([&, displayed = displayed]() {
       ExclusiveAccessBubbleViews* bubble =
           BrowserView::GetBrowserViewForBrowser(browser())
-              ->exclusive_access_bubble();
+              ->GetExclusiveAccessBubble();
       return displayed ==
              (bubble ? IsExclusiveAccessBubbleVisible(bubble) : false);
     });
@@ -277,7 +277,7 @@ class DownloadBubbleInteractiveUiTest
     return base::BindLambdaForTesting([&, for_download = for_download]() {
       ExclusiveAccessBubbleViews* bubble =
           BrowserView::GetBrowserViewForBrowser(browser())
-              ->exclusive_access_bubble();
+              ->GetExclusiveAccessBubble();
       return for_download ==
              (bubble ? ExclusiveAccessTest::IsBubbleDownloadNotification(bubble)
                      : false);
@@ -293,7 +293,7 @@ class DownloadBubbleInteractiveUiTest
     return [&]() {
       auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
       return browser_view->GetWidget()->IsFullscreen() &&
-             browser_view->immersive_mode_controller()->IsEnabled();
+             ImmersiveModeController::From(browser())->IsEnabled();
     };
   }
 #endif  // BUILDFLAG(IS_MAC)
@@ -491,7 +491,7 @@ IN_PROC_BROWSER_TEST_F(
   fullscreen_accelerator =
       ui::Accelerator(ui::VKEY_F, ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN);
 #else
-  chrome::AcceleratorProviderForBrowser(browser())->GetAcceleratorForCommandId(
+  AcceleratorProviderForBrowser(browser())->GetAcceleratorForCommandId(
       IDC_FULLSCREEN, &fullscreen_accelerator);
 #endif
 

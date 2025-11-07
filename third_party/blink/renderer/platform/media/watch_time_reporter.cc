@@ -110,6 +110,9 @@ WatchTimeReporter::WatchTimeReporter(
   base_component_ = CreateBaseComponent();
   power_component_ = CreatePowerComponent();
   if (!is_background_) {
+    if (properties_->has_video) {
+      dominant_component_ = CreateDominantComponent();
+    }
     controls_component_ = CreateControlsComponent();
     if (properties_->has_video || properties_->has_audio) {
       display_type_component_ = CreateDisplayTypeComponent();
@@ -369,6 +372,18 @@ void WatchTimeReporter::OnBatteryPowerStatusChange(
   }
 }
 
+void WatchTimeReporter::OnDominantVisibleContentChanged(bool is_dominant) {
+  if (muted_reporter_) {
+    muted_reporter_->OnDominantVisibleContentChanged(is_dominant);
+  }
+
+  if (HandlePropertyChange<bool>(is_dominant, reporting_timer_.IsRunning(),
+                                 dominant_component_.get()) ==
+      PropertyAction::kFinalizeRequired) {
+    RestartTimerForHysteresis();
+  }
+}
+
 void WatchTimeReporter::OnNativeControlsChanged(bool has_native_controls) {
   if (muted_reporter_)
     muted_reporter_->OnNativeControlsChanged(has_native_controls);
@@ -455,6 +470,9 @@ void WatchTimeReporter::MaybeStartReportingTimer(
     display_type_component_->OnReportingStarted(start_timestamp);
   if (hdr_component_) {
     hdr_component_->OnReportingStarted(start_timestamp);
+  }
+  if (dominant_component_) {
+    dominant_component_->OnReportingStarted(start_timestamp);
   }
 
   reporting_timer_.Start(FROM_HERE, reporting_interval_, this,
@@ -563,6 +581,9 @@ void WatchTimeReporter::RecordWatchTime() {
   if (hdr_component_) {
     hdr_component_->RecordWatchTime(current_timestamp);
   }
+  if (dominant_component_) {
+    dominant_component_->RecordWatchTime(current_timestamp);
+  }
 }
 
 void WatchTimeReporter::UpdateWatchTime() {
@@ -580,6 +601,9 @@ void WatchTimeReporter::UpdateWatchTime() {
     controls_component_->Finalize(&keys_to_finalize);
   if (hdr_component_ && hdr_component_->NeedsFinalize()) {
     hdr_component_->Finalize(&keys_to_finalize);
+  }
+  if (dominant_component_ && dominant_component_->NeedsFinalize()) {
+    dominant_component_->Finalize(&keys_to_finalize);
   }
 
   // Then finalize the base component.
@@ -681,6 +705,36 @@ Vector<media::WatchTimeKey> WatchTimeReporter::GetPowerKeys(
 }
 #undef NORMAL_KEY
 
+#define FOREGROUND_VIDEO_KEY(key)                                \
+  ((properties_->has_audio)                                      \
+       ? (is_muted_ ? media::WatchTimeKey::kAudioVideoMuted##key \
+                    : media::WatchTimeKey::kAudioVideo##key)     \
+       : media::WatchTimeKey::kVideo##key)
+
+std::unique_ptr<WatchTimeComponent<bool>>
+WatchTimeReporter::CreateDominantComponent() {
+  DCHECK(!is_background_);
+  DCHECK(properties_->has_video);
+
+  Vector<media::WatchTimeKey> keys_to_finalize{
+      FOREGROUND_VIDEO_KEY(DominantVisibleContent),
+      FOREGROUND_VIDEO_KEY(AuxiliaryVisibleContent)};
+
+  return std::make_unique<WatchTimeComponent<bool>>(
+      false, std::move(keys_to_finalize),
+      base::BindRepeating(&WatchTimeReporter::GetDominantKey,
+                          base::Unretained(this)),
+      get_media_time_cb_, recorder_.get());
+}
+
+Vector<media::WatchTimeKey> WatchTimeReporter::GetDominantKey(
+    bool is_dominant) {
+  return {is_dominant ? FOREGROUND_VIDEO_KEY(DominantVisibleContent)
+                      : FOREGROUND_VIDEO_KEY(AuxiliaryVisibleContent)};
+}
+
+#undef FOREGROUND_VIDEO_KEY
+
 #define FOREGROUND_KEY(key)                                        \
   ((properties_->has_video && properties_->has_audio)              \
        ? (is_muted_ ? media::WatchTimeKey::kAudioVideoMuted##key   \
@@ -764,13 +818,30 @@ Vector<media::WatchTimeKey> WatchTimeReporter::GetDisplayTypeKeys(
          : (is_eme ? media::WatchTimeKey::kAudioVideoSdrEme  \
                    : media::WatchTimeKey::kAudioVideoSdrAll)
 
+#define MEDIA_FOUNDATION_HDR_KEY(is_eme, is_hdr)                            \
+  is_hdr ? (is_eme ? media::WatchTimeKey::kAudioVideoMediaFoundationHdrEme  \
+                   : media::WatchTimeKey::kAudioVideoMediaFoundationHdrAll) \
+         : (is_eme ? media::WatchTimeKey::kAudioVideoMediaFoundationSdrEme  \
+                   : media::WatchTimeKey::kAudioVideoMediaFoundationSdrAll)
+
 std::unique_ptr<WatchTimeComponent<bool>>
 WatchTimeReporter::CreateHdrComponent() {
   Vector<media::WatchTimeKey> keys_to_finalize{HDR_KEY(false, true),
                                                HDR_KEY(false, false)};
+  const auto is_media_foundation =
+      properties_->renderer_type == media::RendererType::kMediaFoundation;
+  if (is_media_foundation) {
+    keys_to_finalize.emplace_back(MEDIA_FOUNDATION_HDR_KEY(false, true));
+    keys_to_finalize.emplace_back(MEDIA_FOUNDATION_HDR_KEY(false, false));
+  }
   if (properties_->is_eme) {
-    keys_to_finalize.emplace_back(HDR_KEY(true, true));
-    keys_to_finalize.emplace_back(HDR_KEY(true, false));
+    if (is_media_foundation) {
+      keys_to_finalize.emplace_back(MEDIA_FOUNDATION_HDR_KEY(true, true));
+      keys_to_finalize.emplace_back(MEDIA_FOUNDATION_HDR_KEY(true, false));
+    } else {
+      keys_to_finalize.emplace_back(HDR_KEY(true, true));
+      keys_to_finalize.emplace_back(HDR_KEY(true, false));
+    }
   }
 
   return std::make_unique<WatchTimeComponent<bool>>(
@@ -781,8 +852,19 @@ WatchTimeReporter::CreateHdrComponent() {
 }
 
 Vector<media::WatchTimeKey> WatchTimeReporter::GetHdrKeys(bool is_hdr) {
+  const auto is_media_foundation =
+      properties_->renderer_type == media::RendererType::kMediaFoundation;
   if (properties_->is_eme) {
+    if (is_media_foundation) {
+      return {HDR_KEY(false, is_hdr), HDR_KEY(true, is_hdr),
+              MEDIA_FOUNDATION_HDR_KEY(false, is_hdr),
+              MEDIA_FOUNDATION_HDR_KEY(true, is_hdr)};
+    }
     return {HDR_KEY(false, is_hdr), HDR_KEY(true, is_hdr)};
+  }
+
+  if (is_media_foundation) {
+    return {HDR_KEY(false, is_hdr), MEDIA_FOUNDATION_HDR_KEY(false, is_hdr)};
   }
   return {HDR_KEY(false, is_hdr)};
 }

@@ -220,7 +220,6 @@ UseCounterMetricsRecorder::GetAllowedUkmFeatures() {
           WebFeature::kWebCodecsAudioEncoder,
           WebFeature::kWebCodecsVideoFrameFromImage,
           WebFeature::kWebCodecsVideoFrameFromBuffer,
-          WebFeature::kPrivateNetworkAccessPreflightWarning,
           WebFeature::kWebBluetoothGetAvailability,
           WebFeature::kCookieHasNotBeenRefreshedIn201To300Days,
           WebFeature::kCookieHasNotBeenRefreshedIn301To350Days,
@@ -458,7 +457,6 @@ UseCounterMetricsRecorder::GetAllowedUkmFeatures() {
           WebFeature::kLanguageModel_PromptStreaming,
           WebFeature::kLanguageModel_Prompt_Input_Image,
           WebFeature::kLanguageModel_Prompt_Input_Audio,
-          WebFeature::kCrossOriginSameSiteCookieAccessViaStorageAccessAPI,
           WebFeature::kCredentialManagerCreateFederatedCredential,
           WebFeature::kCredentialManagerStoreFederatedCredential,
           WebFeature::kCredentialManagerGetLegacyFederatedCredential,
@@ -471,8 +469,10 @@ UseCounterMetricsRecorder::GetAllowedUkmFeatures() {
           WebFeature::kDeviceBoundSessionRegistered,
           WebFeature::kDeviceBoundSessionRequestInScope,
           WebFeature::kDeviceBoundSessionRequestDeferral,
-          // NOTE: before adding new use counters here, verify in UMA that their
-          // emissions are very rare, e.g. <1% of page loads.
+          WebFeature::kFedCmErrorCodeAttribute,
+          WebFeature::kFedCmErrorErrorAttribute,
+          // NOTE: before adding new use counters here, verify in UMA that
+          // their emissions are very rare, e.g. <1% of page loads.
       }));
   return *opt_in_features;
 }

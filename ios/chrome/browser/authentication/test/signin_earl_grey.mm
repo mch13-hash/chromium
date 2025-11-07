@@ -8,6 +8,7 @@
 #import "base/test/ios/wait_util.h"
 #import "components/policy/core/browser/signin/profile_separation_policies.h"
 #import "components/signin/public/base/signin_metrics.h"
+#import "google_apis/gaia/gaia_id.h"
 #import "ios/chrome/browser/authentication/test/expected_signin_histograms.h"
 #import "ios/chrome/browser/authentication/test/signin_earl_grey_app_interface.h"
 #import "ios/chrome/browser/authentication/test/signin_earl_grey_ui_test_util.h"
@@ -72,12 +73,17 @@ using base::test::ios::WaitUntilConditionOrTimeout;
                                            accountId.ToString())];
 }
 
-- (NSString*)primaryAccountGaiaID {
-  return [SigninEarlGreyAppInterface primaryAccountGaiaID];
+- (GaiaId)primaryAccountGaiaID {
+  return GaiaId([SigninEarlGreyAppInterface primaryAccountGaiaIDString]);
 }
 
-- (NSSet<NSString*>*)accountsInProfileGaiaIDs {
-  return [SigninEarlGreyAppInterface accountsInProfileGaiaIDs];
+- (const base::flat_set<GaiaId>)accountsInProfileGaiaIDs {
+  base::flat_set<GaiaId> set;
+  for (NSString* gaiaIDString :
+       [SigninEarlGreyAppInterface accountsInProfileGaiaIDs]) {
+    set.insert(GaiaId(gaiaIDString));
+  }
+  return set;
 }
 
 - (BOOL)isSignedOut {
@@ -147,22 +153,22 @@ using base::test::ios::WaitUntilConditionOrTimeout;
   GREYAssert(WaitUntilConditionOrTimeout(
                  base::test::ios::kWaitForActionTimeout,
                  ^bool {
-                   NSString* primaryAccountGaiaID =
-                       [SigninEarlGreyAppInterface primaryAccountGaiaID];
-                   return primaryAccountGaiaID.length > 0;
+                   NSString* primaryAccountGaiaIDString =
+                       [SigninEarlGreyAppInterface primaryAccountGaiaIDString];
+                   return primaryAccountGaiaIDString.length > 0;
                  }),
              @"Sign in did not complete.");
   GREYWaitForAppToIdle(@"App failed to idle");
 
-  NSString* primaryAccountGaiaID =
-      [SigninEarlGreyAppInterface primaryAccountGaiaID];
+  GaiaId primaryAccountGaiaID = [self primaryAccountGaiaID];
 
   NSString* errorStr = [NSString
       stringWithFormat:@"Unexpected Gaia ID of the signed in user [expected = "
                        @"\"%@\", actual = \"%@\"]",
-                       fakeIdentity.gaiaID, primaryAccountGaiaID];
-  EG_TEST_HELPER_ASSERT_TRUE(
-      [fakeIdentity.gaiaID isEqualToString:primaryAccountGaiaID], errorStr);
+                       fakeIdentity.gaiaId.ToNSString(),
+                       primaryAccountGaiaID.ToNSString()];
+  EG_TEST_HELPER_ASSERT_TRUE(fakeIdentity.gaiaId == primaryAccountGaiaID,
+                             errorStr);
 }
 
 - (void)verifyPrimaryAccountWithEmail:(NSString*)expectedEmail {

@@ -1127,6 +1127,11 @@ int HttpNetworkTransaction::DoCreateStream() {
             enable_ip_based_pooling_for_h2_, enable_alternative_services_,
             net_log_);
   } else {
+    // TODO(crbug.com/414173943): Remove this histogram timer once we confirm
+    // that time consumed by this method is different or the same for the HEv3
+    // and non-HEv3 paths.
+    base::ScopedUmaHistogramTimer histogram_timer(
+        "Net.NetworkTransaction.RequestStreamCpuTime");
     stream_request_ = session_->http_stream_factory()->RequestStream(
         *request_, priority_, /*allowed_bad_certs=*/observed_bad_certs_, this,
         enable_ip_based_pooling_for_h2_, enable_alternative_services_,
@@ -1240,6 +1245,10 @@ int HttpNetworkTransaction::DoInitStream() {
   next_state_ = STATE_INIT_STREAM_COMPLETE;
 
   initialize_stream_start_time_ = base::TimeTicks::Now();
+  // Reset `initialize_stream_end_time_` to prevent an inconsistent state in
+  // case that `DoInitStream()` is called multiple times.
+  initialize_stream_end_time_ = base::TimeTicks();
+
   int rv = stream_->InitializeStream(can_send_early_data_, priority_, net_log_,
                                      io_callback_);
 
@@ -1435,20 +1444,6 @@ int HttpNetworkTransaction::BuildRequestHeaders(
   if (features::kIpPrivacyAddHeaderToProxiedRequests.Get() &&
       is_proxied_request) {
     request_headers_.SetHeader("IP-Protection", "1");
-  }
-
-  if (bool is_prt_eligible =
-          features::kEnableProbabilisticRevealTokensForNonProxiedRequests
-              .Get() ||
-          is_proxied_request;
-      features::kProbabilisticRevealTokensAddHeaderToProxiedRequests.Get() &&
-      is_prt_eligible) {
-    if (std::optional<std::string> maybe_prt_header_value =
-            proxy_info_.prt_header_value();
-        maybe_prt_header_value.has_value()) {
-      request_headers_.SetHeader("Sec-Probabilistic-Reveal-Token",
-                                 std::move(maybe_prt_header_value.value()));
-    }
   }
 
   request_headers_.MergeFrom(request_->extra_headers);
@@ -2450,6 +2445,7 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
   }
 
   if (result == OK) {
+    CHECK(stream_);
     base::UmaHistogramEnumeration(
         base::StrCat({
             "Net.NetworkTransaction.NegotiatedProtocol",
@@ -2471,12 +2467,12 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
         create_stream_end_time_ - create_stream_start_time_;
 
     const std::string_view histogram_base_name =
-        ForWebSocketHandshake() ? "CreateWebSocketStreamTime"
-                                : "CreateHttpStreamTime";
+        ForWebSocketHandshake() ? "CreateWebSocketStreamTime2"
+                                : "CreateHttpStreamTime2";
     const std::string_view host_suffix =
         IsGoogleHostWithAlpnH3(url_.host()) ? ".GoogleHost" : "";
     const std::string_view protocol_suffix =
-        NegotiatedProtocolToHistogramSuffix(negotiated_protocol_);
+        NegotiatedProtocolToHistogramSuffixCoalesced(negotiated_protocol_);
     std::string histogram_name =
         base::StrCat({"Net.NetworkTransaction.", histogram_base_name,
                       host_suffix, ".", protocol_suffix});
@@ -2498,8 +2494,30 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
     if (stream_request_completion_details_->session_source.has_value()) {
       base::UmaHistogramEnumeration(
           base::StrCat(
-              {"Net.NetworkTransaction.SessionSource.", protocol_suffix}),
+              {"Net.NetworkTransaction.SessionSource2.", protocol_suffix}),
           *stream_request_completion_details_->session_source);
+    }
+
+    // Record HttpStream creation time per new/existing stream/session.
+    // TODO(crbug.com/414173943): Remove these histograms after we confirm
+    // there is no difference between the HEv3 and the non-HEv3 paths.
+    if (!ForWebSocketHandshake()) {
+      auto is_existing = [&]() {
+        if (negotiated_protocol_ == NextProto::kProtoUnknown ||
+            negotiated_protocol_ == NextProto::kProtoHTTP11) {
+          // For HTTP/1.1 streams, `IsConnectionReused()` actually means whether
+          // the underlying socket is idle (existing) or fresh (new).
+          return stream_->IsConnectionReused();
+        }
+        CHECK(stream_request_completion_details_->session_source.has_value());
+        return *stream_request_completion_details_->session_source ==
+               SessionSource::kExisting;
+      };
+      base::UmaHistogramTimes(
+          base::StrCat({"Net.NetworkTransaction.", protocol_suffix,
+                        "StreamCreationTime.",
+                        is_existing() ? "Existing" : "New"}),
+          create_time);
     }
   } else {
     base::UmaHistogramSparse("Net.NetworkTransaction.StreamRequestErrorCode2",

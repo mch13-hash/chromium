@@ -32,6 +32,7 @@
 #import "ios/chrome/browser/location_bar/ui_bundled/fakebox_buttons_snapshot_provider.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_constants.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_metrics.h"
+#import "ios/chrome/browser/location_bar/ui_bundled/location_bar_placeholder_type.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_steady_view.h"
 #import "ios/chrome/browser/omnibox/public/omnibox_constants.h"
 #import "ios/chrome/browser/omnibox/ui/text_field_view_containing.h"
@@ -85,7 +86,8 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
 
 }  // namespace
 
-@interface LocationBarViewController () <UIContextMenuInteractionDelegate,
+@interface LocationBarViewController () <TextFieldViewContainingHeightDelegate,
+                                         UIContextMenuInteractionDelegate,
                                          UIIndirectScribbleInteractionDelegate>
 // The injected edit view.
 @property(nonatomic, strong) UIView<TextFieldViewContaining>* editView;
@@ -173,6 +175,7 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
 - (void)setEditView:(UIView<TextFieldViewContaining>*)editView {
   DCHECK(!self.editView);
   _editView = editView;
+  _editView.heightDelegate = self;
   _textField = editView.textFieldView;
 }
 
@@ -364,6 +367,10 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
         _defaultSearchEngineIconView,
         CGSizeMake(kOmniboxLeadingImageSize + 12.0f, kOmniboxLeadingImageSize));
   }
+
+  if (IsProactiveSuggestionsFrameworkEnabled()) {
+    _locationBarSteadyView.pageActionMenuHandler = self.pageActionMenuHandler;
+  }
 }
 
 #pragma mark - FullscreenUIElement
@@ -374,6 +381,9 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
   self.locationBarSteadyView.trailingButton.alpha = alphaValue;
   self.locationBarSteadyView.badgesContainerView.placeholderView.alpha =
       alphaValue;
+  if (IsProactiveSuggestionsFrameworkEnabled() && !self.incognito) {
+    self.locationBarSteadyView.badgesContainerView.alpha = alphaValue;
+  }
   BOOL badgeViewShouldCollapse = progress <= kFullscreenProgressThreshold;
   [self.locationBarSteadyView
       setFullScreenCollapsedMode:badgeViewShouldCollapse];
@@ -454,7 +464,7 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
 }
 
 - (BOOL)canShowLargeContextualPanelEntrypoint {
-  // TODO(crbug.com/330701617): Add actual checks when implementing badge view
+  // TODO(crbug.com/445786272): Add actual checks when implementing badge view
   // loud moment blocking (check might need to be in the actual view).
   return !self.locationBarSteadyView.hidden;
 }
@@ -940,9 +950,10 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
         (UIContextMenuConfiguration*)configuration {
   // Use the location bar's container view because that's the view that has the
   // background color and corner radius.
-  return [[UITargetedPreview alloc]
-      initWithView:self.view.superview
-        parameters:[[UIPreviewParameters alloc] init]];
+  UIPreviewParameters* previewParameters = [[UIPreviewParameters alloc] init];
+  previewParameters.backgroundColor = self.view.superview.backgroundColor;
+  return [[UITargetedPreview alloc] initWithView:self.view.superview
+                                      parameters:previewParameters];
 }
 
 - (UIContextMenuConfiguration*)contextMenuInteraction:
@@ -1098,22 +1109,26 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
 - (void)updatePlaceholderView {
   switch (_placeholderType) {
     case LocationBarPlaceholderType::kNone:
-      self.locationBarSteadyView.placeholderView = nil;
+      [self.locationBarSteadyView setPlaceholderView:nil type:_placeholderType];
       break;
     case LocationBarPlaceholderType::kLensOverlay:
-      self.locationBarSteadyView.placeholderView = _lensOverlayPlaceholderView;
+      [self.locationBarSteadyView setPlaceholderView:_lensOverlayPlaceholderView
+                                                type:_placeholderType];
       break;
     case LocationBarPlaceholderType::kPageActionMenu:
       CHECK(IsPageActionMenuEnabled());
-      self.locationBarSteadyView.placeholderView =
-          _pageActionMenuEntrypointView;
+      [self.locationBarSteadyView
+          setPlaceholderView:_pageActionMenuEntrypointView
+                        type:_placeholderType];
       if (!_pageActionMenuEntrypointView.newBadgeVisible) {
         _pageActionMenuEntrypointView.newBadgeVisible =
             [self.delegate shouldShowAIHubNewFeatureBadge];
       }
       break;
     case LocationBarPlaceholderType::kDefaultSearchEngineIcon:
-      self.locationBarSteadyView.placeholderView = _defaultSearchEngineIconView;
+      [self.locationBarSteadyView
+          setPlaceholderView:_defaultSearchEngineIconView
+                        type:_placeholderType];
       break;
   }
 }
@@ -1139,6 +1154,14 @@ const CGFloat kShareIconBalancingHeightPadding = 1;
       lens::ContainerPresentationType::kFullscreenCover;
   [_lensOverlayPlaceholderView
       setLensOverlayActive:shouldIndicateLensInUse && _lensOverlayVisible];
+}
+
+#pragma mark - TextFieldViewContainingHeightDelegate
+
+- (void)textFieldViewContaining:(UIView<TextFieldViewContaining>*)sender
+                didChangeHeight:(CGFloat)height {
+  [self.delegate locationBarViewController:self
+                  didChangeEditStateHeight:height];
 }
 
 @end

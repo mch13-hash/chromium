@@ -94,7 +94,7 @@ EnclaveAuthenticatorTestBase::EnclaveAuthenticatorTestBase()
 #endif
       recovery_key_store_(FakeRecoveryKeyStore::New()),
       fake_hw_provider_(
-          std::make_unique<crypto::ScopedFakeUnexportableKeyProvider>()) {
+          std::make_unique<WebAuthnScopedFakeUnexportableKeyProvider>()) {
 #if BUILDFLAG(IS_WIN)
   fake_webauthn_dll_->set_available(false);
   biometrics_override_ =
@@ -332,11 +332,14 @@ void EnclaveAuthenticatorTestBase::SimulateSuccessfulGpmPinCreation(
           browser()->profile());
   ASSERT_TRUE(enclave_manager);
 
-  enclave_manager->StoreKeys(
-      kSyncGaiaId,
-      {std::vector<uint8_t>(std::begin(kSecurityDomainSecret),
-                            std::end(kSecurityDomainSecret))},
-      /*last_key_version=*/0);
+  {
+    auto store_keys_lock = enclave_manager->GetStoreKeysLock();
+    enclave_manager->StoreKeys(
+        kSyncGaiaId,
+        {std::vector<uint8_t>(std::begin(kSecurityDomainSecret),
+                              std::end(kSecurityDomainSecret))},
+        /*last_key_version=*/0);
+  }
 
   base::test::TestFuture<bool> add_device_future;
   enclave_manager->AddDeviceAndPINToAccount(

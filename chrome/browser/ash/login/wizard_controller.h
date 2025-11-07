@@ -105,7 +105,7 @@ class DemoSetupController;
 class ErrorScreen;
 struct Geoposition;
 class KioskApp;
-class SimpleGeolocationProvider;
+class SystemLocationProvider;
 class TimeZoneProvider;
 struct TimeZoneResponseData;
 enum class KioskAppType;
@@ -224,7 +224,7 @@ class WizardController : public OobeUI::Observer {
   BaseScreen* current_screen() const { return current_screen_; }
 
   // Returns true if a given screen exists.
-  bool HasScreen(OobeScreenId screen_id);
+  bool HasScreen(OobeScreenId screen_id) const;
 
   // Returns a given screen. Creates it lazily.
   BaseScreen* GetScreen(OobeScreenId screen_id);
@@ -544,7 +544,7 @@ class WizardController : public OobeUI::Observer {
   void OnTimezoneResolved(std::unique_ptr<TimeZoneResponseData> timezone,
                           bool server_error);
 
-  // Called from SimpleGeolocationProvider when location is resolved.
+  // Called from SystemLocationProvider when location is resolved.
   void OnLocationResolved(const Geoposition& position,
                           bool server_error,
                           const base::TimeDelta elapsed);

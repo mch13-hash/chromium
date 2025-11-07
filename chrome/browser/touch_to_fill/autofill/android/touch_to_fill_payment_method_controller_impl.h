@@ -6,10 +6,12 @@
 #define CHROME_BROWSER_TOUCH_TO_FILL_AUTOFILL_ANDROID_TOUCH_TO_FILL_PAYMENT_METHOD_CONTROLLER_IMPL_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/android/scoped_java_ref.h"
 #include "base/containers/span.h"
+#include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/touch_to_fill/autofill/android/touch_to_fill_payment_method_controller.h"
 #include "components/autofill/android/touch_to_fill_keyboard_suppressor.h"
@@ -19,7 +21,12 @@
 
 namespace autofill {
 
+namespace payments {
+struct BnplIssuerContext;
+}  // namespace payments
+
 class BnplIssuer;
+struct BnplTosModel;
 class ContentAutofillClient;
 class Iban;
 class LoyaltyCard;
@@ -55,18 +62,23 @@ class TouchToFillPaymentMethodControllerImpl
                         base::span<const LoyaltyCard> affiliated_loyalty_cards,
                         base::span<const LoyaltyCard> all_loyalty_cards,
                         bool first_time_usage) override;
-  bool UpdateBnplPaymentMethod(std::optional<uint64_t> extracted_amount,
+  bool UpdateBnplPaymentMethod(std::optional<int64_t> extracted_amount,
                                bool is_amount_supported_by_any_issuer) override;
   bool ShowProgressScreen(std::unique_ptr<TouchToFillPaymentMethodView> view,
-                          base::WeakPtr<TouchToFillDelegate> delegate) override;
+                          base::OnceClosure cancel_callback) override;
   bool ShowBnplIssuers(
-      base::WeakPtr<TouchToFillDelegate> delegate,
-      base::span<const BnplIssuer> bnpl_issuers_to_suggest) override;
+      base::span<const payments::BnplIssuerContext> bnpl_issuer_contexts,
+      const std::string& app_locale,
+      base::OnceCallback<void(BnplIssuer)> selected_issuer_callback,
+      base::OnceClosure cancel_callback) override;
   bool ShowErrorScreen(std::unique_ptr<TouchToFillPaymentMethodView> view,
-                       base::WeakPtr<TouchToFillDelegate> delegate,
                        const std::u16string& title,
                        const std::u16string& description) override;
+  bool ShowBnplIssuerTos(BnplTosModel bnpl_tos_model,
+                         base::OnceClosure accept_callback,
+                         base::OnceClosure cancel_callback) override;
   void Hide() override;
+  void SetVisible(bool visible) override;
 
   // content::WebContentsObserver:
   void WebContentsDestroyed() override;
@@ -86,13 +98,18 @@ class TouchToFillPaymentMethodControllerImpl
   void CreditCardSuggestionSelected(JNIEnv* env,
                                     const std::string& unique_id,
                                     bool is_virtual) override;
+  void BnplSuggestionSelected(JNIEnv* env,
+                              std::optional<int64_t> extracted_amount) override;
   void LocalIbanSuggestionSelected(JNIEnv* env,
                                    const std::string& guid) override;
   void ServerIbanSuggestionSelected(JNIEnv* env, long instrument_id) override;
   void LoyaltyCardSuggestionSelected(JNIEnv* env,
                                      const LoyaltyCard& loyalty_card) override;
   void OnErrorOkPressed(JNIEnv* env) override;
-  int GetJavaResourceId(int native_resource_id) override;
+  void OnBnplIssuerSuggestionSelected(JNIEnv* env,
+                                      const std::string& issuer_id) override;
+  void OnBnplTosAccepted(JNIEnv* env) override;
+  int GetJavaResourceId(int native_resource_id) const override;
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject() override;
   void ResetJavaObject();
 

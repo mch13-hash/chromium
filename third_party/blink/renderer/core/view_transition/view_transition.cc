@@ -51,14 +51,18 @@
 
 namespace blink {
 
+// static
+int ViewTransition::next_id_ = 0;
+
 ViewTransition::ScopedPauseRendering::ScopedPauseRendering(
-    const Element& element) {
+    const Element& element,
+    bool has_document_scope) {
   const Document& document = element.GetDocument();
   if (!document.GetFrame() || !document.GetFrame()->IsLocalRoot()) {
     return;
   }
 
-  if (!element.IsDocumentElement()) {
+  if (!has_document_scope) {
     return;
   }
 
@@ -313,6 +317,12 @@ bool ViewTransition::AdvanceTo(State state) {
       << "from " << StateToString(state_) << " to " << StateToString(state);
   DCHECK(CanAdvanceTo(state)) << "Current state " << static_cast<int>(state_)
                               << " new state " << static_cast<int>(state);
+
+  if (state == State::kCapturing || state_ == State::kCapturing) {
+    DCHECK(style_tracker_);
+    style_tracker_->InvalidateBackdropFilterCompositingProperties();
+  }
+
   bool was_initial = state_ == State::kInitial;
   state_ = state;
   if (!was_initial && IsTerminalState(state_)) {
@@ -522,7 +532,6 @@ void ViewTransition::ProcessCurrentState() {
 
       case State::kCaptured: {
         style_tracker_->CaptureResolved();
-
         if (creation_type_ == CreationType::kForSnapshot) {
           DCHECK(transition_state_callback_);
           ViewTransitionState view_transition_state =
@@ -644,8 +653,10 @@ void ViewTransition::ProcessCurrentState() {
           break;
         }
 
-        if (style_tracker_->HasActiveAnimations())
+        if (style_tracker_->HasActiveAnimations() ||
+            wait_until_pending_promise_count_ > 0) {
           break;
+        }
 
         // Post a task to run the next state (cleanup) outside of the current
         // lifecycle update.
@@ -775,12 +786,24 @@ void ViewTransition::ContextDestroyed() {
 void ViewTransition::NotifyCaptureFinished(
     const std::unordered_map<viz::ViewTransitionElementResourceId, gfx::RectF>&
         capture_rects) {
+  if (state_ == State::kCapturing) {
+    style_tracker_->SetCaptureRectsFromCompositor(capture_rects);
+  } else {
+    DCHECK(IsTerminalState(state_));
+  }
+
+  // Inform the delegate that the transition has been captured. Once all
+  // flight transitions have been captured, processing the next step will resume
+  // in creation order ensure deterministic behavior with DOM callbacks. The
+  // onus is on the developer in the case of asynchronous callbacks.
+  delegate_->OnTransitionCaptured(this);
+}
+
+void ViewTransition::OnCapturePhaseComplete() {
   if (state_ != State::kCapturing) {
     DCHECK(IsTerminalState(state_));
     return;
   }
-
-  style_tracker_->SetCaptureRectsFromCompositor(capture_rects);
   bool process_next_state = AdvanceTo(State::kCaptured);
   DCHECK(process_next_state);
   ProcessCurrentState();
@@ -805,16 +828,14 @@ void ViewTransition::NotifyDOMCallbackFinished(bool success) {
 
 bool ViewTransition::NeedsViewTransitionEffectNode(
     const LayoutObject& object) const {
-  // The scope always needs an effect node, even if the scope element is not a
-  // participant in the transition. The reason for this is so that we can place
-  // the effect node for the ::view-transition pseudo-element as a sibling of
-  // the scope's effect. For a document transition, the scope's effect node is
-  // associated with the LayoutView rather than the document element.
-  if (IsA<LayoutView>(object)) {
-    return has_document_scope_ && !IsTerminalState(state_);
+  if (IsTerminalState(state_)) {
+    return false;
   }
-  if (!has_document_scope_ && object == scope_->GetLayoutObject()) {
-    return !IsTerminalState(state_);
+
+  // For a document transition, the scope's effect node is associated with the
+  // LayoutView rather than the document element.
+  if (IsA<LayoutView>(object)) {
+    return has_document_scope_;
   }
 
   // Otherwise check if the layout object has a transition element.
@@ -995,7 +1016,7 @@ void ViewTransition::PauseRendering() {
   if (!document_->GetPage() || !document_->View())
     return;
 
-  rendering_paused_scope_.emplace(*scope_);
+  rendering_paused_scope_.emplace(*scope_, has_document_scope_);
   document_->GetPage()->GetChromeClient().UnregisterFromCommitObservation(this);
 
   if (has_document_scope_ &&
@@ -1174,6 +1195,18 @@ void ViewTransition::WillExitGetComputedStyleScope() {
 void ViewTransition::InvalidateInternalPseudoStyle() {
   if (style_tracker_) {
     style_tracker_->InvalidateInternalPseudoStyle();
+  }
+}
+
+void ViewTransition::IncrementWaitUntilPromises() {
+  ++wait_until_pending_promise_count_;
+}
+
+void ViewTransition::DecrementWaitUntilPromises() {
+  CHECK_GT(wait_until_pending_promise_count_, 0);
+  // If we reach 0, then schedule an animation so that we process the animation.
+  if (--wait_until_pending_promise_count_ == 0) {
+    document_->View()->ScheduleAnimation();
   }
 }
 

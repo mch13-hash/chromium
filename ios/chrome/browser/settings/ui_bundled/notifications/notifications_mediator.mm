@@ -269,7 +269,6 @@
   detailItem.accessibilityIdentifier = accessibilityIdentifier;
   detailItem.iconImage = symbol;
   detailItem.iconTintColor = tint;
-  detailItem.iconCornerRadius = kColorfulBackgroundSymbolCornerRadius;
   detailItem.iconBackgroundColor = backgroundColor;
 
   return detailItem;
@@ -415,7 +414,7 @@
           prefs::kSendTabNotificationsPreviouslyDisabled) &&
       clientEnabled) {
     pushNotificationService->SetPreference(
-        _gaiaID.ToNSString(), PushNotificationClientId::kSendTab, true);
+        _gaiaID, PushNotificationClientId::kSendTab, true);
     // Refresh enabled status in DeviceInfo.
     _deviceInfoSyncService->RefreshLocalDeviceInfo();
   }
@@ -427,7 +426,7 @@
 - (void)disablePreferenceFor:(PushNotificationClientId)clientID {
   PushNotificationService* service =
       GetApplicationContext()->GetPushNotificationService();
-  service->SetPreference(_gaiaID.ToNSString(), clientID, false);
+  service->SetPreference(_gaiaID, clientID, false);
 }
 
 // Returns the TableViewSwitchItem for the given `clientId`.

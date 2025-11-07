@@ -305,6 +305,10 @@ void NavigationApi::UpdateForNavigation(HistoryItem& item,
   for (const auto& disposed_entry : disposed_entries) {
     disposed_entry->DispatchEvent(*Event::Create(event_type_names::kDispose));
   }
+
+  if (auto* routemap = RouteMap::Get(window_->document())) {
+    routemap->OnNavigationStart(old_current->url(), currentEntry()->url());
+  }
 }
 
 NavigationHistoryEntry* NavigationApi::GetEntryForRestore(
@@ -752,8 +756,7 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
   ScriptState::Scope scope(script_state);
 
   while (ongoing_navigate_event_) {
-    AbortOngoingNavigation(script_state,
-                           CancelNavigationReason::kNavigateEvent);
+    AbortOngoingNavigation(script_state);
   }
   CHECK(!ongoing_api_method_tracker_);
   if (!window_) {
@@ -776,7 +779,6 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
 
   PromoteUpcomingNavigationToOngoing(key);
 
-  KURL previous_url = currentEntry()->url();
   auto* init = NavigateEventInit::Create();
   V8NavigationType::Enum navigation_type =
       DetermineNavigationType(params->frame_load_type);
@@ -836,8 +838,7 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
   auto* controller = AbortController::Create(script_state);
   init->setSignal(controller->signal());
   init->setDownloadRequest(params->download_filename);
-  if (params->source_element &&
-      params->source_element->GetExecutionContext() == window_) {
+  if (params->source_element) {
     init->setSourceElement(params->source_element);
   }
   init->setHasUAVisualTransition(params->has_ua_visual_transition);
@@ -869,8 +870,7 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
       window_->GetFrame()->ConsumeHistoryUserActivation();
     }
     if (!navigate_event->signal()->aborted()) {
-      AbortOngoingNavigation(script_state,
-                             CancelNavigationReason::kNavigateEvent);
+      AbortOngoingNavigation(script_state);
     }
     return DispatchResult::kAbort;
   }
@@ -882,10 +882,6 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
     navigate_event->MaybeCommitImmediately(script_state);
   } else if (params->event_type != NavigateEventType::kCrossDocument) {
     navigate_event->React(script_state);
-  }
-
-  if (auto* routemap = RouteMap::Get(window_->document())) {
-    routemap->OnNavigationStart(previous_url, params->url);
   }
 
   // Note: we cannot clean up ongoing_navigation_ for cross-document
@@ -913,7 +909,7 @@ void NavigationApi::InformAboutCanceledNavigation(
   if (ongoing_navigate_event_) {
     auto* script_state = ToScriptStateForMainWorld(window_->GetFrame());
     ScriptState::Scope scope(script_state);
-    AbortOngoingNavigation(script_state, reason);
+    AbortOngoingNavigation(script_state);
   }
 
   // If this function is being called as part of frame detach, also cleanup any
@@ -969,7 +965,7 @@ bool NavigationApi::HasNonDroppedOngoingNavigation() const {
   return has_ongoing_intercept && !has_dropped_navigation_;
 }
 
-void NavigationApi::DidFailOngoingNavigation(ScriptValue value) {
+void NavigationApi::DidAbort(ScriptValue value) {
   if (ongoing_api_method_tracker_) {
     ongoing_api_method_tracker_->RejectFinishedPromise(value);
     ongoing_api_method_tracker_ = nullptr;
@@ -1012,16 +1008,13 @@ void NavigationApi::DidFinishOngoingNavigation() {
   }
 }
 
-void NavigationApi::AbortOngoingNavigation(ScriptState* script_state,
-                                           CancelNavigationReason reason) {
+void NavigationApi::AbortOngoingNavigation(ScriptState* script_state) {
   CHECK(ongoing_navigate_event_);
   ScriptValue error = ScriptValue::From(
       script_state,
       MakeGarbageCollected<DOMException>(DOMExceptionCode::kAbortError,
                                          "Navigation was aborted"));
-  ongoing_navigate_event_->Abort(script_state, error, reason);
-  ongoing_navigate_event_ = nullptr;
-  DidFailOngoingNavigation(error);
+  ongoing_navigate_event_->Abort(script_state, error);
 }
 
 int NavigationApi::GetIndexFor(NavigationHistoryEntry* entry) {

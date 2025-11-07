@@ -80,6 +80,7 @@ ci/Dawn Win10 x86 Release (Intel)
 ci/Dawn Win10 x86 Release (NVIDIA)
 ci/Dawn Win11 arm64 Builder
 ci/Dawn Win11 arm64 DEPS Builder
+ci/Dawn Win11 arm64 DEPS Release (Qualcomm Snapdragon X Elite)
 ci/Deterministic Android
 ci/Deterministic Android (dbg)
 ci/Deterministic Fuchsia (dbg)
@@ -139,6 +140,7 @@ ci/Linux FYI Release (AMD RX 5500 XT)
 ci/Linux FYI Release (AMD RX 7600)
 ci/Linux FYI Release (Intel UHD 630)
 ci/Linux FYI Release (Intel UHD 770)
+ci/Linux FYI Release (NVIDIA RTX 4070 Super)
 ci/Linux FYI Release (NVIDIA)
 ci/Linux MSan Builder
 ci/Linux MSan Tests
@@ -243,9 +245,11 @@ ci/Win10 FYI x64 Release (NVIDIA)
 ci/Win10 FYI x64 Release XR Perf (NVIDIA)
 ci/Win10 FYI x86 Release (NVIDIA)
 ci/Win10 Tests x64
+ci/Win10 Tests x64 (dbg)
 ci/Win10 x64 Debug (NVIDIA)
 ci/Win10 x64 Release (NVIDIA)
 ci/Win11 FYI arm64 Release (Qualcomm Adreno 690)
+ci/Win11 FYI arm64 Release (Qualcomm Snapdragon X Elite)
 ci/Win11 FYI x64 Experimental Release (AMD 780M)
 ci/Win11 FYI x64 Experimental Release (AMD 890M)
 ci/Win11 FYI x64 Experimental Release (NVIDIA RTX 4070 Super)
@@ -358,6 +362,7 @@ ci/linux-cfm-rel
 ci/linux-chromeos-archive-rel
 ci/linux-chromeos-dbg
 ci/linux-chromeos-rel
+ci/linux-crossbench
 ci/linux-extended-tracing-rel
 ci/linux-gcc-rel
 ci/linux-oi-rel
@@ -490,7 +495,6 @@ try/chromeos-jacuzzi-rel
 try/chromeos-js-coverage-rel
 try/chromeos-libfuzzer-asan-rel
 try/chromeos-octopus-rel
-try/chromium_presubmit
 try/compile-size
 try/fuchsia-angle-try
 try/fuchsia-arm64-cast-receiver-rel
@@ -520,12 +524,14 @@ try/gpu-fyi-try-linux-amd-890m-exp
 try/gpu-fyi-try-linux-amd-rel
 try/gpu-fyi-try-linux-amd-rx-7600-rel
 try/gpu-fyi-try-linux-intel-arc-140v-exp
+try/gpu-fyi-try-linux-intel-arc-b570-exp
 try/gpu-fyi-try-linux-intel-exp
 try/gpu-fyi-try-linux-intel-rel
 try/gpu-fyi-try-linux-intel-uhd770-rel
 try/gpu-fyi-try-linux-nvidia-dbg
 try/gpu-fyi-try-linux-nvidia-exp
 try/gpu-fyi-try-linux-nvidia-rel
+try/gpu-fyi-try-linux-nvidia-rtx-4070-super-rel
 try/gpu-fyi-try-linux-nvidia-tsn
 try/gpu-fyi-try-linux-wayland-amd-rel
 try/gpu-fyi-try-linux-wayland-intel-rel
@@ -557,9 +563,11 @@ try/gpu-fyi-try-win11-amd-rel-64
 try/gpu-fyi-try-win11-nvidia-4070-exp-64
 try/gpu-fyi-try-win11-nvidia-4070-rel-64
 try/gpu-fyi-try-win11-qualcomm-rel-64
+try/gpu-fyi-try-win11-qualcomm-snapdragon-x-elite-rel-64
 try/gpu-fyi-try-win11-x64-amd-780m-exp
 try/gpu-fyi-try-win11-x64-amd-890m-exp
 try/gpu-fyi-try-win11-x64-intel-arc-140v-exp
+try/gpu-fyi-try-win11-x64-intel-arc-b570-exp
 try/gpu-try-android-pixel-2-64
 try/gpu-try-linux-nvidia-rel
 try/gpu-try-mac-amd-retina-dbg
@@ -596,6 +604,7 @@ try/linux-chromeos-compile-dbg
 try/linux-chromeos-dbg
 try/linux-chromeos-rel
 try/linux-clobber-rel
+try/linux-crossbench
 try/linux-dcheck-off-rel
 try/linux-enterprise-companion-try-builder-dbg
 try/linux-enterprise-companion-try-builder-rel
@@ -609,6 +618,7 @@ try/linux-msan-chained-origins-rel
 try/linux-msan-no-origins-rel
 try/linux-oi-rel
 try/linux-perfetto-rel
+try/linux-presubmit
 try/linux-rel
 try/linux-rel-cft
 try/linux-rel-test-selection
@@ -656,6 +666,7 @@ try/mac-skia-alt-arm64-blink-rel
 try/mac-swangle-chromium-try-x64
 try/mac-updater-try-builder-dbg
 try/mac-updater-try-builder-rel
+try/mac-x64-compile-dbg
 try/mac12-arm64-rel
 try/mac12-tests
 try/mac13-arm64-rel

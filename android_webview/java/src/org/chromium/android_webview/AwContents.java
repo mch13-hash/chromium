@@ -151,11 +151,13 @@ import java.lang.annotation.Annotation;
 import java.lang.ref.WeakReference;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.WeakHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -173,6 +175,7 @@ import java.util.regex.Pattern;
 @Lifetime.WebView
 @JNINamespace("android_webview")
 public class AwContents implements SmartClipProvider {
+
     private static final String TAG = "AwContents";
     private static final boolean TRACE = false;
     private static final int NO_WARN = 0;
@@ -191,6 +194,10 @@ public class AwContents implements SmartClipProvider {
 
     private static final String SAMSUNG_WORKAROUND_BASE_URL = "email://";
     private static final int SAMSUNG_WORKAROUND_DELAY = 200;
+
+    private static final Pattern BAD_HEADER_CHAR = Pattern.compile("[\u0000\r\n]");
+    private static final String BAD_HEADER_MSG =
+            "HTTP headers must not contain null, CR, or NL characters. ";
 
     private static int sLastId;
     // Unique id given to each AwContents object, starting from 1.
@@ -374,7 +381,7 @@ public class AwContents implements SmartClipProvider {
     private WebContentsInternalsHolder mWebContentsInternalsHolder;
     private NavigationController mNavigationController;
     private final AwContentsClient mContentsClient;
-    private AwNavigationClient mNavigationClient;
+    private final List<AwNavigationListener> mNavigationClients = new ArrayList<>();
     private AwWebContentsObserver mWebContentsObserver;
     private final AwContentsClientBridge mContentsClientBridge;
     private final AwWebContentsDelegateAdapter mWebContentsDelegate;
@@ -800,6 +807,11 @@ public class AwContents implements SmartClipProvider {
         public void cancelFling() {
             mWebContents.getEventForwarder().cancelFling(SystemClock.uptimeMillis(), false);
         }
+
+        @Override
+        public int getBottomViewportInset() {
+            return mDisplayCutoutController.getBottomImeInset();
+        }
     }
 
     // --------------------------------------------------------------------------------------------
@@ -1119,8 +1131,7 @@ public class AwContents implements SmartClipProvider {
         mViewEventSink = ViewEventSink.from(mWebContents);
         mViewEventSink.setHideKeyboardOnBlur(false);
         SelectionPopupController controller = SelectionPopupController.fromWebContents(webContents);
-        controller.setActionModeCallback(
-                new AwActionModeCallback(mContext, this, webContents, selectionActionMenuDelegate));
+        controller.setActionModeCallback(new AwActionModeCallback(mContext, this, webContents));
         controller.setSelectionClient(SelectionClient.createSmartSelectionClient(webContents));
         controller.setSelectionActionMenuDelegate(selectionActionMenuDelegate);
         AwSelectionDropdownMenuDelegate.maybeSetWebViewDropdownSelectionMenuDelegate(controller);
@@ -1152,7 +1163,7 @@ public class AwContents implements SmartClipProvider {
             mAutofillProvider.setWebContents(mWebContents);
         }
         selectionActionMenuDelegate.setAutofillSelectionMenuItemHelper(
-                new AutofillSelectionMenuItemHelper(mContext, mAutofillProvider));
+                new AutofillSelectionMenuItemHelper(mAutofillProvider));
         AwContentsJni.get().initializeAndroidAutofill(mNativeAwContents);
     }
 
@@ -1854,8 +1865,7 @@ public class AwContents implements SmartClipProvider {
         if (isDestroyed(NO_WARN)) return;
         if (prefetchParameters != null) {
             IllegalArgumentException exception =
-                    AwBrowserContext.validateAdditionalHeaders(
-                            prefetchParameters.getAdditionalHeaders());
+                    validateAdditionalHeaders(prefetchParameters.getAdditionalHeaders());
             if (exception != null) {
                 throw exception;
             }
@@ -2226,16 +2236,113 @@ public class AwContents implements SmartClipProvider {
         }
 
         LoadUrlParams params = new LoadUrlParams(url, PageTransition.TYPED);
-        if (additionalHttpHeaders != null) {
+        if (additionalHttpHeaders != null && !additionalHttpHeaders.isEmpty()) {
+            // Perform partial validation, which has been part of the WebView API behavior for a
+            // long time.
             IllegalArgumentException exception =
-                    AwBrowserContext.validateAdditionalHeaders(additionalHttpHeaders);
+                    validateAdditionalHeadersForLoadUrl(additionalHttpHeaders);
             if (exception != null) {
                 throw exception;
             }
-            params.setExtraHeaders(new HashMap<String, String>(additionalHttpHeaders));
+            // Silently reject invalid values to maintain API compatibility.
+            // See https://crbug.com/450927905.
+            Map<String, String> filteredHeaders = removeInvalidHttpHeaders(additionalHttpHeaders);
+            RecordHistogram.recordCount100Histogram(
+                    "Android.WebView.LoadUrl.RejectedHeaderCount",
+                    additionalHttpHeaders.size() - filteredHeaders.size());
+            params.setExtraHeaders(filteredHeaders);
         }
 
         loadUrl(params);
+    }
+
+    /**
+     * Check if any of the provided HTTP header key-value pairs contains invalid characters.
+     *
+     * <p>Warning: This method <em>only</em> checks for null, carriage return and line feed. Header
+     * names are significantly more restricted than the check performed by this function, so it only
+     * exists for historic compatibility.
+     *
+     * <p>Use {@link #validateAdditionalHeaders(Map)} instead if you want to correctly validate HTTP
+     * header names and values.
+     *
+     * @param headers Map of HTTP header name-value pairs.
+     * @return An exception if validation fails, or {@code null} otherwise.
+     * @see #validateAdditionalHeaders(Map)
+     */
+    private static @Nullable IllegalArgumentException validateAdditionalHeadersForLoadUrl(
+            Map<String, String> headers) {
+        if (headers == null) return null;
+        for (Map.Entry<String, String> header : headers.entrySet()) {
+            String headerName = header.getKey();
+            String headerValue = header.getValue();
+            if (headerName != null && BAD_HEADER_CHAR.matcher(headerName).find()) {
+                return new IllegalArgumentException(
+                        BAD_HEADER_MSG + "Invalid header name '" + headerName + "'.");
+            }
+            if (headerValue != null && BAD_HEADER_CHAR.matcher(headerValue).find()) {
+                return new IllegalArgumentException(
+                        BAD_HEADER_MSG
+                                + "Header '"
+                                + headerName
+                                + "' has invalid value '"
+                                + headerValue
+                                + "'");
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if any of the provided HTTP header key-value pairs contains invalid characters.
+     *
+     * <p>This method uses the native validation from the //net layer.
+     *
+     * @param headers Map of HTTP header name-value pairs.
+     * @return An exception if validation fails, or {@code null} otherwise.
+     */
+    /*package*/ static @Nullable IllegalArgumentException validateAdditionalHeaders(
+            Map<String, String> headers) {
+        if (headers == null) return null;
+        for (Map.Entry<String, String> header : headers.entrySet()) {
+            String headerName = header.getKey();
+            String headerValue = header.getValue();
+            if (headerName == null || !AwBrowserContext.isValidHttpHeaderName(headerName)) {
+                return new IllegalArgumentException(
+                        BAD_HEADER_MSG + "Invalid header name '" + headerName + "'.");
+            }
+            if (headerValue == null || !AwBrowserContext.isValidHttpHeaderValue(headerValue)) {
+                return new IllegalArgumentException(
+                        BAD_HEADER_MSG
+                                + "Header '"
+                                + headerName
+                                + "' has invalid value '"
+                                + headerValue
+                                + "'");
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Filters the input map of HTTP header key-values to only retain the valid header entries.
+     *
+     * <p>Returns a new map instance and does not modify the input.
+     */
+    private static @NonNull Map<String, String> removeInvalidHttpHeaders(
+            @NonNull Map<String, String> originalHeaders) {
+        Map<String, String> filteredHeaders = new HashMap<>(originalHeaders.size());
+        for (Entry<String, String> entry : originalHeaders.entrySet()) {
+            String name = entry.getKey();
+            String value = entry.getValue();
+            if (name != null
+                    && value != null
+                    && AwBrowserContext.isValidHttpHeaderName(name)
+                    && AwBrowserContext.isValidHttpHeaderValue(value)) {
+                filteredHeaders.put(name, value);
+            }
+        }
+        return filteredHeaders;
     }
 
     /** WebView.loadUrl. */
@@ -3720,12 +3827,8 @@ public class AwContents implements SmartClipProvider {
         return mDisplayModeController.getDisplayMode();
     }
 
-    public AwNavigationClient getNavigationClient() {
-        return mNavigationClient;
-    }
-
-    public void setNavigationClient(AwNavigationClient navigationClient) {
-        mNavigationClient = navigationClient;
+    public List<AwNavigationListener> getNavigationClients() {
+        return mNavigationClients;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -4283,14 +4386,14 @@ public class AwContents implements SmartClipProvider {
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                float frame_rate =
+                float frameRate =
                         mSizeIsSmallForFrameRateHints
                                 ? View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT
                                 : View.REQUESTED_FRAME_RATE_CATEGORY_HIGH;
                 if (mPreferredFrameIntervalNanos > 0) {
-                    frame_rate = (float) 1e9 / mPreferredFrameIntervalNanos;
+                    frameRate = (float) 1e9 / mPreferredFrameIntervalNanos;
                 }
-                mContainerView.setRequestedFrameRate(frame_rate);
+                mContainerView.setRequestedFrameRate(frameRate);
                 float velocity =
                         AwContentsJni.get().getVelocityInPixelsPerSecond(mNativeAwContents);
                 mContainerView.setFrameContentVelocity(velocity);
@@ -4316,7 +4419,7 @@ public class AwContents implements SmartClipProvider {
                 }
             }
 
-            boolean did_draw =
+            boolean didDraw =
                     AwContentsJni.get()
                             .onDraw(
                                     mNativeAwContents,
@@ -4335,12 +4438,12 @@ public class AwContents implements SmartClipProvider {
                 TraceEvent.instant("DrawBackgroundColor");
                 canvas.drawColor(getEffectiveBackgroundColor());
             }
-            if (did_draw
+            if (didDraw
                     && canvas.isHardwareAccelerated()
                     && !ForceAuxiliaryBitmapRendering.sResult) {
-                did_draw = mDrawFunctor.requestDraw(canvas);
+                didDraw = mDrawFunctor.requestDraw(canvas);
             }
-            if (did_draw) {
+            if (didDraw) {
                 int scrollXDiff = mContainerView.getScrollX() - scrollX;
                 int scrollYDiff = mContainerView.getScrollY() - scrollY;
                 canvas.translate(-scrollXDiff, -scrollYDiff);

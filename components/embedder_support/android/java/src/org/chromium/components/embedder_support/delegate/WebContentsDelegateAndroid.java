@@ -17,6 +17,7 @@ import org.chromium.base.JniOnceCallback;
 import org.chromium.blink.mojom.DisplayMode;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.navigation_controller.UserAgentOverrideOption;
 import org.chromium.content_public.common.ResourceRequestBody;
@@ -77,7 +78,7 @@ public class WebContentsDelegateAndroid {
     }
 
     @CalledByNative
-    public void onUpdateUrl(GURL url) {}
+    public void onUpdateTargetUrl(GURL url) {}
 
     @CalledByNative
     public boolean takeFocus(boolean reverse) {
@@ -110,23 +111,22 @@ public class WebContentsDelegateAndroid {
     }
 
     /**
-     * Report a form resubmission. The overwriter of this function should eventually call
-     * either of NavigationController.ContinuePendingReload or
-     * NavigationController.CancelPendingReload.
+     * Report a form resubmission. The overwriter of this function should eventually call either of
+     * NavigationController.ContinuePendingReload or NavigationController.CancelPendingReload.
      */
     @CalledByNative
     public void showRepostFormWarningDialog() {}
 
     @CalledByNative
     public void enterFullscreenModeForTab(
-            long requestingFrame,
+            RenderFrameHost renderFrameHost,
             boolean prefersNavigationBar,
             boolean prefersStatusBar,
             long displayId) {}
 
     @CalledByNative
     public void fullscreenStateChangedForTab(
-            long requestingFrame,
+            RenderFrameHost renderFrameHost,
             boolean prefersNavigationBar,
             boolean prefersStatusBar,
             long displayId) {}
@@ -161,19 +161,25 @@ public class WebContentsDelegateAndroid {
         return false;
     }
 
-    /** @return The height of the top controls in physical pixels (not DIPs). */
+    /**
+     * @return The height of the top controls in physical pixels (not DIPs).
+     */
     @CalledByNative
     public int getTopControlsHeight() {
         return 0;
     }
 
-    /** @return The minimum visible height the top controls can have in physical pixels (not DIPs). */
+    /**
+     * @return The minimum visible height the top controls can have in physical pixels (not DIPs).
+     */
     @CalledByNative
     public int getTopControlsMinHeight() {
         return 0;
     }
 
-    /** @return The height of the bottom controls in physical pixels (not DIPs). */
+    /**
+     * @return The height of the bottom controls in physical pixels (not DIPs).
+     */
     @CalledByNative
     public int getBottomControlsHeight() {
         return 0;
@@ -181,20 +187,24 @@ public class WebContentsDelegateAndroid {
 
     /**
      * @return The minimum visible height the bottom controls can have in physical pixels (not
-     *         DIPs).
+     *     DIPs).
      */
     @CalledByNative
     public int getBottomControlsMinHeight() {
         return 0;
     }
 
-    /** @return Whether or not the browser controls height changes should be animated. */
+    /**
+     * @return Whether or not the browser controls height changes should be animated.
+     */
     @CalledByNative
     public boolean shouldAnimateBrowserControlsHeightChanges() {
         return false;
     }
 
-    /** @return Whether or not the browser controls resize Blink's view size. */
+    /**
+     * @return Whether or not the browser controls resize Blink's view size.
+     */
     @CalledByNative
     public boolean controlsResizeView() {
         return false;
@@ -202,7 +212,7 @@ public class WebContentsDelegateAndroid {
 
     /**
      * @return If shown, returns the height of the virtual keyboard in physical pixels. Otherwise,
-     *         returns 0.
+     *     returns 0.
      */
     @CalledByNative
     public int getVirtualKeyboardHeight() {

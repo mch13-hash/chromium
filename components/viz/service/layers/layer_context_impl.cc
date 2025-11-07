@@ -17,6 +17,8 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
+#include "base/trace_event/traced_value.h"
+#include "base/trace_event/typed_macros.h"
 #include "base/types/expected_macros.h"
 #include "cc/animation/animation.h"
 #include "cc/animation/animation_host.h"
@@ -720,6 +722,8 @@ void UpdateTileDisplayLayerExtra(const mojom::TileDisplayLayerExtraPtr& extra,
   layer.SetNearestNeighbor(extra->nearest_neighbor);
   layer.SetContentColorUsage(extra->content_color_usage);
   layer.SetRecordedBounds(extra->recorded_bounds);
+  layer.SetProposedTilingScalesForDeletion(
+      extra->proposed_tiling_scales_for_deletion);
 }
 
 base::expected<void, std::string> UpdateLayer(const mojom::Layer& wire,
@@ -889,6 +893,7 @@ base::expected<void, std::string> CreateOrUpdateLayers(
     const std::vector<mojom::LayerPtr>& updates,
     std::optional<std::vector<int32_t>>& layer_order,
     cc::LayerTreeImpl& layers) {
+  TRACE_EVENT1("viz", "CreateOrUpdateLayers", "LayerCount", updates.size());
   if (!layer_order) {
     // No layer list changes. Only update existing layers.
     for (auto& wire : updates) {
@@ -987,8 +992,8 @@ DeserializeTileResource(cc::LayerTreeHostImpl* host_impl,
       /*main_thread_release_callback=*/base::NullCallback(),
       /*evicted_callback=*/base::NullCallback());
 
-  return cc::TileDisplayLayerImpl::TileResource(resource_id, wire.resource.size,
-                                                wire.is_checkered);
+  return cc::TileDisplayLayerImpl::TileResource(resource_id,
+                                                wire.resource.GetSize());
 }
 
 base::expected<cc::TileDisplayLayerImpl::TileContents, std::string>
@@ -1449,22 +1454,12 @@ LayerContextImpl::~LayerContextImpl() {
 
 void LayerContextImpl::BeginFrame(const BeginFrameArgs& args) {
   if (base::FeatureList::IsEnabled(features::kTreeAnimationsInViz)) {
-    // TODO(vmiura): Manage these flags properly.
-    const bool has_damage = true;
     compositor_sink_->SetLayerContextWantsBeginFrames(false);
-    if (!host_impl_->CanDraw()) {
-      return;
-    }
-
-    host_impl_->WillBeginImplFrame(args);
-
-    cc::LayerTreeHostImpl::FrameData frame;
-    frame.begin_frame_ack = BeginFrameAck(args, has_damage);
-    frame.origin_begin_main_frame_args = args;
-    host_impl_->PrepareToDraw(&frame);
-    host_impl_->DrawLayers(&frame);
-    host_impl_->DidDrawAllLayers(frame);
-    host_impl_->DidFinishImplFrame(args);
+    // TODO(zmo): The stage breakdown var is |start_update_display_tree|.
+    // Consider using a difference name, so it works for TreeAnimationsInViz
+    // mode as well.
+    base::TimeTicks start_begin_frame = base::TimeTicks::Now();
+    DoDrawInternal(args, start_begin_frame, /*expects_to_draw=*/false);
   }
 }
 
@@ -1696,6 +1691,7 @@ void LayerContextImpl::UpdateDisplayTree(mojom::LayerTreeUpdatePtr update) {
 
 base::expected<void, std::string> LayerContextImpl::DoUpdateDisplayTree(
     mojom::LayerTreeUpdatePtr update) {
+  TRACE_EVENT0("viz", "LayerContextImpl::DoUpdateDisplayTree");
   cc::LayerTreeImpl& layers = *host_impl_->active_tree();
 
   // We resize all property trees first, as layers and property tree nodes
@@ -1809,14 +1805,18 @@ base::expected<void, std::string> LayerContextImpl::DoUpdateDisplayTree(
   host_impl_->set_send_frame_token_to_embedder(
       update->send_frame_token_to_embedder);
 
-  for (const auto& tiling : update->tilings) {
-    if (cc::LayerImpl* layer = layers.LayerById(tiling->layer_id)) {
-      if (layer->GetLayerType() != cc::mojom::LayerType::kTileDisplay) {
-        return base::unexpected("Invalid tile update");
+  {
+    TRACE_EVENT1("viz", "DeserializeTilings", "TilingCount",
+                 update->tilings.size());
+    for (const auto& tiling : update->tilings) {
+      if (cc::LayerImpl* layer = layers.LayerById(tiling->layer_id)) {
+        if (layer->GetLayerType() != cc::mojom::LayerType::kTileDisplay) {
+          return base::unexpected("Invalid tile update");
+        }
+        RETURN_IF_ERROR(DeserializeTiling(
+            host_impl_.get(), static_cast<cc::TileDisplayLayerImpl&>(*layer),
+            *tiling, /*update_damage=*/false));
       }
-      RETURN_IF_ERROR(DeserializeTiling(
-          host_impl_.get(), static_cast<cc::TileDisplayLayerImpl&>(*layer),
-          *tiling, /*update_damage=*/false));
     }
   }
 
@@ -1894,8 +1894,8 @@ base::expected<void, std::string> LayerContextImpl::DoUpdateDisplayTree(
         return base::unexpected(
             "Invalid transferable resource in UI resource creation");
       }
-      if (ui_resource_request->transferable_resource->size.width() <= 0 ||
-          ui_resource_request->transferable_resource->size.height() <= 0) {
+      if (ui_resource_request->transferable_resource->GetSize().width() <= 0 ||
+          ui_resource_request->transferable_resource->GetSize().height() <= 0) {
         return base::unexpected(
             "Invalid dimensions for transferable UI resource.");
       }
@@ -1954,6 +1954,11 @@ base::expected<void, std::string> LayerContextImpl::DoUpdateDisplayTree(
     // least one EffectNode that was inducing a render surface.
     layers.set_needs_update_draw_properties();
   }
+  // Set this last, making sure renderer side state isn't overwritten by other
+  // updates. As this is a transient property, we should set but not clear it.
+  if (update->full_tree_damaged) {
+    property_trees.set_full_tree_damaged(true);
+  }
 
   // Safe down-cast: AnimationHost is the only subclass of MutatorHost.
   auto* animation_host = static_cast<cc::AnimationHost*>(layers.mutator_host());
@@ -1968,26 +1973,54 @@ void LayerContextImpl::DoDraw(const BeginFrameArgs& begin_frame_args,
   if (base::FeatureList::IsEnabled(features::kTreeAnimationsInViz)) {
     compositor_sink_->SetLayerContextWantsBeginFrames(true);
   } else {
-    if (host_impl_->CanDraw()) {
-      host_impl_->WillBeginImplFrame(begin_frame_args);
+    DoDrawInternal(begin_frame_args, start_update_display_tree,
+                   /*expects_to_draw=*/true);
+  }
+}
 
-      cc::LayerTreeHostImpl::FrameData frame;
-      TreesInVizTiming stage_breakdown;
-      stage_breakdown.start_update_display_tree = start_update_display_tree;
-      const bool has_damage = true;
-      frame.begin_frame_ack = BeginFrameAck(begin_frame_args, has_damage);
-      frame.origin_begin_main_frame_args = begin_frame_args;
-      stage_breakdown.start_prepare_to_draw = base::TimeTicks::Now();
-      host_impl_->PrepareToDraw(&frame);
-      stage_breakdown.start_draw_layers = base::TimeTicks::Now();
-      std::optional<cc::SubmitInfo> submit_info =
-          host_impl_->DrawLayers(&frame);
-      if (submit_info.has_value()) {
-        stage_breakdown.submit_compositor_frame = submit_info->time;
+void LayerContextImpl::DoDrawInternal(const BeginFrameArgs& begin_frame_args,
+                                      base::TimeTicks start_update_display_tree,
+                                      bool expects_to_draw) {
+  TRACE_EVENT0("viz", "LayerContextImpl::DoDrawInternal");
+  if (!host_impl_->CanDraw()) {
+    return;
+  }
+
+  host_impl_->WillBeginImplFrame(begin_frame_args);
+
+  cc::FrameData frame;
+  TreesInVizTiming stage_breakdown;
+  stage_breakdown.start_update_display_tree = start_update_display_tree;
+  // TODO(vmiura): Manage these flags properly.
+  const bool has_damage = true;
+  frame.begin_frame_ack = BeginFrameAck(begin_frame_args, has_damage);
+  frame.origin_begin_main_frame_args = begin_frame_args;
+  stage_breakdown.start_prepare_to_draw = base::TimeTicks::Now();
+  host_impl_->PrepareToDraw(&frame, /*expects_to_draw=*/expects_to_draw);
+
+  // Notifies the client which of the tilings it nominated for deletion are
+  // actually safe to delete. This is done after PrepareToDraw() so that we have
+  // the most up-to-date information on which tilings were used for the current
+  // frame.
+  SendTilingsCleanupNotificationToClient();
+
+  stage_breakdown.start_draw_layers = base::TimeTicks::Now();
+  frame.set_trees_in_viz_timestamps(std::move(stage_breakdown));
+  host_impl_->DrawLayers(&frame);
+  host_impl_->DidDrawAllLayers(frame);
+  host_impl_->DidFinishImplFrame(begin_frame_args);
+}
+
+void LayerContextImpl::SendTilingsCleanupNotificationToClient() {
+  for (cc::LayerImpl* layer : *host_impl_->active_tree()) {
+    if (layer->GetLayerType() == cc::mojom::LayerType::kTileDisplay) {
+      auto* tile_layer = static_cast<cc::TileDisplayLayerImpl*>(layer);
+      std::vector<float> scales_to_remove =
+          tile_layer->GetSafeToDeleteTilings();
+      if (!scales_to_remove.empty()) {
+        client_->get()->OnTilingsReadyForCleanup(tile_layer->id(),
+                                                 scales_to_remove);
       }
-      frame.set_trees_in_viz_timestamps(std::move(stage_breakdown));
-      host_impl_->DidDrawAllLayers(frame);
-      host_impl_->DidFinishImplFrame(begin_frame_args);
     }
   }
 }

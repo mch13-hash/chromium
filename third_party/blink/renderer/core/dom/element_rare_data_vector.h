@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/dom/focusgroup_flags.h"
 #include "third_party/blink/renderer/core/dom/has_invalidation_flags.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
+#include "third_party/blink/renderer/core/dom/overscroll_pseudo_element_data.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element_data.h"
 #include "third_party/blink/renderer/platform/heap/trace_traits.h"
@@ -50,6 +51,7 @@ class InvokerData;
 class InterestInvokerTargetData;
 class OutOfFlowData;
 class HTMLElement;
+class Element;
 
 enum class ElementFlags;
 
@@ -96,8 +98,9 @@ class CORE_EXPORT ElementRareDataVector final : public NodeRareData {
     kCSSPseudoElementData = 36,
     kCustomElementRegistry = 37,
     kAnimationTriggerData = 38,
+    kFocusgroupLastFocused = 39,
 
-    kNumFields = 39,
+    kNumFields = 40,
   };
 
   ElementRareDataField* GetField(FieldId field_id) const;
@@ -173,10 +176,15 @@ class CORE_EXPORT ElementRareDataVector final : public NodeRareData {
       const AtomicString& document_transition_tag = g_null_atom) const;
   bool HasScrollButtonOrMarkerGroupPseudos() const;
   PseudoElementData::PseudoElementVector GetPseudoElements() const;
+
   void AddColumnPseudoElement(ColumnPseudoElement&);
   const ColumnPseudoElementsVector* GetColumnPseudoElements() const;
   ColumnPseudoElement* GetColumnPseudoElement(wtf_size_t idx) const;
   void ClearColumnPseudoElements(wtf_size_t to_keep);
+
+  void AddOverscrollPseudoElement(PseudoElement&);
+  const OverscrollPseudoElementData* GetOverscrollPseudoElementData() const;
+  void ClearOverscrollPseudoElements();
 
   CSSStyleDeclaration& EnsureInlineCSSStyleDeclaration(Element* owner_element);
 
@@ -368,7 +376,12 @@ class CORE_EXPORT ElementRareDataVector final : public NodeRareData {
   void ClearFocusgroupData() {
     fields_.focusgroup_behavior = FocusgroupBehavior::kNoBehavior;
     fields_.focusgroup_flags = FocusgroupFlags::kNone;
+    SetFocusgroupLastFocused(nullptr);
   }
+  void SetFocusgroupLastFocused(Element* element);
+  Element* GetFocusgroupLastFocused() const;
+  void ClearFocusgroupLastFocused() { SetFocusgroupLastFocused(nullptr); }
+
   void SetAffectedByStartingStyles() {
     fields_.affected_by_starting_styles = true;
   }

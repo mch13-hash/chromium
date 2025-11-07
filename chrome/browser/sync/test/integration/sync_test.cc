@@ -160,23 +160,6 @@ int GetNumClients(SyncTest::TestType test_type) {
 
 }  // namespace
 
-std::ostream& operator<<(std::ostream& stream, SyncTestMode sync_test_mode) {
-  stream << SyncTestModeAsString(sync_test_mode);
-  return stream;
-}
-
-std::string SyncTestModeAsString(SyncTestMode sync_test_mode) {
-  switch (sync_test_mode) {
-    case SyncTestMode::kSignInOnly:
-      return "SignInOnly";
-    case SyncTestMode::kSyncTheFeature_WithSyncToSignin:
-      return "SyncTheFeature_WithSyncToSignin";
-    case SyncTestMode::kSyncTheFeature_WithoutSyncToSignin:
-      return "SyncTheFeature_WithoutSyncToSignin";
-  }
-  NOTREACHED();
-}
-
 #if !BUILDFLAG(IS_ANDROID)
 class SyncTest::ClosedBrowserObserver : public BrowserListObserver {
  public:
@@ -199,14 +182,6 @@ class SyncTest::ClosedBrowserObserver : public BrowserListObserver {
   OnBrowserRemovedCallback browser_remove_callback_;
 };
 #endif
-
-// static
-SyncTest::SetupSyncMode SyncTest::GetSetupSyncMode(
-    SyncTestMode sync_test_mode) {
-  return sync_test_mode == SyncTestMode::kSignInOnly
-             ? SyncTest::kSyncTransportOnly
-             : SyncTest::kSyncTheFeature;
-}
 
 SyncTest::SyncTest(TestType test_type)
     : test_type_(test_type),
@@ -505,6 +480,10 @@ syncer::UserSelectableTypeSet SyncTest::GetRegisteredSelectableTypes(
       ->GetRegisteredSelectableTypes();
 }
 
+SyncTest::SetupSyncMode SyncTest::GetSetupSyncMode() const {
+  return kSyncTheFeature;
+}
+
 std::vector<raw_ptr<SyncServiceImpl, VectorExperimental>>
 SyncTest::GetSyncServices() {
   std::vector<raw_ptr<SyncServiceImpl, VectorExperimental>> services;
@@ -645,9 +624,9 @@ void SyncTest::InitializeProfile(int index, Profile* profile) {
   EXPECT_NE(nullptr, GetClient(index)) << "Could not create Client " << index;
 }
 
-bool SyncTest::SetupSyncInternal(SyncWaitCondition wait_condition,
-                                 SyncTestAccount account,
-                                 SetupSyncMode setup_mode) {
+bool SyncTest::SetupSyncInternal(SetupSyncMode setup_mode,
+                                 SyncWaitCondition wait_condition,
+                                 SyncTestAccount account) {
   // Create sync profiles and clients if they haven't already been created.
   if (profiles_.empty()) {
     if (!SetupClients()) {
@@ -754,15 +733,18 @@ bool SyncTest::SetupSyncInternal(SyncWaitCondition wait_condition,
   return true;
 }
 
-bool SyncTest::SetupSync(SyncWaitCondition wait_condition,
-                         SetupSyncMode setup_mode) {
-  return SetupSync(SyncTestAccount::kDefaultAccount, wait_condition,
-                   setup_mode);
+bool SyncTest::SetupSync(SyncWaitCondition wait_condition) {
+  return SetupSync(SyncTestAccount::kDefaultAccount, wait_condition);
 }
 
 bool SyncTest::SetupSync(SyncTestAccount account,
-                         SyncWaitCondition wait_condition,
-                         SetupSyncMode setup_mode) {
+                         SyncWaitCondition wait_condition) {
+  return SetupSyncWithMode(GetSetupSyncMode(), wait_condition, account);
+}
+
+bool SyncTest::SetupSyncWithMode(SetupSyncMode setup_mode,
+                                 SyncWaitCondition wait_condition,
+                                 SyncTestAccount account) {
 #if BUILDFLAG(IS_ANDROID)
   // For Android, currently the framework only supports one client.
   // The client uses the default profile.
@@ -772,7 +754,7 @@ bool SyncTest::SetupSync(SyncTestAccount account,
 
   base::ScopedAllowBlockingForTesting allow_blocking;
 
-  if (!SetupSyncInternal(wait_condition, account, setup_mode)) {
+  if (!SetupSyncInternal(setup_mode, wait_condition, account)) {
     return false;
   }
 
@@ -1143,11 +1125,27 @@ void SyncTest::ExcludeDataTypesFromCheckForDataTypeFailures(
   excluded_types_from_check_for_data_type_failures_ = types;
 }
 
+std::ostream& operator<<(std::ostream& stream,
+                         SyncTest::SetupSyncMode sync_test_mode) {
+  stream << SetupSyncModeAsString(sync_test_mode);
+  return stream;
+}
+
+std::string SetupSyncModeAsString(SyncTest::SetupSyncMode sync_test_mode) {
+  switch (sync_test_mode) {
+    case SyncTest::SetupSyncMode::kSyncTransportOnly:
+      return "kSyncTransportOnly";
+    case SyncTest::SetupSyncMode::kSyncTheFeature:
+      return "kSyncTheFeature";
+  }
+  NOTREACHED();
+}
+
 // The set of types that *can* run in transport mode. Doesn't mean they are all
 // enabled by default, e.g. HISTORY requires a dedicated opt-in via
 // SyncUserSettings::SetSelectedTypes().
 syncer::DataTypeSet AllowedTypesInStandaloneTransportMode() {
-  static_assert(58 == syncer::GetNumDataTypes(),
+  static_assert(59 == syncer::GetNumDataTypes(),
                 "Add new types below if they can run in transport mode");
 
 #if BUILDFLAG(IS_ANDROID)
@@ -1234,6 +1232,10 @@ syncer::DataTypeSet AllowedTypesInStandaloneTransportMode() {
   }
   if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard)) {
     allowed_types.Put(syncer::AUTOFILL_VALUABLE);
+  }
+
+  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillValuableMetadata)) {
+    allowed_types.Put(syncer::AUTOFILL_VALUABLE_METADATA);
   }
 
   if (base::FeatureList::IsEnabled(syncer::kSyncAccountSettings)) {

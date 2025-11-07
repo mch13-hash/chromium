@@ -78,15 +78,6 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
       // |OverlayProcessorOzone|.
       override;
 
-  // This function takes a pointer to the std::optional instance so the
-  // instance can be reset. When overlay strategy covers the entire output
-  // surface, we no longer need the output surface as a separate overlay. This
-  // is also used by SurfaceControl to adjust rotation.
-  // TODO(weiliangc): Internalize the |output_surface_plane| inside the overlay
-  // processor.
-  void AdjustOutputSurfaceOverlay(
-      std::optional<OverlayCandidate>& output_surface_plane) override;
-
   OverlayProcessorUsingStrategy();
 
   // A list of possible overlay candidates is presented to this function.
@@ -121,6 +112,9 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
  protected:
   virtual gfx::Rect GetOverlayDamageRectForOutputSurface(
       const OverlayCandidate& overlay) const;
+
+  virtual void InsertPrimaryPlane(OverlayCandidate primary_plane,
+                                  OverlayCandidateList& candidates);
 
   std::vector<std::unique_ptr<OverlayProcessorStrategy>> strategies_;
 
@@ -278,9 +272,6 @@ class VIZ_SERVICE_EXPORT OverlayProcessorUsingStrategy
       tracked_candidates_;
 
   // These variables are used only for UMA purposes.
-  void OnOverlaySwitchUMA(ProposedCandidateKey overlay_tracking_key);
-  base::TimeTicks last_time_interval_switch_overlay_tick_;
-  ProposedCandidateKey prev_overlay_tracking_id_;
   uint64_t frame_sequence_number_ = 0;
 
   // These values are used for tracking how much we can downscale with overlays

@@ -5,6 +5,7 @@
 #include "content/browser/indexed_db/instance/connection.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -79,6 +80,31 @@ std::optional<int64_t> IndexIsOptional(int64_t index_id) {
   return index_id;
 }
 
+// Number of connections in the process, across all BucketContexts. All
+// operations use std::memory_order_relaxed since there is no dependency with
+// other data.
+//
+// TODO(crbug.com/381086791): Remove after the bug is understood.
+std::atomic_int64_t g_num_connections = 0;
+
+void IncrementNumConnections() {
+  int64_t new_connection_count =
+      g_num_connections.fetch_add(1, std::memory_order_relaxed) + 1;
+
+  // Report the number of connections when it's high. This will be used to
+  // determine the proportion of clients with elevated number of connections and
+  // as a trace trigger to understand how clients get into that state.
+  constexpr int64_t kHighPendingConnectionCount = 10000;
+  if (new_connection_count > kHighPendingConnectionCount) {
+    base::UmaHistogramCounts100000("IndexedDB.NumConnections.OnCreateAbove10k",
+                                   new_connection_count);
+  }
+}
+
+void DecrementNumConnections() {
+  g_num_connections.fetch_sub(1, std::memory_order_relaxed);
+}
+
 }  // namespace
 
 // static
@@ -110,12 +136,17 @@ Connection::Connection(BucketContext& bucket_context,
       client_state_checker_(std::move(client_state_checker)),
       client_token_(client_token),
       scheduling_priority_(scheduling_priority) {
+  IncrementNumConnections();
+
   bucket_context_handle_->quota_manager()->NotifyBucketAccessed(
       bucket_context_handle_->bucket_locator(), base::Time::Now());
 }
 
 Connection::~Connection() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  DecrementNumConnections();
+
   is_shutting_down_ = true;
   if (!IsConnected()) {
     return;
@@ -334,9 +365,12 @@ void Connection::Get(int64_t transaction_id,
                      blink::mojom::IDBDatabase::GetCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  TRACE_EVENT0("IndexedDB", "Connection::Get");
+
   base::expected<Transaction*, DatabaseError> transaction =
       GetTransactionAndVerifyState(transaction_id);
   if (!transaction.has_value()) {
+    TRACE_EVENT_INSTANT("IndexedDB", "Connection::Get - Error");
     std::move(callback).Run(blink::mojom::IDBDatabaseGetResult::NewErrorResult(
         blink::mojom::IDBError::New(transaction.error().code(),
                                     transaction.error().message())));
@@ -706,22 +740,33 @@ Connection::GetTransactionAndVerifyState(
     int64_t transaction_id,
     std::optional<blink::mojom::IDBTransactionMode> required_mode) {
   if (!IsConnected()) {
+    TRACE_EVENT_INSTANT(
+        "IndexedDB",
+        "Connection::GetTransactionAndVerifyState - Not connected");
     return base::unexpected(DatabaseError(
         blink::mojom::IDBException::kUnknownError, "Not connected."));
   }
   Transaction* transaction = GetTransaction(transaction_id);
   if (!transaction) {
+    TRACE_EVENT_INSTANT(
+        "IndexedDB",
+        "Connection::GetTransactionAndVerifyState - Unknown transaction");
     return base::unexpected(DatabaseError(
         blink::mojom::IDBException::kUnknownError, "Unknown transaction."));
   }
 
   if (required_mode.has_value() && (transaction->mode() != *required_mode)) {
+    TRACE_EVENT_INSTANT(
+        "IndexedDB", "Connection::GetTransactionAndVerifyState - Wrong mode");
     mojo::ReportBadMessage("Called from wrong transaction type.");
     return base::unexpected(DatabaseError(
         blink::mojom::IDBException::kUnknownError, "Wrong transaction type."));
   }
 
   if (!transaction->IsAcceptingRequests()) {
+    TRACE_EVENT_INSTANT(
+        "IndexedDB",
+        "Connection::GetTransactionAndVerifyState - Not accepting requests");
     // TODO(crbug.com/40791538): If the transaction was already committed
     // (or is in the process of being committed) we should kill the renderer.
     // This branch however also includes cases where the browser process aborted

@@ -91,7 +91,7 @@ public class UrlBar extends AutocompleteEditText {
     // check for text equality, instead of worrying about partial equality with truncated text.
     static final int MIN_LENGTH_FOR_TRUNCATION = 100;
 
-    private static final int MULTILINE_EDIT_MAX_LINES = 5;
+    static final int MULTILINE_EDIT_MAX_LINES = 5;
 
     /**
      * The text direction of the URL or query: LAYOUT_DIRECTION_LOCALE, LAYOUT_DIRECTION_LTR, or
@@ -233,7 +233,8 @@ public class UrlBar extends AutocompleteEditText {
         setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         int verticalPadding =
                 getResources().getDimensionPixelSize(R.dimen.url_bar_vertical_padding);
-        setPaddingRelative(0, verticalPadding, 0, verticalPadding);
+        int endPadding = getResources().getDimensionPixelSize(R.dimen.url_bar_end_padding);
+        setPaddingRelative(0, verticalPadding, endPadding, verticalPadding);
 
         setTextClassifier(TextClassifier.NO_OP);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -335,8 +336,7 @@ public class UrlBar extends AutocompleteEditText {
         if (!mFocused) mFocusEventEmitted = false;
         super.onFocusChanged(focused, direction, previouslyFocusedRect);
 
-        setSingleLine(true);
-        setMaxLines(1);
+        setInputIsMultilineEligible(false);
         setHorizontalFadingEdgeEnabled(!focused);
 
         if (focused) {
@@ -389,19 +389,24 @@ public class UrlBar extends AutocompleteEditText {
      * <p>Should be called whenever focus or text contents change.
      */
     private void fixupTextDirection() {
-        // When unfocused, force left-to-right rendering at the paragraph level (which is desired
-        // for URLs). Right-to-left runs are still rendered RTL, but will not flip the whole URL
-        // around. This is consistent with OmniboxViewViews on desktop. When focused, render text
-        // normally (to allow users to make non-URL searches and to avoid showing Android's split
-        // insertion point when an RTL user enters RTL text). Also render text normally when the
-        // text field is empty (because then it displays an instruction that is not a URL).
-        if (mFocused || length() == 0) {
+        // 4 states to cover, depending on focus state and text presence:
+        // - focus with text      -> follow the natural text direction
+        // - no focus with text   -> always LTR (this is 100% the URL)
+        // - focus with no text   -> follow the locale (Focused state hint text)
+        // - no focus and no text -> follow the locale (NTP hint text)
+        if (length() == 0) {
+            // Always language specific text direction to show hint text.
             setTextDirection(TEXT_DIRECTION_INHERIT);
+            setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
+        } else if (mFocused) {
+            // Always input-specific text direction
+            setTextDirection(TEXT_DIRECTION_INHERIT);
+            setTextAlignment(TEXT_ALIGNMENT_TEXT_START);
         } else {
+            // Always LTR (URL)
             setTextDirection(TEXT_DIRECTION_LTR);
+            setTextAlignment(TEXT_ALIGNMENT_TEXT_START);
         }
-        // Always align to the same as the paragraph direction (LTR = left, RTL = right).
-        setTextAlignment(TEXT_ALIGNMENT_TEXT_START);
     }
 
     @Override
@@ -465,16 +470,16 @@ public class UrlBar extends AutocompleteEditText {
         }
 
         limitDisplayableLength();
+    }
 
-        if (OmniboxFeatures.allowMultilineEditField()) {
-            // Observe the user input alone, to prevent autocompletion from taking over the input.
-            boolean isMultilineEligible = TextUtils.indexOf(getTextWithoutAutocomplete(), ' ') >= 0;
-            boolean wasMultilineEligible = !isSingleLine();
-            if (isMultilineEligible != wasMultilineEligible) {
+    @Override
+    public void setInputIsMultilineEligible(boolean isMultilineEligible) {
+        isMultilineEligible &= mFocused;
+        if (OmniboxFeatures.allowMultilineEditField() && !mIsInCct) {
+            // Only act if the caller wants multiline, but is single line - or the other way around.
+            if (isMultilineEligible != !isSingleLine()) {
                 // Toggling between single- and multi-line edit fields appears to make the EditText
                 // restart and reposition the cursor.
-                // TODO(crbug.com/432311666): verify if selection restart is caused by our own
-                // logic. If it is, see if this can be fixed and remove selection management below.
                 int cursor = getSelectionStart();
                 setSingleLine(!isMultilineEligible);
                 setMaxLines(isMultilineEligible ? MULTILINE_EDIT_MAX_LINES : 1);
@@ -907,6 +912,7 @@ public class UrlBar extends AutocompleteEditText {
         Layout layout = assumeNonNull(getLayout());
         if (TextUtils.isEmpty(text)) {
             if (getLayoutDirection() == LAYOUT_DIRECTION_RTL
+                    && getHint() != null
                     && BidiFormatter.getInstance().isRtl(getHint())) {
                 // Compared to below that uses getPrimaryHorizontal(1) due to 0 returning an
                 // invalid value, if the text is empty, getPrimaryHorizontal(0) returns the actual
@@ -992,7 +998,9 @@ public class UrlBar extends AutocompleteEditText {
         int urlTextLength = url.length();
 
         Layout textLayout = assumeNonNull(getLayout());
-        assert getLayout().getLineCount() == 1;
+
+        if (mFocused) return;
+
         final int originEndIndex = Math.min(mOriginEndIndex, urlTextLength);
         if (mOriginEndIndex > urlTextLength) {
             // If discovered locally, please update crbug.com/859219 with the steps to reproduce.

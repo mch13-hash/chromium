@@ -6,6 +6,9 @@ package org.chromium.chrome.browser.compositor.overlays.strip;
 
 import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
+import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.BUTTON_TOUCH_TARGET_SIZE_DP;
+import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.MIN_TAB_WIDTH_DP;
+import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.TAB_OVERLAP_WIDTH_DP;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -40,10 +43,6 @@ import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsOffsetTagsInfo;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
-import org.chromium.chrome.browser.browser_controls.TopControlLayer;
-import org.chromium.chrome.browser.browser_controls.TopControlsStacker;
-import org.chromium.chrome.browser.browser_controls.TopControlsStacker.TopControlType;
-import org.chromium.chrome.browser.browser_controls.TopControlsStacker.TopControlVisibility;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerHost;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
@@ -130,8 +129,7 @@ public class StripLayoutHelperManager
                 PauseResumeWithNativeObserver,
                 TabStripTransitionDelegate,
                 TopResumedActivityChangedObserver,
-                AppHeaderObserver,
-                TopControlLayer {
+                AppHeaderObserver {
     /**
      * POD type that contains the necessary tab model info on startup. Used in the startup flicker
      * fix experiment where we create a placeholder tab strip on startup to mitigate jank as tabs
@@ -199,7 +197,7 @@ public class StripLayoutHelperManager
 
     // Caching Variables
     private final RectF mStripFilterArea = new RectF();
-    private final boolean mIsLayoutOptimizationsEnabled;
+    private final boolean mIsHeaderCustomizationSupported;
 
     // External influences
     private @MonotonicNonNull TabModelSelector mTabModelSelector; // Set on native initialization.
@@ -266,9 +264,9 @@ public class StripLayoutHelperManager
     private final ObservableSupplier<LayerTitleCache> mLayerTitleCacheSupplier;
     private final BrowserControlsStateProvider mBrowserControlsStateProvider;
     private final Callback<Integer> mStripVisibilityStateObserver;
-    private final ObservableSupplierImpl<Integer> mStripVisibilityStateSupplier;
+    private final ObservableSupplierImpl<@StripVisibilityState Integer>
+            mStripVisibilityStateSupplier;
     private final @Nullable ObservableSupplier<Boolean> mXrSpaceModeObservableSupplier;
-    private final TopControlsStacker mTopControlsStacker;
 
     // Drag-Drop
     private @Nullable TabStripDragHandler mTabStripDragHandler;
@@ -450,7 +448,6 @@ public class StripLayoutHelperManager
      * @param shareDelegateSupplier Supplies {@link ShareDelegate} to share tab URLs.
      * @param xrSpaceModeObservableSupplier Supplies current XR space mode status. True for XR full
      *     space mode, false otherwise.
-     * @param topControlsStacker The {@link TopControlsStacker} to add |this| as a control to.
      */
     public StripLayoutHelperManager(
             Context context,
@@ -475,8 +472,7 @@ public class StripLayoutHelperManager
             DataSharingTabManager dataSharingTabManager,
             BottomSheetController bottomSheetController,
             Supplier<ShareDelegate> shareDelegateSupplier,
-            @Nullable ObservableSupplier<Boolean> xrSpaceModeObservableSupplier,
-            TopControlsStacker topControlsStacker) {
+            @Nullable ObservableSupplier<Boolean> xrSpaceModeObservableSupplier) {
         mContext = context;
         Resources res = context.getResources();
         mManagerHost = managerHost;
@@ -495,12 +491,12 @@ public class StripLayoutHelperManager
         mEventFilter =
                 new AreaMotionEventFilter(context, mTabStripEventHandler, null, false, false);
 
-        mIsLayoutOptimizationsEnabled =
-                ToolbarFeatures.isTabStripWindowLayoutOptimizationEnabled(
+        mIsHeaderCustomizationSupported =
+                ToolbarFeatures.isAppHeaderCustomizationSupported(
                         /* isTablet= */ true, DisplayUtil.isContextInDefaultDisplay(mContext));
         mScrollableStripHeight = res.getDimension(R.dimen.tab_strip_height) / mDensity;
         mHeight =
-                mIsLayoutOptimizationsEnabled
+                mIsHeaderCustomizationSupported
                         ? toolbarManager.getTabStripHeightSupplier().get() / mDensity
                         : mScrollableStripHeight;
         mTopPadding = mHeight - mScrollableStripHeight;
@@ -633,9 +629,6 @@ public class StripLayoutHelperManager
         }
 
         mXrSpaceModeObservableSupplier = xrSpaceModeObservableSupplier;
-
-        mTopControlsStacker = topControlsStacker;
-        mTopControlsStacker.addControl(this);
     }
 
     @EnsuresNonNullIf("mDesktopWindowStateManager")
@@ -771,7 +764,6 @@ public class StripLayoutHelperManager
         if (mDesktopWindowStateManager != null) {
             mDesktopWindowStateManager.removeObserver(this);
         }
-        mTopControlsStacker.removeControl(this);
     }
 
     /** Mark whether tab strip is hidden by a height transition. */
@@ -977,7 +969,7 @@ public class StripLayoutHelperManager
             setStripVisibilityState(StripVisibilityState.HIDDEN_BY_FADE, /* clear= */ true);
         }
 
-        if (mIsLayoutOptimizationsEnabled) {
+        if (mIsHeaderCustomizationSupported) {
             // Convert the input HeightPx to Dp.
             mHeight = newHeightPx / mDensity;
 
@@ -1066,6 +1058,26 @@ public class StripLayoutHelperManager
                 ScrimProperties.INVALID_COLOR, mStripTransitionScrimOpacity);
     }
 
+    @Override
+    public int getFadeTransitionThresholdDp() {
+        if (mTabModelSelector == null) return 0;
+        TabModel incognitoTabModel = mTabModelSelector.getModel(/* incognito= */ true);
+        boolean hasIncognitoTabs = incognitoTabModel != null && incognitoTabModel.getCount() > 0;
+        boolean shouldShowMsb =
+                !ChromeFeatureList.sTabStripIncognitoMigration.isEnabled() && hasIncognitoTabs;
+
+        // Tablet: 284 = 2 * minTabWidth(108) - tabOverlap(28) + newTabButton (48) +
+        // [optional] modelSelectorButton(48).
+        // Desktop: 188 = 2 * minTabWidth(76) - tabOverlap(28) + newTabButton (32) +
+        // [optional] modelSelectorButton(32).
+        float thresholdDp =
+                (2 * MIN_TAB_WIDTH_DP)
+                        - TAB_OVERLAP_WIDTH_DP
+                        + BUTTON_TOUCH_TARGET_SIZE_DP
+                        + (shouldShowMsb ? BUTTON_TOUCH_TARGET_SIZE_DP : 0f);
+        return Math.round(thresholdDp);
+    }
+
     private boolean duringTabStripHeightTransition() {
         return mIsHeightTransitioning;
     }
@@ -1104,7 +1116,7 @@ public class StripLayoutHelperManager
     @Override
     public void onTopResumedActivityChanged(boolean isTopResumedActivity) {
         // TODO (crbug/328055199): Check if losing focus to a non-Chrome task.
-        if (!mIsLayoutOptimizationsEnabled) return;
+        if (!mIsHeaderCustomizationSupported) return;
         mIsTopResumedActivity = isTopResumedActivity;
         mUpdateHost.requestUpdate();
     }
@@ -1137,10 +1149,6 @@ public class StripLayoutHelperManager
 
     public boolean shouldShowTabOutline(StripLayoutTab tab) {
         return getActiveStripLayoutHelper().shouldShowTabOutline(tab);
-    }
-
-    public @MediaState int getMediaIndicatorState(StripLayoutTab tab) {
-        return getActiveStripLayoutHelper().getMediaIndicatorState(tab);
     }
 
     /**
@@ -1176,7 +1184,7 @@ public class StripLayoutHelperManager
 
     /** Allow / disallow system gestures on touchable areas on the strip. */
     private void updateTouchableAreas() {
-        if (!mIsLayoutOptimizationsEnabled) return;
+        if (!mIsHeaderCustomizationSupported) return;
 
         if ((getStripVisibilityStateSupplier().get() & StripVisibilityState.HIDDEN_BY_FADE) != 0) {
             // Reset the system gesture exclusion rects to allow system gestures on the tab strip
@@ -1377,6 +1385,10 @@ public class StripLayoutHelperManager
         mIncognitoHelper.setTabGroupModelFilter(
                 assumeNonNull(provider.getTabGroupModelFilter(true)));
         tabModelSwitched(mTabModelSelector.isIncognitoSelected());
+        // Manually called on initialization, since the logic in #tabModelSwitched only runs if the
+        // Incognito state actually changes. Since mIncognito defaults to false, it may not actually
+        // change on initialization.
+        getActiveStripLayoutHelper().setSelected(/* selected= */ true);
 
         mTabModelSelectorTabModelObserver =
                 new TabModelSelectorTabModelObserver(modelSelector) {
@@ -1530,7 +1542,9 @@ public class StripLayoutHelperManager
                     }
 
                     @Override
-                    public void onMediaStateChanged(Tab tab, int mediaState) {
+                    public void onMediaStateChanged(Tab tab, @MediaState int mediaState) {
+                        getStripLayoutHelper(tab.isIncognito())
+                                .onMediaStateChanged(tab, mediaState);
                         mRenderHost.requestRender();
                     }
                 };
@@ -1583,6 +1597,22 @@ public class StripLayoutHelperManager
     public @ColorInt int getBackgroundColor() {
         return TabUiThemeUtil.getTabStripBackgroundColor(
                 mContext, mIsIncognito, isAppInDesktopWindow(), mIsTopResumedActivity);
+    }
+
+    /**
+     * Returns the tint color for a given media state.
+     *
+     * @param mediaState The {@link MediaState} for which to get the tint.
+     * @param defaultTint The default tint to use.
+     */
+    public @ColorInt int getMediaIndicatorTintColor(
+            @Tab.MediaState int mediaState, @ColorInt int defaultTint) {
+        if (mediaState == Tab.MediaState.RECORDING) {
+            return mContext.getColor(R.color.tab_recording_media_color);
+        } else if (mediaState == Tab.MediaState.SHARING) {
+            return mContext.getColor(R.color.tab_sharing_media_color);
+        }
+        return defaultTint;
     }
 
     @Override
@@ -1670,7 +1700,7 @@ public class StripLayoutHelperManager
     }
 
     @Override
-    public ObservableSupplier<Integer> getStripVisibilityStateSupplier() {
+    public ObservableSupplier<@StripVisibilityState Integer> getStripVisibilityStateSupplier() {
         // TODO(crbug.com/417238089): get() returns a stale value during height transitions.
         return mStripVisibilityStateSupplier;
     }
@@ -1760,32 +1790,5 @@ public class StripLayoutHelperManager
 
     private boolean isActivityInXrFullSpaceModeNow() {
         return mXrSpaceModeObservableSupplier != null && mXrSpaceModeObservableSupplier.get();
-    }
-
-    // TopControlLayer implementation:
-
-    @Override
-    public @TopControlType int getTopControlType() {
-        return TopControlType.TABSTRIP;
-    }
-
-    @Override
-    public int getTopControlHeight() {
-        return mToolbarManager.getTabStripHeightSupplier().get();
-    }
-
-    @Override
-    public int getTopControlVisibility() {
-        // The tab strip adds to the total height of the top controls regardless of whether or not
-        // it is "visible" to the user, i.e. we take its inherent height into account even when
-        // scrolled offscreen or obscured, except when hidden by height transition.
-        // TODO(crbug.com/417238089): Possibly add way to notify stacker of visibility changes.
-        boolean isHiddenByHeightTransition =
-                (getStripVisibilityStateSupplier().get()
-                                & StripVisibilityState.HIDDEN_BY_HEIGHT_TRANSITION)
-                        != 0;
-        return !isHiddenByHeightTransition
-                ? TopControlVisibility.VISIBLE
-                : TopControlVisibility.HIDDEN;
     }
 }

@@ -10,7 +10,10 @@
 #include <vector>
 
 #include "base/strings/string_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "components/history/core/browser/features.h"
+#include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/url_database.h"
 #include "components/history/core/browser/visit_annotations_database.h"
 #include "components/history/core/browser/visited_link_database.h"
@@ -241,7 +244,9 @@ TEST_F(VisitDatabaseTest, GetMostRecentVisitForURL_NoVisits) {
 
   // Should return 0 when there are no visits.
   VisitRow out_visit;
-  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit), 0U);
+  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit,
+                                     VisitQuery404sPolicy::kInclude404s),
+            0U);
   EXPECT_EQ(out_visit.visit_id, 0U);
 }
 
@@ -261,7 +266,9 @@ TEST_F(VisitDatabaseTest, GetMostRecentVisitForURL_Simple) {
 
   // The more recent visit should be returned.
   VisitRow out_visit;
-  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit), 1U);
+  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit,
+                                     VisitQuery404sPolicy::kInclude404s),
+            1U);
   EXPECT_EQ(out_visit.visit_time, kNow - base::Days(1));
 }
 
@@ -283,7 +290,9 @@ TEST_F(VisitDatabaseTest, GetMostRecentVisitForURL_Tied) {
   // ID among the tied visits to be returned consistently. (These expectations
   // will flake if the tiebreaker isn't consistent.)
   VisitRow out_visit;
-  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit), 2U);
+  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit,
+                                     VisitQuery404sPolicy::kInclude404s),
+            2U);
   EXPECT_EQ(out_visit.visit_time, kNow);
 }
 
@@ -298,6 +307,42 @@ TEST_F(VisitDatabaseTest, GetMostRecentVisitsForURL_NoVisits) {
   ASSERT_TRUE(GetMostRecentVisitsForURL(
       kUrlId, 1, VisitQuery404sPolicy::kExclude404s, &out_visits));
   EXPECT_EQ(out_visits.size(), 0U);
+}
+
+TEST_F(VisitDatabaseTest, GetMostRecentVisitForURL_404Policy) {
+  const URLID kUrlId = 1U;
+  const base::Time kNow = Time::Now();
+  VisitContextAnnotations context_annotations_non_404;
+  context_annotations_non_404.on_visit = {.response_code = 500};
+  VisitContextAnnotations context_annotations_404;
+  context_annotations_404.on_visit = {.response_code = 404};
+
+  // Add a non-404 visit for the URL.
+  VisitRow visit;
+  visit.url_id = kUrlId;
+  visit.visit_id = 1;
+  visit.visit_time = kNow - base::Days(2);
+  ASSERT_TRUE(AddVisit(&visit, SOURCE_BROWSED));
+  ASSERT_EQ(1, visit.visit_id);
+
+  // Add a visit with a 404 response code for the URL.
+  VisitRow visit_404;
+  visit_404.url_id = kUrlId;
+  visit_404.visit_id = 2;
+  visit_404.visit_time = kNow - base::Days(1);
+  ASSERT_TRUE(AddVisit(&visit_404, SOURCE_BROWSED));
+  AddContextAnnotationsForVisit(visit_404.visit_id, context_annotations_404);
+
+  // When including 404s, the 404 visit should be returned as the recent visit.
+  VisitRow out_visit;
+  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit,
+                                     VisitQuery404sPolicy::kInclude404s),
+            2U);
+  EXPECT_EQ(out_visit.visit_time, kNow - base::Days(1));
+  EXPECT_EQ(GetMostRecentVisitForURL(kUrlId, &out_visit,
+                                     VisitQuery404sPolicy::kExclude404s),
+            1U);
+  EXPECT_EQ(out_visit.visit_time, kNow - base::Days(2));
 }
 
 TEST_F(VisitDatabaseTest, GetMostRecentVisitsForURL_Simple) {
@@ -368,6 +413,128 @@ TEST_F(VisitDatabaseTest, GetMostRecentVisitsForURL_404Policy) {
       kUrlId, 100, VisitQuery404sPolicy::kExclude404s, &out_visits));
   ASSERT_EQ(out_visits.size(), 1U);
   EXPECT_THAT(out_visits.front(), MatchesVisitInfo(visit_non_404));
+}
+
+TEST_F(VisitDatabaseTest, GetRedirectFromVisit) {
+  // Add a visit chain: 1 -> 2 -> 3, where -> is a redirect.
+  // Within a redirect chain, all visits have the same timestamp.
+  GURL url1("http://www.google.com/url1");
+  URLRow url_row1(url1);
+  URLID url_id1 = AddURL(url_row1);
+  ASSERT_NE(0, url_id1);
+  VisitRow visit1(url_id1, base::Time::Now(), 0,
+                  ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                            ui::PAGE_TRANSITION_CHAIN_START),
+                  0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit1, SOURCE_BROWSED));
+
+  GURL url2("http://www.google.com/url2");
+  URLRow url_row2(url2);
+  URLID url_id2 = AddURL(url_row2);
+  ASSERT_NE(0, url_id2);
+  VisitRow visit2(
+      url_id2, base::Time::Now(), visit1.visit_id,
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                ui::PAGE_TRANSITION_SERVER_REDIRECT),
+      0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit2, SOURCE_BROWSED));
+
+  GURL url3("http://www.google.com/url3");
+  URLRow url_row3(url3);
+  URLID url_id3 = AddURL(url_row3);
+  ASSERT_NE(0, url_id3);
+  VisitRow visit3(
+      url_id3, base::Time::Now(), visit2.visit_id,
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                ui::PAGE_TRANSITION_SERVER_REDIRECT |
+                                ui::PAGE_TRANSITION_CHAIN_END),
+      0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit3, SOURCE_BROWSED));
+
+  // Get redirect from visit2.
+  VisitID to_visit_id = 0;
+  GURL to_url;
+  EXPECT_TRUE(GetRedirectFromVisit(visit2.visit_id, &to_visit_id, &to_url,
+                                   VisitQuery404sPolicy::kInclude404s));
+  EXPECT_EQ(visit3.visit_id, to_visit_id);
+  EXPECT_EQ(GURL("http://www.google.com/url3"), to_url);
+
+  // Get redirect from visit1.
+  to_visit_id = 0;
+  to_url = GURL();
+  EXPECT_TRUE(GetRedirectFromVisit(visit1.visit_id, &to_visit_id, &to_url,
+                                   VisitQuery404sPolicy::kInclude404s));
+  EXPECT_EQ(visit2.visit_id, to_visit_id);
+  EXPECT_EQ(GURL("http://www.google.com/url2"), to_url);
+
+  // Get redirect from visit3 (no referrer)
+  to_visit_id = 0;
+  to_url = GURL();
+  EXPECT_FALSE(GetRedirectFromVisit(visit3.visit_id, &to_visit_id, &to_url,
+                                    VisitQuery404sPolicy::kInclude404s));
+  EXPECT_EQ(0, to_visit_id);
+
+  // Non-redirect case.
+  VisitRow visit4(visit1.url_id, base::Time::Now(), 0, ui::PAGE_TRANSITION_LINK,
+                  0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit4, SOURCE_BROWSED));
+
+  VisitRow visit5(visit2.url_id, base::Time::Now(), visit4.visit_id,
+                  ui::PAGE_TRANSITION_LINK, 0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit5, SOURCE_BROWSED));
+
+  // Get redirect from visit4. The referrer (visit5) is not a redirect.
+  // The from_url part should fail.
+  to_visit_id = 0;
+  to_url = GURL();
+  EXPECT_FALSE(GetRedirectFromVisit(visit4.visit_id, &to_visit_id, &to_url,
+                                    VisitQuery404sPolicy::kInclude404s));
+  EXPECT_EQ(to_visit_id, 0);
+  EXPECT_TRUE(to_url.is_empty());
+}
+
+TEST_F(VisitDatabaseTest, GetRedirectToVisit_404Policy) {
+  // Within a redirect chain, all visits have the same timestamp.
+  GURL url1("http://www.google.com/url1");
+  URLRow url_row1(url1);
+  URLID url_id1 = AddURL(url_row1);
+  ASSERT_NE(0, url_id1);
+  VisitRow visit1(url_id1, base::Time::Now(), 0,
+                  ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                            ui::PAGE_TRANSITION_CHAIN_START),
+                  0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit1, SOURCE_BROWSED));
+
+  // Add a 404 visit
+  VisitContextAnnotations context_annotations_404;
+  context_annotations_404.on_visit = {.response_code = 404};
+  GURL url2("http://www.google.com/404");
+  URLRow url_row2(url2);
+  URLID url_id2 = AddURL(url_row2);
+  ASSERT_NE(0, url_id2);
+  VisitRow visit404(
+      url_id2, base::Time::Now(), visit1.visit_id,
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                ui::PAGE_TRANSITION_SERVER_REDIRECT |
+                                ui::PAGE_TRANSITION_CHAIN_END),
+      0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit404, SOURCE_BROWSED));
+  AddContextAnnotationsForVisit(visit404.visit_id, context_annotations_404);
+
+  VisitID to_visit_id = 0;
+  GURL to_url;
+  EXPECT_TRUE(GetRedirectFromVisit(visit1.visit_id, &to_visit_id, &to_url,
+                                   VisitQuery404sPolicy::kInclude404s));
+  EXPECT_EQ(visit404.visit_id, to_visit_id);
+  EXPECT_EQ(GURL("http://www.google.com/404"), to_url);
+
+  // When 404s are disabled, redirects from visit1 should return false.
+  to_visit_id = 0;
+  to_url = GURL();
+  EXPECT_FALSE(GetRedirectFromVisit(visit1.visit_id, &to_visit_id, &to_url,
+                                    VisitQuery404sPolicy::kExclude404s));
+  EXPECT_EQ(to_visit_id, 0);
+  EXPECT_EQ(to_url.is_empty(), true);
 }
 
 TEST_F(VisitDatabaseTest, GetVisibleVisitCountToHost) {
@@ -1005,6 +1172,61 @@ TEST_F(VisitDatabaseTest, GetVisibleVisitsForURL) {
   EXPECT_THAT(results[0], MatchesVisitInfo(test_visit_rows[1]));
   EXPECT_THAT(results[1], MatchesVisitInfo(test_visit_rows[5]));
 }
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+TEST_F(VisitDatabaseTest, GetVisibleVisits_ActorVisits) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(kBrowsingHistoryActorIntegrationM2);
+
+  const URLID kUrlId1 = 1U;
+  VisitRow visit_browsed(
+      kUrlId1, Time::Now(), 0,
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                ui::PAGE_TRANSITION_CHAIN_START |
+                                ui::PAGE_TRANSITION_CHAIN_END),
+      0, false, 0);
+  ASSERT_TRUE(AddVisit(&visit_browsed, SOURCE_BROWSED));
+
+  VisitRow visit_actor(
+      kUrlId1, Time::Now() + base::Seconds(1), 0,
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_LINK |
+                                ui::PAGE_TRANSITION_CHAIN_START |
+                                ui::PAGE_TRANSITION_CHAIN_END),
+      0, false, 0);
+  EXPECT_TRUE(AddVisit(&visit_actor, SOURCE_ACTOR));
+
+  QueryOptions options;
+  options.duplicate_policy = QueryOptions::KEEP_ALL_DUPLICATES;
+  VisitVector results;
+
+  // By default, actor visits should be excluded from GetVisibleVisitsForURL.
+  GetVisibleVisitsForURL(kUrlId1, options, &results);
+  ASSERT_EQ(1U, results.size());
+  EXPECT_THAT(results[0], MatchesVisitInfo(visit_browsed));
+
+  // When explicitly requested, they should be included.
+  options.include_actor_visits = true;
+  GetVisibleVisitsForURL(kUrlId1, options, &results);
+  ASSERT_EQ(2U, results.size());
+  EXPECT_THAT(results[0], MatchesVisitInfo(visit_actor));
+  EXPECT_THAT(results[1], MatchesVisitInfo(visit_browsed));
+
+  options = QueryOptions();
+  options.duplicate_policy = QueryOptions::KEEP_ALL_DUPLICATES;
+
+  // By default, actor visits should be excluded from GetVisibleVisitsInRange.
+  GetVisibleVisitsInRange(options, &results);
+  ASSERT_EQ(1U, results.size());
+  EXPECT_THAT(results[0], MatchesVisitInfo(visit_browsed));
+
+  // When explicitly requested, they should be included.
+  options.include_actor_visits = true;
+  GetVisibleVisitsInRange(options, &results);
+  ASSERT_EQ(2U, results.size());
+  EXPECT_THAT(results[0], MatchesVisitInfo(visit_actor));
+  EXPECT_THAT(results[1], MatchesVisitInfo(visit_browsed));
+}
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 TEST_F(VisitDatabaseTest, GetHistoryCount) {
   // Start with a day in the middle of summer, so that we are nowhere near

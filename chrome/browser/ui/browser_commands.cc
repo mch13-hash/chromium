@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/check.h"
+#include "base/check_deref.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
@@ -32,6 +33,7 @@
 #include "chrome/browser/chained_back_navigation_tracker.h"
 #include "chrome/browser/commerce/browser_utils.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_side_panel_coordinator.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/favicon/favicon_utils.h"
@@ -107,6 +109,7 @@
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
@@ -356,7 +359,8 @@ content::WebContents* DuplicateTabAt(Browser* browser,
   content::WebContents* raw_contents_dupe = contents_dupe.get();
 
   bool pinned = false;
-  if (browser->CanSupportWindowFeature(Browser::FEATURE_TABSTRIP)) {
+  if (browser->CanSupportWindowFeature(
+          Browser::WindowFeature::kFeatureTabStrip)) {
     // If this is a tabbed browser, just create a duplicate tab inside the same
     // window next to the tab being duplicated.
     TabStripModel* tab_strip_model = browser->tab_strip_model();
@@ -967,7 +971,8 @@ void Home(Browser* browser, WindowOpenDisposition disposition) {
 
   if (disposition == WindowOpenDisposition::CURRENT_TAB ||
       disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB) {
-    extensions::MaybeShowExtensionControlledHomeNotification(browser);
+    extensions::MaybeShowExtensionControlledHomeNotification(
+        browser, browser->tab_strip_model()->GetActiveWebContents());
   }
 #endif
 
@@ -1057,8 +1062,8 @@ void NewWindow(BrowserWindowInterface* browser) {
   Profile* const profile = browser->GetProfile();
 #if BUILDFLAG(IS_MAC)
   // Web apps should open a window to their launch page.
-  if (web_app::AppBrowserController* const app_browser_controller =
-          browser->GetFeatures().app_browser_controller()) {
+  if (auto* const app_browser_controller =
+          web_app::AppBrowserController::From(browser)) {
     const webapps::AppId app_id = app_browser_controller->app_id();
 
     auto launch_container = apps::LaunchContainer::kLaunchContainerWindow;
@@ -1102,19 +1107,21 @@ void CloseWindow(BrowserWindowInterface* browser) {
   browser->GetWindow()->Close();
 }
 
-content::WebContents& NewTab(Browser* browser) {
-  base::RecordAction(UserMetricsAction("NewTab"));
-  // TODO(asvitkine): This is invoked programmatically from several places.
-  // Audit the code and change it so that the histogram only gets collected for
-  // user-initiated commands.
-  UMA_HISTOGRAM_ENUMERATION("Tab.NewTab", NewTabTypes::NEW_TAB_COMMAND,
-                            NewTabTypes::NEW_TAB_ENUM_COUNT);
+content::WebContents& NewTab(Browser* browser, NewTabTypes context) {
+  if (context != NewTabTypes::kNoUserAction) {
+    base::RecordAction(base::UserMetricsAction("NewTab"));
+  }
+
+  UMA_HISTOGRAM_ENUMERATION("Tab.NewTab", context,
+                            NewTabTypes::kNewTabEnumCount);
+
   browser->profile()->SetUserData(
       NewTabGroupingUserData::kNewTabGroupingUserDataKey,
       std::make_unique<NewTabGroupingUserData>(
           browser->tab_strip_model()->GetActiveTabGroupId()));
 
-  if (browser->SupportsWindowFeature(Browser::FEATURE_TABSTRIP)) {
+  if (browser->SupportsWindowFeature(
+          Browser::WindowFeature::kFeatureTabStrip)) {
     std::optional<tab_groups::TabGroupId> group_id = std::nullopt;
 
     if (features::IsNewTabAddsToActiveGroupEnabled()) {
@@ -1161,11 +1168,6 @@ void CloseTab(BrowserWindowInterface* browser) {
         browser->GetTabStripModel()->GetActiveWebContents();
     active_web_contents->Close();
 
-    return;
-  }
-
-  if (!toast_features::IsEnabled(toast_features::kPinnedTabToastOnClose)) {
-    CloseSelectedTabAndRecordTabCountMetric(browser);
     return;
   }
 
@@ -1366,7 +1368,8 @@ WebContents* DuplicateTabAt(Browser* browser, int index) {
 }
 
 void DuplicateSplit(Browser* browser, split_tabs::SplitTabId split) {
-  CHECK(browser->CanSupportWindowFeature(Browser::FEATURE_TABSTRIP));
+  CHECK(browser->CanSupportWindowFeature(
+      Browser::WindowFeature::kFeatureTabStrip));
 
   TabStripModel* model = browser->tab_strip_model();
   split_tabs::SplitTabData* split_data = model->GetSplitData(split);
@@ -1787,9 +1790,8 @@ void MoveTabsToReadLater(Browser* browser,
 #if !BUILDFLAG(IS_ANDROID)
   if (toast_features::IsEnabled(toast_features::kReadingListToast)) {
     // Don't show the reading list toast if the side panel is visible.
-    std::optional<SidePanelEntry::Id> id =
-        browser->GetFeatures().side_panel_ui()->GetCurrentEntryId();
-    if (id.has_value() && id.value() == SidePanelEntryId::kReadingList) {
+    if (browser->GetFeatures().side_panel_ui()->IsSidePanelEntryShowing(
+            SidePanelEntryKey(SidePanelEntryId::kReadingList))) {
       return;
     }
 
@@ -2170,6 +2172,17 @@ void CloseTabSearch(Browser* browser) {
   browser->window()->CloseTabSearchBubble();
 }
 
+void ShowContextualTasksSidePanel(BrowserWindowInterface* browser) {
+  auto* coordinator =
+      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser);
+  CHECK(coordinator);
+  if (coordinator->IsSidePanelOpenForContextualTask()) {
+    coordinator->Close();
+  } else {
+    coordinator->Show();
+  }
+}
+
 void ToggleVerticalTabs(Browser* browser) {
   tabs::VerticalTabStripStateController* controller =
       browser->GetFeatures().vertical_tab_strip_state_controller();
@@ -2312,6 +2325,13 @@ void ToggleShowGoogleLensShortcut(Browser* browser) {
   bool pref_enabled = browser->profile()->GetPrefs()->GetBoolean(
       omnibox::kShowGoogleLensShortcut);
   browser->profile()->GetPrefs()->SetBoolean(omnibox::kShowGoogleLensShortcut,
+                                             !pref_enabled);
+}
+
+void ToggleShowAiModeOmniboxButton(Browser* browser) {
+  bool pref_enabled = browser->profile()->GetPrefs()->GetBoolean(
+      omnibox::kShowAiModeOmniboxButton);
+  browser->profile()->GetPrefs()->SetBoolean(omnibox::kShowAiModeOmniboxButton,
                                              !pref_enabled);
 }
 
@@ -2458,7 +2478,7 @@ bool IsWebAppOrCustomTab(const BrowserWindowInterface* bwi) {
 #if BUILDFLAG(IS_CHROMEOS)
       bwi->GetType() == BrowserWindowInterface::TYPE_CUSTOM_TAB ||
 #endif
-      !!bwi->GetAppBrowserController();
+      web_app::AppBrowserController::IsWebApp(bwi);
 }
 
 Browser* OpenInChrome(Browser* hosted_app_browser) {

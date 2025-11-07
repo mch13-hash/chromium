@@ -20,7 +20,6 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
-#include "third_party/blink/renderer/core/scheduler/task_attribution_util.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/view_transition/dom_view_transition.h"
 #include "third_party/blink/renderer/core/view_transition/page_swap_event.h"
@@ -28,9 +27,17 @@
 #include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.h"
-#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
 
 namespace blink {
+
+namespace {
+
+bool CompareTransitions(const Member<ViewTransition>& left,
+                        const Member<ViewTransition>& right) {
+  return left->Id() < right->Id();
+}
+
+}  // namespace
 
 // static
 const char ViewTransitionSupplement::kSupplementName[] = "ViewTransition";
@@ -62,12 +69,6 @@ DOMViewTransition* ViewTransitionSupplement::StartViewTransitionForElement(
   DCHECK(script_state);
   if (!element) {
     return nullptr;
-  }
-
-  if (callback) {
-    // Set the task state if we're not in an extension task (as extensions
-    // are not currently supported in TaskAttributionTracker).
-    callback->SetTaskState(CaptureCurrentTaskStateIfMainWorld(script_state));
   }
 
   auto* supplement = From(element->GetDocument());
@@ -343,6 +344,20 @@ void ViewTransitionSupplement::OnSkippedTransitionDOMCallback(
   skipped_with_pending_dom_callback_.erase(transition->Scope());
 }
 
+void ViewTransitionSupplement::OnTransitionCaptured(
+    ViewTransition* transition) {
+  CHECK(transition);
+  captured_transitions_.push_back(transition);
+  if (--in_flight_capture_requests_ == 0) {
+    std::sort(captured_transitions_.begin(), captured_transitions_.end(),
+              CompareTransitions);
+    for (auto captured_transition : captured_transitions_) {
+      captured_transition->OnCapturePhaseComplete();
+    }
+    captured_transitions_.clear();
+  }
+}
+
 ViewTransition* ViewTransitionSupplement::GetTransition() {
   return document_transition_.Get();
 }
@@ -420,12 +435,16 @@ void ViewTransitionSupplement::Trace(Visitor* visitor) const {
   visitor->Trace(document_transition_);
   visitor->Trace(element_transitions_);
   visitor->Trace(skipped_with_pending_dom_callback_);
+  visitor->Trace(captured_transitions_);
 
   Supplement<Document>::Trace(visitor);
 }
 
 void ViewTransitionSupplement::AddPendingRequest(
     std::unique_ptr<ViewTransitionRequest> request) {
+  if (request->type() == ViewTransitionRequest::Type::kSave) {
+    in_flight_capture_requests_++;
+  }
   pending_requests_.push_back(std::move(request));
 
   auto* document = GetSupplementable();
@@ -505,9 +524,9 @@ ViewTransitionSupplement::ResolveCrossDocumentViewTransition() {
 viz::ViewTransitionElementResourceId
 ViewTransitionSupplement::GenerateResourceId(
     const blink::ViewTransitionToken& transition_token,
-    bool for_subframe_snapshot) {
+    bool for_scope_snapshot) {
   return viz::ViewTransitionElementResourceId(
-      transition_token, ++resource_local_id_sequence_, for_subframe_snapshot);
+      transition_token, ++resource_local_id_sequence_, for_scope_snapshot);
 }
 
 void ViewTransitionSupplement::InitializeResourceIdSequence(

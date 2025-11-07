@@ -249,7 +249,8 @@ std::optional<std::pair<int, AuthenticatorTransport>> GetWindowsAPIButtonLabel(
         (transport_availability.transport_list_did_include_internal ||
          transport_availability.has_empty_allow_list) &&
         transport_availability.has_platform_authenticator_credential ==
-            device::FidoRequestHandlerBase::RecognizedCredential::kUnknown;
+            device::FidoRequestHandlerBase::RecognizedCredential::kUnknown &&
+        transport_availability.win_is_uvpaa;
     win_handles_hybrid =
         (transport_availability.transport_list_did_include_hybrid ||
          transport_availability.has_empty_allow_list) &&
@@ -258,10 +259,11 @@ std::optional<std::pair<int, AuthenticatorTransport>> GetWindowsAPIButtonLabel(
         transport_availability.transport_list_did_include_security_key ||
         transport_availability.has_empty_allow_list;
   } else {
-    win_handles_internal = transport_availability.make_credential_attachment ==
-                               device::AuthenticatorAttachment::kPlatform ||
-                           transport_availability.make_credential_attachment ==
-                               device::AuthenticatorAttachment::kAny;
+    win_handles_internal = (transport_availability.make_credential_attachment ==
+                                device::AuthenticatorAttachment::kPlatform ||
+                            transport_availability.make_credential_attachment ==
+                                device::AuthenticatorAttachment::kAny) &&
+                           transport_availability.win_is_uvpaa;
     win_handles_security_key =
         transport_availability.make_credential_attachment ==
             device::AuthenticatorAttachment::kCrossPlatform ||
@@ -694,10 +696,6 @@ void AuthenticatorRequestDialogController::PasskeyUpgradeFailed() {
   CancelAuthenticatorRequest();
 }
 
-void AuthenticatorRequestDialogController::HideDialog() {
-  SetCurrentStep(Step::kNotStarted);
-}
-
 bool AuthenticatorRequestDialogController::is_request_complete() const {
   return model_->step() == Step::kTimedOut ||
          model_->step() == Step::kKeyNotRegistered ||
@@ -971,7 +969,7 @@ bool AuthenticatorRequestDialogController::StartGuidedFlowForHint(
 void AuthenticatorRequestDialogController::
     HideDialogAndDispatchToPlatformAuthenticator(
         std::optional<AuthenticatorType> type) {
-  HideDialog();
+  SetCurrentStep(Step::kPlatformAuthenticator);
 
   std::vector<AuthenticatorReference>& authenticators =
       ephemeral_state_.saved_authenticators_.authenticator_list();

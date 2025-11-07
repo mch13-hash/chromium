@@ -18,7 +18,9 @@ import static org.mockito.Mockito.when;
 import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinator.BottomSheetType.SINGLE_THEME_COLLECTION;
 import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationCoordinator.BottomSheetType.THEME_COLLECTIONS;
 
+import android.content.ComponentCallbacks;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.view.ContextThemeWrapper;
 import android.view.View;
 import android.widget.ImageView;
@@ -47,6 +49,7 @@ import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridge;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeBridge.ThemeCollectionSelectionListener;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
+import org.chromium.components.browser_ui.widget.MaterialSwitchWithText;
 import org.chromium.components.image_fetcher.ImageFetcher;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
@@ -61,6 +64,7 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
 
     private static final String TEST_COLLECTION_ID = "Test Collection Id";
     private static final String TEST_COLLECTION_TITLE = "Test Collection";
+    private static final String TEST_COLLECTION_TITLE_NEW = "Test Collection New";
     private static final String NEW_TEST_COLLECTION_ID = "New Test Collection Id";
     private static final String NEW_TEST_COLLECTION_TITLE = "New Test Collection";
 
@@ -70,13 +74,13 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
     @Mock private NtpThemeBridge mNtpThemeBridge;
     @Mock private ImageFetcher mImageFetcher;
     @Mock private BottomSheetController mBottomSheetController;
-    @Mock private Runnable mOnThemeImageSelectedCallback;
     @Captor private ArgumentCaptor<Callback<List<CollectionImage>>> mCallbackCaptor;
-
     @Captor private ArgumentCaptor<ThemeCollectionSelectionListener> mListenerCaptor;
+    @Captor private ArgumentCaptor<ComponentCallbacks> mComponentCallbacksCaptor;
 
     private NtpSingleThemeCollectionCoordinator mCoordinator;
     private Context mContext;
+    private Context mContextSpy;
     private View mBottomSheetView;
 
     @Before
@@ -85,19 +89,19 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
                 new ContextThemeWrapper(
                         ApplicationProvider.getApplicationContext(),
                         R.style.Theme_BrowserUI_DayNight);
+        mContextSpy = spy(mContext);
 
         when(mBottomSheetDelegate.getBottomSheetController()).thenReturn(mBottomSheetController);
 
         mCoordinator =
                 new NtpSingleThemeCollectionCoordinator(
-                        mContext,
+                        mContextSpy,
                         mBottomSheetDelegate,
                         mNtpThemeBridge,
                         mImageFetcher,
                         TEST_COLLECTION_ID,
                         TEST_COLLECTION_TITLE,
-                        SheetState.FULL,
-                        mOnThemeImageSelectedCallback);
+                        SheetState.FULL);
 
         ArgumentCaptor<View> viewCaptor = ArgumentCaptor.forClass(View.class);
         verify(mBottomSheetDelegate)
@@ -166,6 +170,9 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
 
     @Test
     public void testDestroy() {
+        verify(mContextSpy).registerComponentCallbacks(mComponentCallbacksCaptor.capture());
+        ComponentCallbacks componentCallbacks = mComponentCallbacksCaptor.getValue();
+
         View backButton = mBottomSheetView.findViewById(R.id.back_button);
         ImageView learnMoreButton = mBottomSheetView.findViewById(R.id.learn_more_button);
         NtpThemeCollectionsAdapter adapter = mCoordinator.getNtpThemeCollectionsAdapterForTesting();
@@ -181,6 +188,7 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
         assertFalse(learnMoreButton.hasOnClickListeners());
         verify(adapterSpy).clearOnClickListeners();
         verify(mNtpThemeBridge).removeListener(any());
+        verify(mContextSpy).unregisterComponentCallbacks(eq(componentCallbacks));
     }
 
     @Test
@@ -263,18 +271,16 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
         RecyclerView recyclerView =
                 mBottomSheetView.findViewById(R.id.single_theme_collection_recycler_view);
         recyclerView.measure(
-                View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(400, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY));
-        recyclerView.layout(0, 0, 480, 800);
+        recyclerView.layout(0, 0, 400, 800);
 
         // Get the view for the first item.
         View themeCollectionView = recyclerView.getChildAt(0);
         assertNotNull(themeCollectionView);
 
         themeCollectionView.performClick();
-        verify(mNtpThemeBridge)
-                .setSelectedTheme(eq(imageToClick.collectionId), eq(imageToClick.imageUrl));
-        verify(mOnThemeImageSelectedCallback).run();
+        verify(mNtpThemeBridge).setCollectionTheme(eq(imageToClick));
     }
 
     @Test
@@ -291,5 +297,75 @@ public class NtpSingleThemeCollectionCoordinatorUnitTest {
         listener.onThemeCollectionSelectionChanged(collectionId, imageUrl);
 
         verify(adapterSpy).setSelection(eq(collectionId), eq(imageUrl));
+    }
+
+    @Test
+    public void testConfigurationChanged() {
+        verify(mContextSpy).registerComponentCallbacks(mComponentCallbacksCaptor.capture());
+        ComponentCallbacks componentCallbacks = mComponentCallbacksCaptor.getValue();
+
+        int initialScreenWidth = mCoordinator.getScreenWidthForTesting();
+
+        // Test that screen width is updated on configuration change.
+        Configuration newConfig = new Configuration(mContext.getResources().getConfiguration());
+        newConfig.screenWidthDp = 1000;
+        componentCallbacks.onConfigurationChanged(newConfig);
+
+        int screenWidthAfterChange = mCoordinator.getScreenWidthForTesting();
+        assertTrue(
+                "Screen width should change on configuration change.",
+                initialScreenWidth != screenWidthAfterChange);
+        assertEquals(
+                "Screen width should be updated to the new value.", 1000, screenWidthAfterChange);
+
+        // Test that screen width is not updated if it is the same.
+        componentCallbacks.onConfigurationChanged(newConfig);
+        assertEquals(
+                "Screen width should not change if configuration is the same.",
+                screenWidthAfterChange,
+                mCoordinator.getScreenWidthForTesting());
+
+        // Test that screen width is updated again with a different value.
+        newConfig.screenWidthDp = 500;
+        componentCallbacks.onConfigurationChanged(newConfig);
+        assertTrue(
+                "Screen width should change on configuration change again.",
+                screenWidthAfterChange != mCoordinator.getScreenWidthForTesting());
+        assertEquals(
+                "Screen width should be updated to the new value.",
+                500,
+                mCoordinator.getScreenWidthForTesting());
+    }
+
+    @Test
+    public void testDailyUpdateSwitchState() {
+        // Case 1: Daily refresh is enabled for the current collection.
+        when(mNtpThemeBridge.getSelectedThemeCollectionId()).thenReturn(TEST_COLLECTION_ID);
+        when(mNtpThemeBridge.getIsDailyRefreshEnabled()).thenReturn(true);
+        mCoordinator.updateThemeCollection(
+                TEST_COLLECTION_ID, TEST_COLLECTION_TITLE_NEW, SheetState.FULL);
+        assertTrue(
+                ((MaterialSwitchWithText)
+                                mBottomSheetView.findViewById(R.id.daily_update_switch_button))
+                        .isChecked());
+
+        // Case 2: Daily refresh is disabled for the current collection.
+        when(mNtpThemeBridge.getIsDailyRefreshEnabled()).thenReturn(false);
+        mCoordinator.updateThemeCollection(
+                TEST_COLLECTION_ID, TEST_COLLECTION_TITLE, SheetState.FULL);
+        assertFalse(
+                ((MaterialSwitchWithText)
+                                mBottomSheetView.findViewById(R.id.daily_update_switch_button))
+                        .isChecked());
+
+        // Case 3: Another collection is selected.
+        when(mNtpThemeBridge.getSelectedThemeCollectionId()).thenReturn("another_id");
+        when(mNtpThemeBridge.getIsDailyRefreshEnabled()).thenReturn(true);
+        mCoordinator.updateThemeCollection(
+                TEST_COLLECTION_ID, TEST_COLLECTION_TITLE_NEW, SheetState.FULL);
+        assertFalse(
+                ((MaterialSwitchWithText)
+                                mBottomSheetView.findViewById(R.id.daily_update_switch_button))
+                        .isChecked());
     }
 }

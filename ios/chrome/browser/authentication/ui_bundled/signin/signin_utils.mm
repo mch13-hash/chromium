@@ -27,10 +27,10 @@
 #import "ios/chrome/app/change_profile_commands.h"
 #import "ios/chrome/app/profile/profile_state.h"
 #import "ios/chrome/app/tests_hook.h"
+#import "ios/chrome/browser/authentication/history_sync/coordinator/history_sync_coordinator.h"
+#import "ios/chrome/browser/authentication/history_sync/model/history_sync_utils.h"
 #import "ios/chrome/browser/authentication/ui_bundled/change_profile/change_profile_settings_continuation.h"
 #import "ios/chrome/browser/authentication/ui_bundled/change_profile/change_profile_signout_continuation.h"
-#import "ios/chrome/browser/authentication/ui_bundled/history_sync/history_sync_coordinator.h"
-#import "ios/chrome/browser/authentication/ui_bundled/history_sync/history_sync_utils.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/features.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
@@ -64,15 +64,8 @@
 
 namespace {
 
-// Maximum delay to wait for fetching the account capabilities before showing
-// the sign-in upgrade promo. If fetching the account capabilities takes more
-// than the delay, then the promo is suppressed - it may be shown on the next
-// start-up.
-constexpr base::TimeDelta kShowSigninUpgradePromoMaxDelay =
-    base::Milliseconds(200);
-
-// The duration between two signin upgrade promo trigger is randomly chosen
-// between [53..68) days.
+// The duration between two signin fullscreen sign-in promo trigger is randomly
+// chosen between [53..68) days.
 base::TimeDelta DurationBetweenPromoTriggers() {
   using signin::kPromoTriggerRange;
   return base::RandTimeDelta(kPromoTriggerRange.first,
@@ -171,27 +164,12 @@ syncer::DataTypeSet DataCountsMapToDataTypeSet(
 
 namespace signin {
 
-base::TimeDelta GetWaitThresholdForCapabilities() {
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(
-          signin::kWaitThresholdMillisecondsForCapabilitiesApi)) {
-    std::string delayString = command_line->GetSwitchValueASCII(
-        signin::kWaitThresholdMillisecondsForCapabilitiesApi);
-    int commandLineDelay = 0;
-    if (base::StringToInt(delayString, &commandLineDelay)) {
-      return base::Milliseconds(commandLineDelay);
-    }
-  }
-  return kShowSigninUpgradePromoMaxDelay;
-}
-
 bool ShouldPresentUserSigninUpgrade(ProfileIOS* profile,
                                     const base::Version& current_version) {
   DCHECK(profile);
   DCHECK(current_version.IsValid());
 
-  if (tests_hook::DisableUpgradeSigninPromo()) {
+  if (tests_hook::DisableFullscreenSigninPromo()) {
     return false;
   }
 
@@ -220,7 +198,8 @@ bool ShouldPresentUserSigninUpgrade(ProfileIOS* profile,
     switch (history_sync::GetSkipReason(sync_service, auth_service,
                                         profile->GetPrefs(), YES)) {
       case history_sync::HistorySyncSkipReason::kNone:
-        // Need to show the upgrade promo, to show the history sync opt-in.
+        // Need to show the fullscreen sign-in promo, to show the history sync
+        // opt-in.
         break;
       case history_sync::HistorySyncSkipReason::kNotSignedIn:
         NOTREACHED();
@@ -231,7 +210,7 @@ bool ShouldPresentUserSigninUpgrade(ProfileIOS* profile,
     }
   }
 
-  // Avoid showing the upgrade sign-in promo when the device restore sign-in
+  // Avoid showing the fullscreen sign-in promo when the device restore sign-in
   // promo should be shown instead.
   if (GetPreRestoreIdentity(profile->GetPrefs()).has_value()) {
     return false;
@@ -256,7 +235,7 @@ bool ShouldPresentUserSigninUpgrade(ProfileIOS* profile,
   std::optional<promos_manager::Promo> forced_promo =
       promos_manager::PromoForName(base::SysNSStringToUTF8(forced_promo_name));
   if (forced_promo.has_value() &&
-      forced_promo.value() == promos_manager::Promo::SigninFullscreen) {
+      forced_promo.value() == promos_manager::Promo::FullscreenSignin) {
     return true;
   }
 
@@ -362,7 +341,7 @@ bool ShouldPresentWebSignin(ProfileIOS* profile) {
   return true;
 }
 
-void RecordUpgradePromoSigninStarted(
+void RecordFullscreenSigninPromoStarted(
     signin::IdentityManager* identity_manager,
     ChromeAccountManagerService* account_manager_service,
     const base::Version& current_version) {

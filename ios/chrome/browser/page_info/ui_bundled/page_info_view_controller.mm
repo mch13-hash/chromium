@@ -12,7 +12,6 @@
 #import "base/time/time.h"
 #import "components/page_info/core/page_info_history_data_source.h"
 #import "components/strings/grit/components_strings.h"
-#import "components/strings/grit/privacy_sandbox_strings.h"
 #import "ios/chrome/browser/keyboard/ui_bundled/UIKeyCommand+Chrome.h"
 #import "ios/chrome/browser/net/model/crurl.h"
 #import "ios/chrome/browser/page_info/ui_bundled/features.h"
@@ -53,7 +52,6 @@ typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierPermissions,
   SectionIdentifierAboutThisSite,
   SectionIdentifierLastVisited,
-  SectionIdentifierTrackingProtection,
 };
 
 typedef NS_ENUM(NSInteger, ItemIdentifier) {
@@ -62,8 +60,6 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   ItemIdentifierPermissionsMicrophone,
   ItemIdentifierAboutThisSite,
   ItemIdentifierLastVisited,
-  ItemIdentifierTrackingProtection,
-  ItemIdentifierTrackingProtectionButton,
 };
 
 // The minimum scale factor of the title label showing the URL.
@@ -72,10 +68,6 @@ const float kTitleLabelMinimumScaleFactor = 0.7f;
 // The maximum number of lines we should show for a page's description in the
 // AboutThisSite section.
 const NSInteger kAboutThisSiteDetailTextNumberOfLines = 2;
-
-// Used as an identifier to open the tracking protection settings page.
-const char kTrackingProtectionSettingsURL[] =
-    "settings://open_tracking_protection_settings";
 
 }  // namespace
 
@@ -94,7 +86,6 @@ const char kTrackingProtectionSettingsURL[] =
 @implementation PageInfoViewController {
   UITableViewDiffableDataSource<NSNumber*, NSNumber*>* _dataSource;
   PageInfoAboutThisSiteInfo* _aboutThisSiteInfo;
-  PageInfoTrackingProtectionInfo* _trackingProtectionInfo;
   NSString* _lastVisitedTimestamp;
 }
 
@@ -154,12 +145,10 @@ const char kTrackingProtectionSettingsURL[] =
 - (void)viewWillAppear:(BOOL)animated {
   [super viewWillAppear:animated];
 
-  if (IsPageInfoLastVisitedIOSEnabled()) {
-    // The Last Visited timestamp needs to be updated when the view is first
-    // loaded and subsequencenly since there could have been deletions performed
-    // on the Last Visited or History UI.
-    [self.pageInfoHistoryMutator lastVisitedTimestampNeedsUpdate];
-  }
+  // The Last Visited timestamp needs to be updated when the view is first
+  // loaded and subsequencenly since there could have been deletions performed
+  // on the Last Visited or History UI.
+  [self.pageInfoHistoryMutator lastVisitedTimestampNeedsUpdate];
 }
 
 #pragma mark - LegacyChromeTableViewController
@@ -181,8 +170,6 @@ const char kTrackingProtectionSettingsURL[] =
            }];
 
   [TableViewCellContentConfiguration registerCellForTableView:tableView];
-  RegisterTableViewCell<TableViewDetailIconCell>(tableView);
-  RegisterTableViewCell<TableViewTextCell>(tableView);
   RegisterTableViewHeaderFooter<TableViewTextHeaderFooterView>(tableView);
   RegisterTableViewHeaderFooter<TableViewLinkHeaderFooterView>(tableView);
   RegisterTableViewHeaderFooter<TableViewAttributedStringHeaderFooterView>(
@@ -204,25 +191,13 @@ const char kTrackingProtectionSettingsURL[] =
     [self updateSnapshotForAboutThisSite:snapshot];
   }
 
-  // Append cell for the Last Visited row only if the `kPageInfoLastVisitedIOS`
-  // flag is enabled and the Last Visited timestamp is available.
-  if (IsPageInfoLastVisitedIOSEnabled() && _lastVisitedTimestamp) {
+  // Append cell for the Last Visited row only if the flag is enabled and the
+  // Last Visited timestamp is available.
+  if (_lastVisitedTimestamp) {
     [snapshot
         appendSectionsWithIdentifiers:@[ @(SectionIdentifierLastVisited) ]];
     [snapshot appendItemsWithIdentifiers:@[ @(ItemIdentifierLastVisited) ]
                intoSectionWithIdentifier:@(SectionIdentifierLastVisited)];
-  }
-
-  if (_trackingProtectionInfo.shouldShowTrackingProtectionUI) {
-    [snapshot appendSectionsWithIdentifiers:@[
-      @(SectionIdentifierTrackingProtection)
-    ]];
-    [snapshot
-        appendItemsWithIdentifiers:@[
-          @(ItemIdentifierTrackingProtection),
-          @(ItemIdentifierTrackingProtectionButton),
-        ]
-         intoSectionWithIdentifier:@(SectionIdentifierTrackingProtection)];
   }
 
   [_dataSource applySnapshot:snapshot animatingDifferences:NO];
@@ -244,21 +219,8 @@ const char kTrackingProtectionSettingsURL[] =
           showAboutThisSitePage:_aboutThisSiteInfo.moreAboutURL];
       break;
     case ItemIdentifierLastVisited:
-      CHECK(IsPageInfoLastVisitedIOSEnabled());
       [self.pageInfoPresentationHandler showLastVisitedPage];
       break;
-    case ItemIdentifierTrackingProtection: {
-      if (_trackingProtectionInfo.hasTrackingProtectionException) {
-        [self.pageInfoPresentationHandler
-            showSendFeedbackPageForSender:UserFeedbackSender::
-                                              TrackingProtections];
-      }
-      break;
-    }
-    case ItemIdentifierTrackingProtectionButton: {
-      [self.trackingProtectionMutator toggleTrackingProtectionState];
-      break;
-    }
     case ItemIdentifierPermissionsCamera:
     case ItemIdentifierPermissionsMicrophone:
       break;
@@ -287,18 +249,6 @@ const char kTrackingProtectionSettingsURL[] =
     case SectionIdentifierAboutThisSite:
     case SectionIdentifierLastVisited:
       return nil;
-    case SectionIdentifierTrackingProtection: {
-      TableViewLinkHeaderFooterView* footer =
-          DequeueTableViewHeaderFooter<TableViewLinkHeaderFooterView>(
-              self.tableView);
-      footer.delegate = self;
-      footer.urls = @[ [[CrURL alloc]
-          initWithGURL:GURL(kTrackingProtectionSettingsURL)] ];
-      [footer setText:l10n_util::GetNSString(
-                          IDS_IOS_PAGE_INFO_TRACKING_PROTECTIONS_SECTION_FOOTER)
-            withColor:[UIColor colorNamed:kTextSecondaryColor]];
-      return footer;
-    }
     case SectionIdentifierPermissions: {
       TableViewAttributedStringHeaderFooterView* footer =
           DequeueTableViewHeaderFooter<
@@ -316,8 +266,6 @@ const char kTrackingProtectionSettingsURL[] =
 - (void)view:(TableViewLinkHeaderFooterView*)view didTapLinkURL:(CrURL*)URL {
   if (URL.gurl == GURL(kPageInfoHelpCenterURL)) {
     [self.pageInfoPresentationHandler showSecurityHelpPage];
-  } else if (URL.gurl == GURL(kTrackingProtectionSettingsURL)) {
-    // TODO(crbug.com/442799468): Add logic to open the Settings page.
   }
 }
 
@@ -516,67 +464,6 @@ const char kTrackingProtectionSettingsURL[] =
 
       return cell;
     }
-    case ItemIdentifierTrackingProtection: {
-      TableViewDetailIconCell* cell =
-          DequeueTableViewCell<TableViewDetailIconCell>(tableView);
-      cell.accessoryType = UITableViewCellAccessoryNone;
-      cell.selectionStyle = UITableViewCellSelectionStyleNone;
-      [cell createDetailTextLabel];
-      [cell setDetailTextNumberOfLines:0];
-      cell.textLayoutConstraintAxis = UILayoutConstraintAxisVertical;
-
-      if (_trackingProtectionInfo.hasTrackingProtectionException) {
-        cell.textLabel.text = l10n_util::GetNSString(
-            IDS_TRACKING_PROTECTIONS_PAUSED_PROTECTIONS_TITLE);
-        StringWithTags parsedDetailText =
-            ParseStringWithLinks(l10n_util::GetNSString(
-                IDS_IOS_PAGE_INFO_TRACKING_PROTECTIONS_PAUSED_DETAIL_TEXT));
-        NSMutableAttributedString* detailText =
-            [[NSMutableAttributedString alloc]
-                initWithString:parsedDetailText.string];
-        CHECK_EQ(parsedDetailText.ranges.size(), 1UL);
-        [detailText addAttribute:NSForegroundColorAttributeName
-                           value:[UIColor colorNamed:kBlueColor]
-                           range:parsedDetailText.ranges[0]];
-        cell.detailTextLabel.attributedText = detailText;
-        [cell setIconImage:DefaultSymbolWithPointSize(kShowActionSymbol,
-                                                      kPageInfoSymbolPointSize)
-                  tintColor:UIColor.whiteColor
-            backgroundColor:[UIColor colorNamed:kBlue500Color]
-               cornerRadius:kColorfulBackgroundSymbolCornerRadius];
-      } else {
-        cell.textLabel.text = l10n_util::GetNSString(
-            IDS_IOS_PAGE_INFO_TRACKING_PROTECTIONS_RESUMED);
-        cell.detailTextLabel.attributedText = [[NSMutableAttributedString alloc]
-            initWithString:
-                l10n_util::GetNSString(
-                    IDS_TRACKING_PROTECTIONS_ACTIVE_PROTECTIONS_DESCRIPTION)];
-        [cell setIconImage:DefaultSymbolWithPointSize(kHideActionSymbol,
-                                                      kPageInfoSymbolPointSize)
-                  tintColor:UIColor.whiteColor
-            backgroundColor:[UIColor colorNamed:kBlue500Color]
-               cornerRadius:kColorfulBackgroundSymbolCornerRadius];
-      }
-
-      return cell;
-    }
-    case ItemIdentifierTrackingProtectionButton: {
-      TableViewCellContentConfiguration* configuration =
-          [[TableViewCellContentConfiguration alloc] init];
-      if (_trackingProtectionInfo.hasTrackingProtectionException) {
-        configuration.title = l10n_util::GetNSString(
-            IDS_TRACKING_PROTECTIONS_BUTTON_RESUME_PROTECTIONS_LABEL);
-      } else {
-        configuration.title = l10n_util::GetNSString(
-            IDS_TRACKING_PROTECTIONS_BUTTON_PAUSE_PROTECTIONS_LABEL);
-      }
-      configuration.titleColor = [UIColor colorNamed:kBlueColor];
-
-      UITableViewCell* cell =
-          [TableViewCellContentConfiguration dequeueTableViewCell:tableView];
-      cell.contentConfiguration = configuration;
-      return cell;
-    }
   }
 }
 
@@ -731,8 +618,6 @@ const char kTrackingProtectionSettingsURL[] =
 #pragma mark - PageInfoHistoryConsumer
 
 - (void)setLastVisitedTimestamp:(std::optional<base::Time>)lastVisited {
-  CHECK(IsPageInfoLastVisitedIOSEnabled());
-
   if (lastVisited.has_value()) {
     _lastVisitedTimestamp = base::SysUTF16ToNSString(
         page_info::PageInfoHistoryDataSource::FormatLastVisitedTimestamp(
@@ -770,21 +655,6 @@ const char kTrackingProtectionSettingsURL[] =
   }
 
   // Update the UI.
-  [_dataSource applySnapshot:snapshot animatingDifferences:NO];
-}
-
-#pragma mark - PageInfoTrackingProtectionConsumer
-
-// Sets PageInfoTrackingProtectionInfo and updates the UI.
-- (void)setTrackingProtectionInfo:
-    (PageInfoTrackingProtectionInfo*)trackingProtectionInfo {
-  _trackingProtectionInfo = trackingProtectionInfo;
-  NSDiffableDataSourceSnapshot<NSNumber*, NSNumber*>* snapshot =
-      [_dataSource snapshot];
-  [snapshot reconfigureItemsWithIdentifiers:@[
-    @(ItemIdentifierTrackingProtection),
-    @(ItemIdentifierTrackingProtectionButton),
-  ]];
   [_dataSource applySnapshot:snapshot animatingDifferences:NO];
 }
 

@@ -1260,6 +1260,11 @@ interface CountQueuingStrategy
     getter highWaterMark
     getter size
     method constructor
+interface CreateMonitor : EventTarget
+    attribute @@toStringTag
+    getter ondownloadprogress
+    method constructor
+    setter ondownloadprogress
 interface Credential
     attribute @@toStringTag
     getter id
@@ -3206,6 +3211,8 @@ interface HTMLBodyElement : HTMLElement
     getter onblur
     getter onerror
     getter onfocus
+    getter ongamepadconnected
+    getter ongamepaddisconnected
     getter onhashchange
     getter onlanguagechange
     getter onload
@@ -3236,6 +3243,8 @@ interface HTMLBodyElement : HTMLElement
     setter onblur
     setter onerror
     setter onfocus
+    setter ongamepadconnected
+    setter ongamepaddisconnected
     setter onhashchange
     setter onlanguagechange
     setter onload
@@ -3743,6 +3752,8 @@ interface HTMLFrameSetElement : HTMLElement
     getter onblur
     getter onerror
     getter onfocus
+    getter ongamepadconnected
+    getter ongamepaddisconnected
     getter onhashchange
     getter onlanguagechange
     getter onload
@@ -3769,6 +3780,8 @@ interface HTMLFrameSetElement : HTMLElement
     setter onblur
     setter onerror
     setter onfocus
+    setter ongamepadconnected
+    setter ongamepaddisconnected
     setter onhashchange
     setter onlanguagechange
     setter onload
@@ -6554,6 +6567,7 @@ interface PerformanceResourceTiming : PerformanceEntry
     attribute @@toStringTag
     getter connectEnd
     getter connectStart
+    getter contentEncoding
     getter decodedBodySize
     getter deliveryType
     getter domainLookupEnd
@@ -8236,7 +8250,7 @@ interface SVGStyleElement : SVGElement
 interface SVGSwitchElement : SVGGraphicsElement
     attribute @@toStringTag
     method constructor
-interface SVGSymbolElement : SVGElement
+interface SVGSymbolElement : SVGGraphicsElement
     attribute @@toStringTag
     getter preserveAspectRatio
     getter viewBox
@@ -9210,6 +9224,7 @@ interface ViewTransition
     getter updateCallbackDone
     method constructor
     method skipTransition
+    method waitUntil
 interface ViewTransitionTypeSet
     attribute @@toStringTag
     getter size
@@ -10687,6 +10702,7 @@ interface WebTransport
     getter datagrams
     getter incomingBidirectionalStreams
     getter incomingUnidirectionalStreams
+    getter protocol
     getter ready
     method close
     method constructor
@@ -11167,6 +11183,17 @@ namespace GPUTextureUsage
     attribute RENDER_ATTACHMENT
     attribute STORAGE_BINDING
     attribute TEXTURE_BINDING
+namespace Temporal
+    attribute @@toStringTag
+    attribute Now
+    method Duration
+    method Instant
+    method PlainDate
+    method PlainDateTime
+    method PlainMonthDay
+    method PlainTime
+    method PlainYearMonth
+    method ZonedDateTime
 namespace console
     attribute @@toStringTag
     getter memory
@@ -11272,6 +11299,8 @@ namespace console
     getter onerror
     getter onfocus
     getter onformdata
+    getter ongamepadconnected
+    getter ongamepaddisconnected
     getter ongotpointercapture
     getter onhashchange
     getter oninput
@@ -11489,6 +11518,8 @@ namespace console
     setter onerror
     setter onfocus
     setter onformdata
+    setter ongamepadconnected
+    setter ongamepaddisconnected
     setter ongotpointercapture
     setter onhashchange
     setter oninput

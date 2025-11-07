@@ -4,11 +4,11 @@
 
 #include "content/browser/renderer_host/input/input_transfer_handler_android.h"
 
-#include "base/android/android_info.h"
 #include "base/android/jni_android.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/trace_event/typed_macros.h"
+#include "components/input/features.h"
 #include "components/input/utils.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "content/browser/compositor/surface_utils.h"
@@ -113,9 +113,6 @@ bool InputTransferHandlerAndroid::OnTouchEvent(
     return false;
   }
 
-  const bool active_touch_sequence_on_viz =
-      cached_transferred_sequence_down_time_ms_ > last_seen_touch_end_ts_;
-
   // GetRawDownTime is in milliseconds precision, convert delta to milliseconds
   // precision as well for accurate comparison.
   const int64_t delta =
@@ -124,16 +121,18 @@ bool InputTransferHandlerAndroid::OnTouchEvent(
     // TODO(crbug.com/406485568): Investigate this negative delta and
     // potentially file an Android platform bug.
     TRACE_EVENT_INSTANT("input,input.scrolling", "DownTimeAfterEventTime");
-    EmitTransferResultHistogramAndTraceEvent(
-        TransferInputToVizResult::kDownTimeAfterEventTime);
-    if (!NewPointersGoDirectlyToViz() && active_touch_sequence_on_viz) {
-      OnStartDroppingSequence(
-          event,
-          InputOnVizSequenceDroppedReason::kActiveSeqOnVizAbnormalDownTime);
-      return true;
+    if (!input::features::kTransferSequencesWithAbnormalDownTime.Get()) {
+      EmitTransferResultHistogramAndTraceEvent(
+          TransferInputToVizResult::kDownTimeAfterEventTime);
+      if (IsTouchSequencePotentiallyActiveOnViz()) {
+        OnStartDroppingSequence(
+            event,
+            InputOnVizSequenceDroppedReason::kActiveSeqOnVizAbnormalDownTime);
+        return true;
+      }
+      // Let browser handle this sequence.
+      return false;
     }
-    // Let browser handle this sequence.
-    return false;
   }
 
   const bool is_transferred_back_sequence = delta > 0;
@@ -172,11 +171,7 @@ bool InputTransferHandlerAndroid::OnTouchEvent(
     return true;
   }
 
-  if (NewPointersGoDirectlyToViz()) {
-    return false;
-  }
-
-  if (!active_touch_sequence_on_viz) {
+  if (!IsTouchSequencePotentiallyActiveOnViz()) {
     return false;
   }
 
@@ -223,6 +218,10 @@ bool InputTransferHandlerAndroid::FilterRedundantDownEvent(
   return event.GetRawDownTime() <= cached_transferred_sequence_down_time_ms_;
 }
 
+void InputTransferHandlerAndroid::OnDetachedFromWindow() {
+  cached_transferred_sequence_event_time_us_.reset();
+}
+
 void InputTransferHandlerAndroid::RequestInputBack(
     RequestInputBackReason reason) {
   requested_input_back_ = true;
@@ -232,43 +231,18 @@ void InputTransferHandlerAndroid::RequestInputBack(
 
 bool InputTransferHandlerAndroid::IsTouchSequencePotentiallyActiveOnViz()
     const {
-  return cached_transferred_sequence_down_time_ms_ > last_seen_touch_end_ts_;
+  return cached_transferred_sequence_event_time_us_.has_value();
 }
 
+// In some cases where Viz might drop sequence the touch end is not received
+// here.
+// TOOD(crbug.com/448836551): Make Viz forward touch end for dropped
+// sequences to Browser.
 void InputTransferHandlerAndroid::OnTouchEnd(base::TimeTicks event_time) {
-  last_seen_touch_end_ts_ = event_time;
-}
-
-bool InputTransferHandlerAndroid::NewPointersGoDirectlyToViz() {
-  using base::android::android_info::SdkVersion;
-  if (base::android::android_info::sdk_int() ==
-      base::android::android_info::SDK_VERSION_V) {
-    // Some of the earlier Android 15 versions might have new pointer downs
-    // going to Viz, but we are defensively saying `false` here since there's no
-    // reliable way to check this which builds of Android 15 have new pointers
-    // going to Viz.
-    return false;
+  if (cached_transferred_sequence_event_time_us_.has_value() &&
+      *cached_transferred_sequence_event_time_us_ < event_time) {
+    cached_transferred_sequence_event_time_us_.reset();
   }
-
-  // The fix referred to in comments below: http://ag/32215438.
-  if (base::android::android_info::sdk_int() ==
-      base::android::android_info::SDK_VERSION_BAKLAVA) {
-    if (base::android::android_info::manufacturer() == "Google") {
-      // All Google's Android 16 devices have the fix available and pointer
-      // downs go directly to Viz.
-      return true;
-    } else {
-      // Some of OEMs might not have picked up the fix which was done quite late
-      // in the release cycle of Android 16.
-      return false;
-    }
-  }
-
-  CHECK_GT(base::android::android_info::sdk_int(),
-           base::android::android_info::SDK_VERSION_BAKLAVA);
-  // On Android 17+, the fix is always available, the pointer downs from the
-  // same touch sequence will go to Viz.
-  return true;
 }
 
 void InputTransferHandlerAndroid::OnStartDroppingSequence(
@@ -341,6 +315,10 @@ void InputTransferHandlerAndroid::ConsumeEventsUntilCancel(
     num_events_in_dropped_sequence_ = 0;
   }
   if (event.GetAction() == ui::MotionEvent::Action::DOWN) {
+    // The touch sequence transferred by system probably corresponds to this
+    // down. Resend state and updated transferred sequence timestamps.
+    cached_transferred_sequence_down_time_ms_ = event.GetRawDownTime();
+    cached_transferred_sequence_event_time_us_ = event.GetEventTime();
     client_->SendStateOnTouchTransfer(event,
                                       last_sent_browser_would_have_handled_);
   }
@@ -366,6 +344,7 @@ void InputTransferHandlerAndroid::OnTouchTransferredSuccessfully(
   CHECK_EQ(handler_state_, HandlerState::kIdle);
   handler_state_ = HandlerState::kConsumeEventsUntilCancel;
   cached_transferred_sequence_down_time_ms_ = event.GetRawDownTime();
+  cached_transferred_sequence_event_time_us_ = event.GetEventTime();
   last_sent_browser_would_have_handled_ = browser_would_have_handled;
   client_->SendStateOnTouchTransfer(event, browser_would_have_handled);
   // Corresponding to the `ACTION_DOWN` event which initiated the touch

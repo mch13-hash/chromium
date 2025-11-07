@@ -108,7 +108,7 @@ String BuildJustificationText(const String& text_content,
 float JustifyResults(const String& text_content,
                      const String& line_text,
                      unsigned line_text_start_offset,
-                     ShapeResultSpacing<String>& spacing,
+                     ShapeResultSpacing& spacing,
                      InlineItemResults& results) {
   float last_glyph_spacing = 0;
   for (wtf_size_t i = 0; i < results.size(); ++i) {
@@ -306,9 +306,10 @@ std::optional<LayoutUnit> ApplyJustificationInternal(
   }
 
   // Compute the spacing to justify.
-  ShapeResultSpacing<String> spacing(line_text,
-                                     target == JustificationTarget::kSvgText);
-  spacing.SetExpansion(space, line_info.BaseDirection());
+  ShapeResultSpacing spacing(line_text,
+                             target == JustificationTarget::kSvgText);
+  spacing.SetExpansion(line_info.LineStyle().GetTextJustify(), space,
+                       line_info.BaseDirection());
   const bool is_ruby = target == JustificationTarget::kRubyText ||
                        target == JustificationTarget::kRubyBase;
   if (!spacing.HasExpansion()) {
@@ -329,7 +330,8 @@ std::optional<LayoutUnit> ApplyJustificationInternal(
     if (target == JustificationTarget::kRubyText) {
       inset = std::min(LayoutUnit(2 * line_info.LineStyle().FontSize()), inset);
     }
-    spacing.SetExpansion(space - inset, line_info.BaseDirection());
+    spacing.SetExpansion(line_info.LineStyle().GetTextJustify(), space - inset,
+                         line_info.BaseDirection());
   }
 
   if (results) {

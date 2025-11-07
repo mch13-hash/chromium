@@ -831,7 +831,8 @@ NetworkContext::NetworkContext(
   }
 
   device_bound_session_manager_ = DeviceBoundSessionManager::Create(
-      url_request_context_->device_bound_session_service());
+      url_request_context_->device_bound_session_service(),
+      cookie_manager_.get());
 }
 
 NetworkContext::NetworkContext(
@@ -2427,7 +2428,8 @@ void NetworkContext::PreconnectSockets(
   net::HttpNetworkSession* session = factory->GetSession();
   net::HttpStreamFactory* http_stream_factory = session->http_stream_factory();
   http_stream_factory->PreconnectStreams(
-      base::saturated_cast<int32_t>(num_streams), request_info);
+      base::saturated_cast<int32_t>(num_streams), request_info,
+      base::OnceClosure());
 }
 
 #if BUILDFLAG(IS_P2P_ENABLED)
@@ -2709,7 +2711,6 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
   // case for any given NetworkContext: either PrefetchProxy, handling its
   // custom proxy configs, or IpProtection, using the proxy allowlist.
   auto* mdl_manager = network_service_->masked_domain_list_manager();
-  auto* prt_registry = network_service_->probabilistic_reveal_token_registry();
   bool requires_ipp_proxy_delegate =
       (mdl_manager->IsEnabled() ||
        !net::features::kIpPrivacyUnconditionalProxyDomainList.Get().empty()) &&
@@ -2726,10 +2727,9 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
     auto ip_protection_core_impl =
         std::make_unique<ip_protection::IpProtectionCoreImplMojo>(
             std::move(params_->ip_protection_control), core_host_remote,
-            mdl_manager, prt_registry, params_->enable_ip_protection,
+            mdl_manager, params_->enable_ip_protection,
             params_->ip_protection_incognito,
-            std::move(params_->initial_ip_protection_tokens),
-            params_->ip_protection_data_directory);
+            std::move(params_->initial_ip_protection_tokens));
     builder.set_proxy_delegate(
         std::make_unique<ip_protection::IpProtectionProxyDelegate>(
             ip_protection_core_impl.get()));
@@ -2801,9 +2801,9 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
   }
 
 #if BUILDFLAG(IS_WIN)
-  if (params_->windows_system_proxy_resolver) {
+  if (params_->system_proxy_resolver) {
     builder.SetMojoWindowsSystemProxyResolver(
-        std::move(params_->windows_system_proxy_resolver));
+        std::move(params_->system_proxy_resolver));
   }
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -2835,6 +2835,14 @@ URLRequestContextOwner NetworkContext::MakeURLRequestContext(
             params_->file_paths->no_vary_search_directory->path();
       }
       cache_params.type = network_session_configurator::ChooseCacheType();
+#if BUILDFLAG(IS_WIN)
+      // For enterprise users, we always use simple backend when encryption is
+      // enabled.
+      if (params_->enable_encrypted_http_cache) {
+        cache_params.type =
+            net::URLRequestContextBuilder::HttpCacheParams::DISK_SIMPLE;
+      }
+#endif
       if (params_->http_cache_file_operations_factory) {
         cache_params.file_operations_factory =
             base::MakeRefCounted<MojoBackendFileOperationsFactory>(
@@ -3157,9 +3165,17 @@ NetworkContext::MakeSessionCleanupCookieStore() const {
   std::unique_ptr<net::CookieCryptoDelegate> crypto_delegate = nullptr;
 
   if (params_->enable_encrypted_cookies) {
-    CHECK(params_->cookie_encryption_provider);
-    crypto_delegate = std::make_unique<CookieOSCryptAsyncDelegate>(
-        std::move(params_->cookie_encryption_provider));
+    if (params_->cookie_encryption_provider) {
+      crypto_delegate = std::make_unique<CookieOSCryptAsyncDelegate>(
+          std::move(params_->cookie_encryption_provider));
+    } else {
+#if !BUILDFLAG(IS_ANDROID)
+      // A cookie crypto delegate should not be created on Android to
+      // match the behavior of cookie_config::GetCookieCryptoDelegate().
+      // See https://crbug.com/449652881
+      NOTREACHED();
+#endif
+    }
   }
 
 #if BUILDFLAG(IS_WIN)
@@ -3555,6 +3571,34 @@ void NetworkContext::GetDeviceBoundSessionManager(
   if (device_bound_session_manager_) {
     device_bound_session_manager_->AddReceiver(
         std::move(device_bound_session_manager));
+  }
+}
+
+void NetworkContext::AddQuicHints(
+    const std::vector<url::SchemeHostPort>& origins,
+    const net::NetworkAnonymizationKey& network_anonymization_key) {
+  CHECK(url_request_context_);
+
+  for (const auto& origin : origins) {
+    url::CanonHostInfo host_info;
+    std::string canonical_host(
+        net::CanonicalizeHost(origin.host(), &host_info));
+    if (!host_info.IsIPAddress() &&
+        !net::IsCanonicalizedHostCompliant(canonical_host)) {
+      LOG(ERROR) << "Invalid QUIC hint host: " << origin.host();
+      continue;
+    }
+
+    // The AlternativeService hostname can be used to signal a change of host.
+    // By passing in an empty host, the origin's host will be used.
+    net::AlternativeService alternative_service(net::NextProto::kProtoQUIC, "",
+                                                origin.port());
+
+    url::SchemeHostPort canonical_origin(url::kHttpsScheme, canonical_host,
+                                         origin.port());
+    url_request_context_->http_server_properties()->SetQuicAlternativeService(
+        canonical_origin, network_anonymization_key, alternative_service,
+        base::Time::Max(), quic::ParsedQuicVersionVector());
   }
 }
 

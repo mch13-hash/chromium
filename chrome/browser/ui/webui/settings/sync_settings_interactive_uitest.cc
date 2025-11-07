@@ -146,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(SyncSettingsInteractiveTest,
   const DeepQuery kSignInButton = {"settings-ui",
                                    "settings-main",
                                    "settings-people-page-index",
-                                   "settings-account-page",
+                                   "settings-people-page",
                                    "settings-sync-account-control",
                                    "cr-button#signIn"};
   const GURL kAccountSettingsUrl = GURL(chrome::kChromeUIAccountSettingsURL);
@@ -163,7 +163,7 @@ IN_PROC_BROWSER_TEST_F(SyncSettingsInteractiveTest,
       InstrumentTab(kDiceSignInTabId, 1, browser()), Do([&]() {
         CoreAccountInfo account_info =
             identity_test_env()->MakeAccountAvailable(kTestEmail);
-        // TODO(crbug.com/419203245): Investigate why using the more suitable
+        // TODO(crbug.com/457428660): Investigate why using the more suitable
         // `GetSignInTabWithAccessPoint` returns null.
         content::WebContents* contents =
             browser()->tab_strip_model()->GetWebContentsAt(1);
@@ -180,7 +180,7 @@ IN_PROC_BROWSER_TEST_F(SyncSettingsInteractiveTest,
                          UiElementHasAppeared(kHistoryOptinAcceptButton)),
       WaitForStateChange(kHistorySyncOptinDialogContentsId,
                          UiElementHasAppeared(kHistoryOptinRejectButton)));
-  // TODO(crbug.com/419203245): Add metrics checks once they are implemented.
+  // TODO(crbug.com/457428660): Add metrics checks once they are implemented.
 }
 
 // Tests that a signed in user on the web can trigger and see the History
@@ -193,7 +193,7 @@ IN_PROC_BROWSER_TEST_F(
   const DeepQuery kContinueAsButton = {"settings-ui",
                                        "settings-main",
                                        "settings-people-page-index",
-                                       "settings-account-page",
+                                       "settings-people-page",
                                        "settings-sync-account-control",
                                        "cr-button#account-aware"};
   const GURL kAccountSettingsUrl = GURL(chrome::kChromeUIAccountSettingsURL);

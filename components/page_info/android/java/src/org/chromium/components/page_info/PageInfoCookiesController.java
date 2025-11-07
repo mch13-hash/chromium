@@ -105,8 +105,6 @@ public class PageInfoCookiesController extends PageInfoPreferenceSubpageControll
                                 ::onTrackingProtectionsButtonPressed,
                         /* onClearCallback= */ this::onClearCookiesClicked,
                         /* onCookieSettingsLinkClicked= */ delegate::showCookieSettings,
-                        /* onIncognitoSettingsLinkClicked */ delegate
-                                ::showIncognitoTrackingProtectionsSettings,
                         /* onFeedbackLinkClicked= */ delegate::showCookieFeedback,
                         /* disableCookieDeletion= */ isDeletionDisabled(),
                         /* hostName= */ mMainController.getURL().getHost(),
@@ -192,6 +190,9 @@ public class PageInfoCookiesController extends PageInfoPreferenceSubpageControll
 
     @Override
     public void updateRowIfNeeded() {}
+
+    @Override
+    public void updateSubpageIfNeeded() {}
 
     @Override
     public void onSubpageRemoved() {

@@ -49,6 +49,7 @@
 #import "ios/chrome/app/profile/profile_state_observer.h"
 #import "ios/chrome/app/profile/search_engine_choice_profile_agent.h"
 #import "ios/chrome/app/profile/session_metrics_profile_agent.h"
+#import "ios/chrome/app/profile/synced_set_up_profile_agent.h"
 #import "ios/chrome/app/profile/welcome_back_screen_profile_agent.h"
 #import "ios/chrome/app/spotlight/spotlight_manager.h"
 #import "ios/chrome/app/tests_hook.h"
@@ -89,9 +90,11 @@
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
 #import "ios/chrome/browser/signin/model/authentication_service_factory.h"
+#import "ios/chrome/browser/snapshots/model/constants.h"
 #import "ios/chrome/browser/translate/model/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/web_state_list/model/session_metrics.h"
 #import "ios/chrome/browser/web_state_list/model/web_usage_enabler/web_usage_enabler_browser_agent.h"
+#import "ios/chrome/browser/welcome_back/model/features.h"
 #import "ios/components/cookie_util/cookie_util.h"
 #import "ios/public/provider/chrome/browser/raccoon/raccoon_api.h"
 #import "ios/web/public/thread/web_task_traits.h"
@@ -171,7 +174,7 @@ void PurgeDataForSessions(const SessionIds& session_ids,
   const std::array<base::FilePath::StringViewType, 3> directories = {
       kLegacySessionsDirname,
       kSessionRestorationDirname,
-      FILE_PATH_LITERAL("Snapshots"),
+      kSnapshotsDirName,
   };
 
   for (const base::FilePath& storage_path : storage_paths) {
@@ -326,7 +329,6 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
       NOTREACHED();
 
     case ProfileInitStage::kLoadProfile:
-    case ProfileInitStage::kMigrateStorage:
     case ProfileInitStage::kPurgeDiscardedSessionsData:
     case ProfileInitStage::kProfileLoaded:
     case ProfileInitStage::kPrepareUI:
@@ -363,10 +365,6 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
 
     case ProfileInitStage::kLoadProfile:
       // Nothing to do.
-      break;
-
-    case ProfileInitStage::kMigrateStorage:
-      [self migrateSessionStorageIfNeeded];
       break;
 
     case ProfileInitStage::kPurgeDiscardedSessionsData:
@@ -569,17 +567,6 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
   [_state queueTransitionToNextInitStage];
 }
 
-- (void)migrateSessionStorageIfNeeded {
-  DCHECK(_state.profile);
-
-  __weak ProfileController* weakSelf = self;
-  SessionRestorationServiceFactory::GetInstance()->MigrateSessionStorageFormat(
-      _state.profile, SessionRestorationServiceFactory::kOptimized,
-      base::BindOnce(^{
-        [weakSelf.state queueTransitionToNextInitStage];
-      }));
-}
-
 - (void)purgeDiscardedSessionsData {
   DCHECK(_state.profile);
   DCHECK(_profileManager);
@@ -682,8 +669,12 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
     }
   }
 
-  if (first_run::IsWelcomeBackInFirstRunEnabled()) {
+  if (IsWelcomeBackEnabled()) {
     [_state addAgent:[[WelcomeBackScreenProfileAgent alloc] init]];
+  }
+
+  if (IsSyncedSetUpEnabled()) {
+    [_state addAgent:[[SyncedSetUpProfileAgent alloc] init]];
   }
 }
 

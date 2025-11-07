@@ -48,6 +48,7 @@ class FakeBaseTabStripController : public TabStripController {
   std::optional<int> GetActiveIndex() const override;
   bool IsTabSelected(int index) const override;
   bool IsTabPinned(int index) const override;
+  bool IsBrowserClosing() const override;
   void SelectTab(int index, const ui::Event& event) override;
   void RecordMetricsOnTabSelectionChange(
       std::optional<tab_groups::TabGroupId> group) override;
@@ -69,7 +70,7 @@ class FakeBaseTabStripController : public TabStripController {
                              ui::mojom::MenuSourceType source_type) override;
   int HasAvailableDragActions() const override;
   void OnDropIndexUpdate(std::optional<int> index, bool drop_before) override;
-  void CreateNewTab() override;
+  void CreateNewTab(NewTabTypes context) override;
   void CreateNewTabWithLocation(const std::u16string& loc) override;
   void OnStartedDragging(bool dragging_window) override;
   void OnStoppedDragging() override;

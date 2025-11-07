@@ -9,66 +9,123 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
 import type {ContextualEntrypointAndCarouselElement} from './contextual_entrypoint_and_carousel.js';
 
 export function getHtml(this: ContextualEntrypointAndCarouselElement) {
+  const showDescription = this.searchboxLayoutMode !== 'Compact' &&
+      this.showContextMenuDescription_ && !this.shouldShowRecentTabChip_;
+  const toolChipsVisible = this.shouldShowRecentTabChip_ ||
+      this.inDeepSearchMode_ || this.inCreateImageMode_;
+  const toolChips = html`
+        ${
+      this.shouldShowRecentTabChip_ ? html`
+        <composebox-recent-tab-chip id="recentTabChip"
+            class="upload-icon"
+            .recentTab="${this.tabSuggestions[0]}"
+            .inputsDisabled="${this.recentTabChipDisabled_}"
+            @add-tab-context="${this.addTabContext_}">
+        </composebox-recent-tab-chip>
+        ` :
+                                      ''}
+        <cr-composebox-tool-chip
+            icon="composebox:deepSearch"
+            label="${this.i18n('deepSearch')}"
+            remove-chip-aria-label="${
+      this.i18n('removeToolChipAriaLabel', this.i18n('deepSearch'))}"
+            ?visible="${this.inDeepSearchMode_}"
+            @click="${this.onDeepSearchClick_}">
+        </cr-composebox-tool-chip>
+        <cr-composebox-tool-chip
+            icon="composebox:nanoBanana"
+            label="${this.i18n('createImages')}"
+            remove-chip-aria-label="${
+      this.i18n('removeToolChipAriaLabel', this.i18n('createImages'))}"
+            ?visible="${this.inCreateImageMode_}"
+            @click="${this.onCreateImageClick_}">
+        </cr-composebox-tool-chip>
+  `;
+
+  const voiceSearchButton = html`
+          <cr-icon-button id="voiceSearchButton" class="voice-icon"
+              part="voice-icon" iron-icon="cr:mic"
+              @click="${this.onVoiceSearchClick_}"
+              title="${this.i18n('voiceSearchButtonLabel')}">
+          </cr-icon-button>
+        `;
+
+  const contextMenu = html`
+      <div class="context-menu-container" part="context-menu-and-tools">
+        <cr-composebox-context-menu-entrypoint id="contextEntrypoint"
+            part="composebox-entrypoint"
+            exportparts="context-menu-entrypoint-icon"
+            class="upload-icon no-overlap"
+            .tabSuggestions="${this.tabSuggestions}"
+            .entrypointName="${this.entrypointName}"
+            @open-image-upload="${this.openImageUpload_}"
+            @open-file-upload="${this.openFileUpload_}"
+            @add-tab-context="${this.addTabContext_}"
+            @deep-search-click="${this.onDeepSearchClick_}"
+            @create-image-click="${this.onCreateImageClick_}"
+            .inCreateImageMode="${this.inCreateImageMode_}"
+            .hasImageFiles="${this.hasImageFiles()}"
+            .disabledTabIds="${this.addedTabsIds_}"
+            .fileNum="${this.files_.size}"
+            ?inputs-disabled="${this.inputsDisabled_}"
+            ?show-context-menu-description="${showDescription}">
+        </cr-composebox-context-menu-entrypoint>
+        ${
+      this.searchboxLayoutMode === 'Compact' && this.showVoiceSearch ?
+          voiceSearchButton :
+          ''}
+        ${this.searchboxLayoutMode !== 'Compact' ? toolChips : ''}
+        ${
+      this.searchboxLayoutMode === 'TallTopContext' && this.showVoiceSearch ?
+          voiceSearchButton :
+          ''}
+      </div>
+  `;
+
   // clang-format off
   return html`<!--_html_template_start_-->
+  ${this.searchboxLayoutMode === 'Compact' ? contextMenu : ''}
   ${this.showFileCarousel_ ? html`
-    <ntp-composebox-file-carousel
+    <cr-composebox-file-carousel
+      part="cr-composebox-file-carousel"
       id="carousel"
-      .files=${Array.from(this.files_.values())}
-      @delete-file=${this.onDeleteFile_}>
-    </ntp-composebox-file-carousel> ` : ''}
-  ${this.showDropdown && this.showFileCarousel_ ? html`
-  <div class="carousel-divider"></div>` : ''}
+      class="${this.carouselOnTop_ ? 'top' : ''}"
+      .files="${Array.from(this.files_.values())}"
+      @delete-file="${this.onDeleteFile_}">
+    </cr-composebox-file-carousel> ` : ''}
+  ${this.searchboxLayoutMode === 'TallTopContext' ? contextMenu : ''}
+  ${this.showDropdown && (this.showFileCarousel_ || this.searchboxLayoutMode === 'TallTopContext') ? html`
+  <div class="carousel-divider" part="carousel-divider"></div>` : ''}
   <!-- Suggestions are slotted in from the parent component. -->
   <slot id="dropdownMatches"></slot>
-  ${this.contextMenuEnabled_ ? html`
-    <div id="contextMenuContainer">
-      <composebox-context-menu-entrypoint id="contextEntrypoint"
-          class="upload-icon no-overlap"
-          @open-image-upload="${this.openImageUpload_}"
-          @open-file-upload="${this.openFileUpload_}"
-          @add-tab-context="${this.addTabContext_}"
-          @deep-search-click="${this.onDeepSearchClick_}"
-          @create-image-click="${this.onCreateImageClick_}"
-          ?in-create-image-mode="${this.inCreateImageMode_}"
-          ?inputs-disabled="${this.inputsDisabled_}"
-          ?show-context-menu-description="${this.showContextMenuDescription_}">
-      </composebox-context-menu-entrypoint>
-      <composebox-tool-chip
-          icon="composebox:deepSearch"
-          label="${this.i18n('deepSearch')}"
-          ?visible="${this.inDeepSearchMode_}"
-          @click="${this.onDeepSearchClick_}">
-      </composebox-tool-chip>
-      <composebox-tool-chip
-          icon="composebox:nanoBanana"
-          label="${this.i18n('createImages')}"
-          ?visible="${this.inCreateImageMode_}"
-          @click="${this.onCreateImageClick_}">
-      </composebox-tool-chip>
-    </div>
-  ` : html`
-    <div id="uploadContainer" class="icon-fade">
-        <cr-icon-button
-            class="upload-icon no-overlap"
-            id="imageUploadButton"
-            iron-icon="composebox:imageUpload"
-            title="${this.i18n('composeboxImageUploadButtonTitle')}"
-            .disabled="${this.inputsDisabled_}"
-            @click="${this.openImageUpload_}">
-        </cr-icon-button>
-        ${this.composeboxShowPdfUpload_ ? html`
-        <cr-icon-button
-            class="upload-icon no-overlap"
-            id="fileUploadButton"
-            iron-icon="composebox:fileUpload"
-            title="${this.i18n('composeboxPdfUploadButtonTitle')}"
-            .disabled="${this.inputsDisabled_}"
-            @click="${this.openFileUpload_}">
-        </cr-icon-button>
-        `: ''}
-    </div>
-  `}
+  ${this.searchboxLayoutMode === 'Compact' && toolChipsVisible ? html`
+    <div class="context-menu-container" id='toolChipsContainer'
+        part="tool-chips-container">${toolChips}</div>
+  ` : ''}
+  ${this.searchboxLayoutMode === 'TallBottomContext' || this.searchboxLayoutMode === '' ? html`
+    ${this.contextMenuEnabled_ ? contextMenu : html`
+      <div part="upload-container" id="uploadContainer" class="icon-fade">
+          <cr-icon-button
+              class="upload-icon no-overlap"
+              id="imageUploadButton"
+              iron-icon="composebox:imageUpload"
+              title="${this.i18n('composeboxImageUploadButtonTitle')}"
+              .disabled="${this.inputsDisabled_}"
+              @click="${this.openImageUpload_}">
+          </cr-icon-button>
+          ${this.composeboxShowPdfUpload_ ? html`
+          <cr-icon-button
+              class="upload-icon no-overlap"
+              id="fileUploadButton"
+              iron-icon="composebox:fileUpload"
+              title="${this.i18n('composeboxPdfUploadButtonTitle')}"
+              .disabled="${this.inputsDisabled_}"
+              @click="${this.openFileUpload_}">
+          </cr-icon-button>
+          `: ''}
+      </div>
+    `}
+  `: ''}
   <input type="file"
       accept="${this.imageFileTypes_}"
       id="imageInput"
@@ -81,6 +138,9 @@ export function getHtml(this: ContextualEntrypointAndCarouselElement) {
       @change="${this.onFileChange_}"
       hidden>
   </input>
+  ${(this.searchboxLayoutMode === 'TallBottomContext' || !this.searchboxLayoutMode) && this.showVoiceSearch ?
+          voiceSearchButton :
+          ''}
 <!--_html_template_end_-->`;
   // clang-format on
 }

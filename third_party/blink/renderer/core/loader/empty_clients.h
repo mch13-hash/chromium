@@ -100,10 +100,12 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   WebViewImpl* GetWebView() const override { return nullptr; }
   void ChromeDestroyed() override {}
   void SetWindowRect(const gfx::Rect&, LocalFrame&) override {}
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   void Minimize(LocalFrame&) override {}
   void Maximize(LocalFrame&) override {}
   void Restore(LocalFrame&) override {}
   void SetResizable(bool resizable, LocalFrame&) override {}
+#endif
   gfx::Rect RootWindowRect(LocalFrame&) override { return gfx::Rect(); }
   void DidAccessInitialMainDocument() override {}
   void FocusPage() override {}
@@ -131,6 +133,10 @@ class CORE_EXPORT EmptyChromeClient : public ChromeClient {
   void StopDeferringCommits(LocalFrame& main_frame,
                             cc::PaintHoldingCommitTrigger) override {}
   void SetShouldThrottleFrameRate(bool flag, LocalFrame& main_frame) override {}
+  void RequestMainFrameOnCompositorAnimation(
+      LocalFrame&,
+      cc::PropertyChangeForcesCommitCriteria animation_forces_commit) override {
+  }
   void StartDragging(LocalFrame*,
                      const WebDragData&,
                      DragOperationsMask,

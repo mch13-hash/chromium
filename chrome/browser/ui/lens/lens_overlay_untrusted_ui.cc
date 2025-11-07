@@ -23,6 +23,7 @@
 #include "chrome/grit/lens_untrusted_resources.h"
 #include "chrome/grit/lens_untrusted_resources_map.h"
 #include "components/lens/lens_features.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -326,6 +327,9 @@ LensOverlayUntrustedUI::LensOverlayUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean(
     "enableThumbnailSizingTweaks",
     lens::features::GetVisualSelectionUpdatesEnableThumbnailSizingTweaks());
+  html_source->AddBoolean("steadyComposeboxShowVoiceSearch", false);
+  html_source->AddBoolean("expandedComposeboxShowVoiceSearch", false);
+  html_source->AddBoolean("expandedSearchboxShowVoiceSearch", false);
 
   // Determine if the cursor tooltip should appear.
   Profile* profile = Profile::FromWebUI(web_ui);
@@ -356,8 +360,7 @@ void LensOverlayUntrustedUI::BindInterface(
 
   auto handler = std::make_unique<LensSearchboxHandler>(
       std::move(receiver), Profile::FromWebUI(web_ui()),
-      web_ui()->GetWebContents(),
-      /*metrics_reporter=*/nullptr, /*lens_searchbox_client=*/controller);
+      web_ui()->GetWebContents(), /*lens_searchbox_client=*/controller);
   controller->SetContextualSearchboxHandler(std::move(handler));
 }
 

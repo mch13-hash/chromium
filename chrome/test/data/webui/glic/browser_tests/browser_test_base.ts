@@ -7,8 +7,8 @@
 //   --gn_target chrome/test/data/webui/glic:build_ts
 
 import {WebClientMode} from '/glic/glic_api/glic_api.js';
-import type {GlicBrowserHost, GlicHostRegistry, GlicWebClient, Observable, OpenPanelInfo, PanelOpeningData} from '/glic/glic_api/glic_api.js';
-import {ObservableValue, type Subscriber} from '/glic/observable.js';
+import type {GlicBrowserHost, GlicHostRegistry, GlicWebClient, Observable, OpenPanelInfo, PanelOpeningData, PanelStateKind} from '/glic/glic_api/glic_api.js';
+import {ObservableValue, Subject, type Subscriber} from '/glic/observable.js';
 
 import {createGlicHostRegistryOnLoad} from '../api_boot.js';
 
@@ -24,6 +24,16 @@ export function getTestName(): string|null {
     testName = testName ? testName.substring(0, lastSlashIndex) : null;
   }
   return testName;
+}
+
+export function mapObservable<S, T>(src: Observable<S>, mapping: (s: S) => T) {
+  const result = new Subject<T>();
+  src.subscribe(
+      (v) => {
+        result.next(mapping(v));
+      },
+  );
+  return result;
 }
 
 // Creates a queue of promises from an observable.
@@ -96,15 +106,20 @@ export class WebClient implements GlicWebClient {
   initializedPromise = Promise.withResolvers<void>();
   onNotifyPanelWasClosed: () => void = () => {};
   panelOpenState = ObservableValue.withValue<boolean>(false);
+  panelOpenStateKind = ObservableValue.withNoValue<PanelStateKind>();
+  panelOpenData = ObservableValue.withNoValue<PanelOpeningData>();
 
   async initialize(glicBrowserHost: GlicBrowserHost): Promise<void> {
     this.host = glicBrowserHost;
     this.initializedPromise.resolve();
   }
 
-  async notifyPanelWillOpen(_panelOpeningData: PanelOpeningData):
+  async notifyPanelWillOpen(panelOpeningData: PanelOpeningData):
       Promise<OpenPanelInfo> {
     this.panelOpenState.assignAndSignal(true);
+    this.panelOpenStateKind.assignAndSignal(
+        checkDefined(panelOpeningData.panelState?.kind));
+    this.panelOpenData.assignAndSignal(panelOpeningData);
     this.firstOpened.resolve();
 
     const openPanelInfo: OpenPanelInfo = {

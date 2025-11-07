@@ -150,9 +150,6 @@ const base::FeatureParam<bool> kPriceInsightsUseCache{
 // Discount Autofill at Checkout
 BASE_FEATURE(kDiscountAutofill, base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Promotion in Magic Stack for Price Tracking users from other platforms.
-BASE_FEATURE(kPriceTrackingPromo, base::FEATURE_ENABLED_BY_DEFAULT);
-
 // Shopping variations to Tab resumption.
 BASE_FEATURE(kTabResumptionShopCard, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -256,6 +253,9 @@ extern const char kShopCardArm4[] = "arm_4";
 // (max 3 impressions). So ShopCard variations of Tab Resumption can
 // be conclusively benchmarked against regular Tab Resumption.
 extern const char kShopCardArm5[] = "arm_5";
+// Similar to arm 3, but price drop and product image data acquisition
+// occurs after the card is rendered and is updated if applicable.
+extern const char kShopCardArm6[] = "arm_6";
 extern const char kShopCardFrontPosition[] = "shop_card_front";
 extern const char kShopCardMaxImpressions[] = "max_impressions";
 

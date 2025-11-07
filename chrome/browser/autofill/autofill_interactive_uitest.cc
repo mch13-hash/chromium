@@ -10,7 +10,6 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -1666,7 +1665,13 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, DynamicFormFill) {
 }
 
 // Test that form filling works after reloading the current page.
-IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, AutofillAfterReload) {
+// Disable on Linux due to flakiness: crbug.com/446401455.
+#if BUILDFLAG(IS_LINUX)
+#define MAYBE_AutofillAfterReload DISABLED_AutofillAfterReload
+#else
+#define MAYBE_AutofillAfterReload AutofillAfterReload
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillInteractiveTest, MAYBE_AutofillAfterReload) {
   CreateTestProfile();
   SetTestUrlResponse(kTestShippingFormString);
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GetTestUrl()));
@@ -3108,9 +3113,14 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTestDynamicForm,
   // need to explicitly wait for the pending votes. Since voting is scheduled on
   // submission, we first need to wait for the submission (otherwise, there are
   // no pending to vote for).
-  //
   // Additionally, we wait for a navigation because that's when the key metrics
-  // are emitted.
+  // are emitted. When the RFH changes on same site navigation, the metrics are
+  // emitted during RFH destruction, so we wait for it as well.
+  auto* main_frame = GetWebContents()->GetPrimaryMainFrame();
+  std::optional<content::RenderFrameDeletedObserver> rfh_deleted_observer;
+  if (main_frame->ShouldChangeRenderFrameHostOnSameSiteNavigation()) {
+    rfh_deleted_observer.emplace(main_frame);
+  }
   content::LoadStopObserver load_stop_observer(GetWebContents());
   BrowserAutofillManager& autofill_manager = *GetBrowserAutofillManager();
   TestAutofillManagerSingleEventWaiter submission_waiter(
@@ -3122,6 +3132,9 @@ IN_PROC_BROWSER_TEST_F(AutofillInteractiveTestDynamicForm,
                            ->GetVotesUploader())
                   .FlushPendingVotes());
   load_stop_observer.Wait();
+  if (rfh_deleted_observer) {
+    rfh_deleted_observer->WaitUntilDeleted();
+  }
 
   // Short hand for ExpectBucketCount:
   auto expect_count = [&](std::string_view name,

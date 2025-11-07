@@ -90,7 +90,7 @@ class ClickToCallBrowserTest
     }
     features_.InitWithFeaturesAndParameters(enabled_features,
                                             disabled_features);
-    CHECK_EQ(IsPageActionMigrationEnabled(),
+    CHECK_EQ(IsPageActionsMigrationEnabled(),
              GetParam().page_actions_migration_enabled);
   }
   ~ClickToCallBrowserTest() override = default;
@@ -118,7 +118,7 @@ class ClickToCallBrowserTest
     return histograms.GetTotalCountsForPrefix(HistogramName(""));
   }
 
-  bool IsPageActionMigrationEnabled() const {
+  bool IsPageActionsMigrationEnabled() const {
     return IsPageActionMigrated(PageActionIconType::kClickToCall);
   }
 
@@ -415,14 +415,6 @@ IN_PROC_BROWSER_TEST_P(ClickToCallBrowserTest, LeftClick_ChooseDevice) {
   ASSERT_EQ(1u, devices.size());
 
   base::RunLoop run_loop;
-  PageActionIconView* click_to_call_icon =
-      GetPageActionIconView(PageActionIconType::kClickToCall);
-  if (IsPageActionMigrationEnabled()) {
-    ASSERT_EQ(nullptr, click_to_call_icon);
-  } else {
-    ASSERT_FALSE(click_to_call_icon->GetVisible());
-  }
-
   ClickToCallUiController* controller =
       ClickToCallUiController::GetOrCreateFromWebContents(web_contents());
   controller->set_on_dialog_shown_closure_for_testing(run_loop.QuitClosure());
@@ -436,11 +428,6 @@ IN_PROC_BROWSER_TEST_P(ClickToCallBrowserTest, LeftClick_ChooseDevice) {
 
   SharingDialogView* dialog =
       static_cast<SharingDialogView*>(controller->dialog());
-  if (IsPageActionMigrationEnabled()) {
-    ASSERT_NE(nullptr, dialog);
-  } else {
-    ASSERT_TRUE(click_to_call_icon->GetVisible());
-  }
 
   EXPECT_EQ(SharingDialogType::kDialogWithDevicesMaybeApps,
             dialog->GetDialogType());

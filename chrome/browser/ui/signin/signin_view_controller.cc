@@ -130,7 +130,7 @@ void ShowTabOverwritingNTP(BrowserWindowInterface* browser,
   NavigateParams params(browser->GetBrowserForMigrationOnly(), url,
                         ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   params.user_gesture = false;
   params.tabstrip_add_types |= AddTabTypes::ADD_INHERIT_OPENER;
 
@@ -175,9 +175,8 @@ signin_metrics::PromoAction GetPromoActionForNewAccount(
 bool ShowAccountExtensionsOnSignout(Profile* profile) {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // Do not sign out immediately if the user has account extensions.
-  if (extensions::sync_util::IsSyncingExtensionsInTransportMode(profile)) {
-    extensions::AccountExtensionTracker* tracker =
-        extensions::AccountExtensionTracker::Get(profile);
+  if (extensions::AccountExtensionTracker* tracker =
+          extensions::AccountExtensionTracker::Get(profile)) {
     return !tracker->GetSignedInAccountExtensions().empty();
   }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
@@ -249,11 +248,7 @@ GURL GetSigninUrlForDiceSigninTab(
         {.email = email_hint, .continue_url = continue_url});
   }
 
-  bool use_chrome_sync_url =
-      base::FeatureList::IsEnabled(
-          switches::kBrowserSigninInSyncHeaderOnGaiaIntegration) ||
-      access_point == signin_metrics::AccessPoint::kExtensions;
-
+  bool use_chrome_sync_url = true;
   // A reauth is requested, or the account is already signed in (which is
   // effectively a reauth).
   if (signin_reason == signin_metrics::Reason::kReauthentication ||
@@ -423,7 +418,7 @@ void SigninViewController::MaybeShowChromeSigninDialogForExtensions(
                         GURL(chrome::kChromeUINewTabURL),
                         ui::PAGE_TRANSITION_AUTO_BOOKMARK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.window_action = NavigateParams::WindowAction::kShowWindow;
   params.user_gesture = false;
   params.tabstrip_add_types |= AddTabTypes::ADD_INHERIT_OPENER;
 
@@ -479,15 +474,15 @@ void SigninViewController::ShowModalSyncConfirmationDialog(
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 void SigninViewController::ShowModalHistorySyncOptInDialog(
-    base::OnceClosure history_optin_completed_closure) {
-    CHECK(
+    bool should_close_modal_dialog,
+    HistorySyncOptinHelper::FlowCompletedCallback callback) {
+  CHECK(
       base::FeatureList::IsEnabled(syncer::kReplaceSyncPromosWithSignInPromos));
   CloseModalSignin();
   dialog_ = std::make_unique<SigninModalDialogImpl>(
       SigninViewControllerDelegate::CreateSyncHistoryOptInDelegate(
-          browser_->GetBrowserForMigrationOnly(),
-          HistorySyncOptinLaunchContext::kModal,
-          std::move(history_optin_completed_closure)),
+          browser_->GetBrowserForMigrationOnly(), should_close_modal_dialog,
+          HistorySyncOptinLaunchContext::kModal, std::move(callback)),
       GetOnModalDialogClosedCallback());
 }
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)

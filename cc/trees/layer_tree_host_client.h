@@ -76,6 +76,12 @@ struct PaintBenchmarkResult {
   size_t painter_memory_usage = 0;
 };
 
+// Under certain circumstances, the client may request BeginMainFrame to be
+// scheduled whenever a relevant property change happens in the compositor.
+// This mechanism covers changes to *any* layer; in the future it might be
+// useful to add a filter mechanism to limit the effect to specific layers.
+enum class PropertyChangeForcesCommitCriteria { kNone, kTransform, kAny };
+
 // A LayerTreeHost is bound to a LayerTreeHostClient. The main rendering
 // loop (in ProxyMain or SingleThreadProxy) calls methods on the
 // LayerTreeHost, which then handles them and also calls into the equivalent
@@ -205,6 +211,15 @@ class CC_EXPORT LayerTreeHostClient {
   // Return a string that is the paused debugger message for the heads-up
   // display overlay.
   virtual std::string GetPausedDebuggerLocalizedMessage();
+
+  // This is an inaccurate signal that has been used to represent that content
+  // was displayed. This actually maps to the removal of backpressure by the
+  // GPU. This can be signalled when the GPU attempts to Draw; when a submitted
+  // frame, that has not drawn, is being replaced by a newer one; or merged with
+  // future OnBeginFrames.
+  //
+  // To determine when presentation occurred see `DidPresentCompositorFrame`.
+  virtual void DidReceiveCompositorFrameAckDeprecatedForCompositor() {}
 
  protected:
   virtual ~LayerTreeHostClient() = default;

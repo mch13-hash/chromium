@@ -260,7 +260,6 @@
 #include "chromeos/ash/components/dbus/usb/usbguard_client.h"
 #include "chromeos/ash/components/fwupd/firmware_update_manager.h"
 #include "chromeos/ash/components/peripheral_notification/peripheral_notification_manager.h"
-#include "chromeos/ash/services/assistant/public/cpp/features.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/dbus/init/initialize_dbus_client.h"
 #include "chromeos/dbus/power/power_policy_controller.h"
@@ -540,10 +539,6 @@ void Shell::OnDictationEnded() {
   for (auto& observer : shell_observers_) {
     observer.OnDictationEnded();
   }
-}
-
-bool Shell::IsInTabletMode() const {
-  return display::Screen::Get()->InTabletMode();
 }
 
 bool Shell::ShouldSaveDisplaySettings() {
@@ -1392,7 +1387,7 @@ void Shell::Init(
   // `ScheduledFeature` ctor will access `geolocation_controller_` from
   // `Shell`.
   geolocation_controller_ = std::make_unique<GeolocationController>(
-      SimpleGeolocationProvider::GetInstance());
+      SystemLocationProvider::GetInstance());
 
   // Night Light depends on the display manager, the display color manager,
   // aura::Env, and geolocation controller, so initialize it after all have

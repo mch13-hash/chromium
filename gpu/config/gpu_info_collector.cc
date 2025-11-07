@@ -91,7 +91,6 @@ scoped_refptr<gl::GLSurface> InitializeGLSurface(gl::GLDisplay* display) {
 scoped_refptr<gl::GLContext> InitializeGLContext(gl::GLSurface* surface) {
   TRACE_EVENT("gpu,startup", "gpu_info_collector::InitializeGLContext");
   gl::GLContextAttribs attribs;
-  attribs.client_major_es_version = 2;
   scoped_refptr<gl::GLContext> context(
       gl::init::CreateGLContext(nullptr, surface, attribs));
   if (!context.get()) {
@@ -824,13 +823,6 @@ bool CollectGpuExtraInfo(gfx::GpuExtraInfo* gpu_extra_info,
     }
   }
 
-#if BUILDFLAG(IS_OZONE)
-  if (const auto* const egl_utility =
-          ui::OzonePlatform::GetInstance()->GetPlatformGLEGLUtility()) {
-    egl_utility->CollectGpuExtraInfo(prefs.enable_native_gpu_memory_buffers,
-                                     *gpu_extra_info);
-  }
-#endif
   return true;
 }
 

@@ -10,7 +10,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/lens/core/mojom/geometry.mojom.h"
-#include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_query_controller.h"
 #include "components/lens/lens_overlay_dismissal_source.h"
 #include "components/lens/lens_overlay_invocation_source.h"
@@ -19,9 +18,6 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #include "ui/gfx/geometry/rect.h"
-
-class LensOverlayController;
-class GURL;
 
 namespace lens {
 class LensSessionMetricsLogger;
@@ -46,8 +42,11 @@ namespace syncer {
 class SyncService;
 }  // namespace syncer
 
+class GURL;
+class LensOverlayController;
 class PrefService;
 class ThemeService;
+enum class SidePanelEntryHideReason;
 
 // Controller for all Lens Search features in Chrome. All external entry points
 // should go through this controller.
@@ -128,10 +127,13 @@ class LensSearchController {
       AutocompleteMatchType::Type match_type,
       bool is_zero_prefix_suggestion);
 
-  // Issues a text search request for Lens to fulfill using query text.
-  // Starts contextualization flow if its not already in progress. If the Lens
-  // Overlay is in the process of opening, the request will be queued until the
-  // overlay is fully opened.
+  // Issues a zero state request for Lens to fulfill. Starts contextualization
+  // flow and once contextualization is complete, issues a Lens region request
+  // with the entire viewport selected as the region. Does not open the overlay
+  // UI.
+  void IssueZeroStateRequest(
+      lens::LensOverlayInvocationSource invocation_source);
+
   // If `suppress_contextualization` is true, queries will not be performed with
   // contextualization for the duration of the session. However,
   // contextualization may still be initialized as normal.
@@ -171,6 +173,9 @@ class LensSearchController {
   // Returns true if Lens is currently active on this tab.
   bool IsActive();
 
+  // Returns true if either the overlay or the side panel is showing.
+  bool IsShowingUI();
+
   // Returns true if Lens is currently off on this tab.
   bool IsOff();
 
@@ -189,6 +194,12 @@ class LensSearchController {
 
   // Gets the page title.
   std::optional<std::string> GetPageTitle();
+
+  // Handles the creation of a new thumbnail from a bitmap.
+  void HandleThumbnailCreatedBitmap(const SkBitmap& thumbnail);
+
+  // Clears the visual selection thumbnail on the searchbox.
+  void ClearVisualSelectionThumbnail();
 
   // Returns the weak pointer to this class.
   base::WeakPtr<LensSearchController> GetWeakPtr();
@@ -286,6 +297,10 @@ class LensSearchController {
   // cleaning up.
   void CloseLensPart2(lens::LensOverlayDismissalSource dismissal_source);
 
+  // Called on the UI thread with the processed thumbnail URI.
+  void OnThumbnailProcessed(bool is_region_selection,
+                            const std::string& thumbnail_uri);
+
   // The final step for closing the overlay. This is called after the lens
   // overlay has faded out.
   void OnOverlayHidden(std::optional<lens::LensOverlayDismissalSource> dismissal_source);
@@ -338,6 +353,9 @@ class LensSearchController {
   void StartLensSession(lens::LensOverlayInvocationSource invocation_source,
                         bool suppress_contextualization = false);
 
+  // Shows the mobile promo if the user is eligible.
+  void MaybeShowMobilePromo();
+
   // Runs the eligibility checks necessary for Lens to open on this tab. If the
   // user has not granted permission to use Lens on this tab, the permission
   // request will be shown and callback will be called after the user accepts.
@@ -371,7 +389,7 @@ class LensSearchController {
       lens::proto::LensOverlaySuggestInputs suggest_inputs);
 
   // Callback used by the query controller to pass the thumbnail bytes of a
-  // visual interaction request to the searchbox.
+  // visual interaction request to the searchbox and composebox.
   void HandleThumbnailCreated(const std::string& thumbnail_bytes,
                               const SkBitmap& region_bitmap);
 
@@ -393,6 +411,12 @@ class LensSearchController {
   // Called when the tab will be removed from the window.
   void WillDetach(tabs::TabInterface* tab,
                   tabs::TabInterface::DetachReason reason);
+
+  // Callback to run when the page context has been updated as part of a zero
+  // state request and the region search request should now be issued.
+  void OnPageContextUpdatedForZeroStateRequest(
+      lens::LensOverlayInvocationSource invocation_source,
+      base::Time query_start_time);
 
   // Whether the LensSearchController has been initialized. Meaning, all the
   // dependencies have been initialized and the controller is ready to use.

@@ -42,15 +42,6 @@
         on-click="onCookiesClick_"
         role-description="$i18n{subpageArrowRoleDescription}">
     </cr-link-row>
-    <template is="dom-if" if="[[enableIncognitoTrackingProtections_]]">
-      <cr-link-row id="incognitoTrackingProtectionsLinkRow" class="hr"
-          start-icon="settings:visibility-off"
-          label="$i18n{incognitoTrackingProtectionsPageEntrypointLabel}"
-          sub-label="$i18n{incognitoTrackingProtectionsPageEntrypointSublabel}"
-          on-click="onIncognitoTrackingProtectionsClick_"
-          role-description="$i18n{subpageArrowRoleDescription}">
-      </cr-link-row>
-    </template>
     <template is="dom-if" if=
         "[[shouldShowAdPrivacy_(
             isPrivacySandboxRestricted_,
@@ -71,10 +62,10 @@
         sub-label="$i18n{securityPageDescription}"
         on-click="onSecurityPageClick_"
         role-description="$i18n{subpageArrowRoleDescription}"></cr-link-row>
-    <cr-link-row id="permissionsLinkRow" start-icon="privacy:page-info"
+    <cr-link-row id="siteSettingsLinkRow" start-icon="privacy:page-info"
         class="hr" label="$i18n{siteSettings}"
-        sub-label="$i18n{permissionsPageDescription}"
-        on-click="onPermissionsPageClick_"
+        sub-label="$i18n{siteSettingsSublabel}"
+        on-click="onSiteSettingsLinkRowClick_"
         role-description="$i18n{subpageArrowRoleDescription}"></cr-link-row>
     <cr-toast id="deleteBrowsingDataToast" duration="5000">
       <div>[[dbdDeletionConfirmationToastLabel_]]</div>

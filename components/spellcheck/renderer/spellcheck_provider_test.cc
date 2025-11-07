@@ -19,7 +19,6 @@
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/path_service.h"
 
 namespace {
@@ -188,14 +187,8 @@ void TestingSpellCheckProvider::FillSuggestionList(const std::u16string&,
 #if BUILDFLAG(IS_WIN)
 void TestingSpellCheckProvider::InitializeDictionaries(
     InitializeDictionariesCallback callback) {
-  if (base::FeatureList::IsEnabled(
-          spellcheck::kWinDelaySpellcheckServiceInit)) {
-    std::move(callback).Run(/*dictionaries=*/{}, /*custom_words=*/{},
-                            /*enable=*/false);
-    return;
-  }
-
-  NOTREACHED();
+  std::move(callback).Run(/*dictionaries=*/{}, /*custom_words=*/{},
+                          /*enable=*/false);
 }
 #endif  // BUILDFLAG(IS_WIN)
 #endif  // BUILDFLAG(USE_BROWSER_SPELLCHECKER)

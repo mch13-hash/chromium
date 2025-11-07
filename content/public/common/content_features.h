@@ -30,7 +30,10 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kAdditionalOpaqueOriginEnforcements);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidCaptureKeyEvents);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidCaretBrowsing);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidDevToolsFrontend);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(
+    kAndroidEnableBackgroundMediaLargeFormFactors);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidFallbackToNextSlot);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidMediaInsertion);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidWarmUpSpareRendererWithTimeout);
 CONTENT_EXPORT extern const base::FeatureParam<std::string>
     kAndroidSpareRendererCreationTiming;
@@ -41,6 +44,8 @@ inline constexpr const char kAndroidSpareRendererCreationAfterFirstPaint[] =
 inline constexpr const char
     kAndroidSpareRendererCreationDelayedDuringLoading[] =
         "delayed-during-loading";
+CONTENT_EXPORT extern const base::FeatureParam<bool>
+    kAndroidSpareRendererAddNavigationThrottle;
 CONTENT_EXPORT extern const base::FeatureParam<int>
     kAndroidSpareRendererCreationDelayMs;
 CONTENT_EXPORT extern const base::FeatureParam<int>
@@ -119,6 +124,7 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnableServiceWorkersForChromeScheme);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnableServiceWorkersForChromeUntrusted);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnsureExistingRendererAlive);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCm);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmEmbedderCheck);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmAlternativeIdentifiers);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmAutofill);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmDelegation);
@@ -131,6 +137,7 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmNonceInParams);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmWellKnownEndpointValidation);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmWithoutWellKnownEnforcement);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFencedFramesEnforceFocus);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kFedCmNavigationInterception);
 #if BUILDFLAG(IS_ANDROID)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFluidResize);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
@@ -143,8 +150,12 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kFractionalScrollOffsets);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kGuestViewMPArch);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kIdbPrioritizeForegroundClients);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kIgnoreDuplicateNavs);
+CONTENT_EXPORT BASE_DECLARE_FEATURE_PARAM(std::string,
+                                          kIgnoreDuplicateNavsOrigins);
 CONTENT_EXPORT BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
                                           kDuplicateNavThreshold);
+CONTENT_EXPORT BASE_DECLARE_FEATURE_PARAM(bool,
+                                          kSkipIgnoreRendererInitiatedNavs);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kInstalledApp);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kInstalledAppProvider);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kIsolatesPriorityUseProcessPriority);
@@ -209,9 +220,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kPrivateNetworkAccessForNavigationsWarningOnly);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrivateNetworkAccessForWorkers);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrivateNetworkAccessForWorkersWarningOnly);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(
-    kPrivateNetworkAccessRespectPreflightResults);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrivateNetworkAccessSendPreflights);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kProcessSelectionDeferringConditions);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kOriginKeyedProcessesByDefault);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPushSubscriptionChangeEventOnInvalidation);
@@ -222,7 +230,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kReduceSubresourceResponseStartedIPC);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kRegionCaptureOfOtherTabs);
 #endif  // BUILDFLAG(ENABLE_SCREEN_CAPTURE)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kRenderDocument);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kRenderDocumentCompositorReuse);
 #if BUILDFLAG(IS_ANDROID)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kRendererProcessLimitOnAndroid);
 CONTENT_EXPORT BASE_DECLARE_FEATURE_PARAM(size_t,
@@ -335,13 +342,13 @@ CONTENT_EXPORT extern const base::FeatureParam<bool>
 CONTENT_EXPORT extern const base::FeatureParam<bool>
     kAccessibilityDeprecateJavaNodeCacheDisableCache;
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAccessibilityDeprecateTypeAnnounce);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kAccessibilityIncludeLongClickAction);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAccessibilityPageZoomV2);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kAccessibilityPopulateSupplementalDescriptionApi);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAccessibilityUnifiedSnapshots);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kAccessibilityManageBroadcastReceiverOnBackground);
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidDesktopZoomScaling);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidOpenPdfInline);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidWebAppLaunchHandler);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
@@ -354,7 +361,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kUserMediaScreenCapturing);
 
 #if BUILDFLAG(IS_MAC)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kMacAllowBackgroundingRenderProcesses);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kMacImeLiveConversionFix);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kSonomaAccessibilityActivationRefinements);
 #endif  // BUILDFLAG(IS_MAC)
 

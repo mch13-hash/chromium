@@ -7,24 +7,22 @@
 
 #include <optional>
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
-#include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "ui/gfx/vector_icon_types.h"
+#include "ui/webui/resources/cr_components/composebox/composebox.mojom.h"
 
 class GURL;
-class MetricsReporter;
 class OmniboxController;
 class Profile;
 class OmniboxEditModel;
-class SkBitmap;
 
 namespace content {
 class WebContents;
@@ -37,9 +35,13 @@ namespace searchbox_internal {
 extern const char* kSearchIconResourceName;
 }  // namespace searchbox_internal
 
-namespace lens {
-struct ImageEncodingOptions;
-}  // namespace lens
+// How an AIM Composebox query was submitted.
+enum class SubmissionType {
+  kDefault = 0,
+  kDeepSearch = 1,
+  kCreateImages = 2,
+  kMaxValue = kCreateImages,
+};
 
 // Base class for browser-side handlers that handle bi-directional communication
 // with WebUI search boxes.
@@ -61,6 +63,16 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
 
   // Returns true if the page remote is bound and ready to receive calls.
   bool IsRemoteBound() const;
+
+  // Adds file context to the searchbox from the browser.
+  void AddFileContextFromBrowser(base::UnguessableToken token,
+                      searchbox::mojom::SelectedFileInfoPtr file_info);
+
+  // Notifies the WebUI that the contextual input status has changed.
+  void OnContextualInputStatusChanged(
+      base::UnguessableToken token,
+      composebox_query::mojom::FileUploadStatus status,
+      std::optional<composebox_query::mojom::FileUploadErrorType> error_type);
 
   // AutocompleteController::Observer:
   void OnResultChanged(AutocompleteController* controller,
@@ -86,6 +98,11 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
       const GURL& url,
       omnibox::mojom::NavigationPredictor navigation_predictor) override;
   void DeleteAutocompleteMatch(uint8_t line, const GURL& url) override;
+  void ActivateKeyword(uint8_t line,
+                       const GURL& url,
+                       base::TimeTicks match_selection_timestamp,
+                       bool is_mouse_event) override;
+  void ShowContextMenu(const gfx::Point& point) override;
   void ExecuteAction(uint8_t line,
                      uint8_t action_index,
                      const GURL& url,
@@ -97,31 +114,37 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                      bool shift_key) override;
   void GetPlaceholderConfig(GetPlaceholderConfigCallback callback) override;
   void GetRecentTabs(GetRecentTabsCallback callback) override;
-  void GetTabPreview(int32_t tab_id, GetTabPreviewCallback callback) override;
+  void GetTabPreview(int32_t tab_id, GetTabPreviewCallback callback) override {}
   void NotifySessionStarted() override {}
   void NotifySessionAbandoned() override {}
   void AddFileContext(searchbox::mojom::SelectedFileInfoPtr file_info,
                       mojo_base::BigBuffer file_bytes,
                       AddFileContextCallback callback) override {}
-  void AddTabContext(int32_t tab_id, AddTabContextCallback) override {}
+  void AddTabContext(int32_t tab_id,
+                     bool delay_upload,
+                     AddTabContextCallback) override {}
   void DeleteContext(const base::UnguessableToken& file_token) override {}
   void ClearFiles() override {}
+  void SubmitQuery(const std::string& query_text,
+                   uint8_t mouse_button,
+                   bool alt_key,
+                   bool ctrl_key,
+                   bool meta_key,
+                   bool shift_key) override {}
+
+  // Stores `callback` to be run when the page remote is bound and ready to
+  // receive calls. Runs `callback` immediately if the remote is already bound.
+  void set_page_is_bound_callback_for_testing(base::OnceClosure callback);
 
  protected:
   FRIEND_TEST_ALL_PREFIXES(RealboxHandlerTest, AutocompleteController_Start);
   FRIEND_TEST_ALL_PREFIXES(RealboxHandlerTest, RealboxUpdatesEditModelInput);
   FRIEND_TEST_ALL_PREFIXES(LensSearchboxHandlerTest,
                            Lens_AutocompleteController_Start);
-  FRIEND_TEST_ALL_PREFIXES(SearchboxHandlerBrowserTest,
-                           CreateTabPreviewEncodingOptions_NotScaled);
-  FRIEND_TEST_ALL_PREFIXES(SearchboxHandlerBrowserTestDSF2,
-                           CreateTabPreviewEncodingOptions_Scaled);
-
   SearchboxHandler(
       mojo::PendingReceiver<searchbox::mojom::PageHandler> pending_page_handler,
       Profile* profile,
       content::WebContents* web_contents,
-      MetricsReporter* metrics_reporter,
       std::unique_ptr<OmniboxController> controller);
   ~SearchboxHandler() override;
 
@@ -129,14 +152,12 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   AutocompleteController* autocomplete_controller();
   OmniboxEditModel* edit_model();
 
-  void OnPreviewReceived(GetTabPreviewCallback callback,
-                         const SkBitmap& preview_bitmap);
-
   const AutocompleteMatch* GetMatchWithUrl(size_t index, const GURL& url);
+
+  virtual omnibox::ChromeAimToolsAndModels GetAimToolMode();
 
   raw_ptr<Profile> profile_;
   raw_ptr<content::WebContents> web_contents_;
-  raw_ptr<MetricsReporter> metrics_reporter_;
   raw_ptr<OmniboxController> controller_;
   // Children classes should use `omnibox_controller()` or `controller_`.
   std::unique_ptr<OmniboxController> owned_controller_;
@@ -145,10 +166,9 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                           AutocompleteController::Observer>
       autocomplete_controller_observation_{this};
 
-  // Since mojo::Remote is not thread-safe, use an atomic to signal readiness.
-  std::atomic<bool> page_set_;
   mojo::Receiver<searchbox::mojom::PageHandler> page_handler_;
   mojo::Remote<searchbox::mojom::Page> page_;
+  base::OnceClosure page_is_bound_callback_for_testing_;
 
   searchbox::mojom::AutocompleteResultPtr CreateAutocompleteResult(
       const std::u16string& input,
@@ -176,12 +196,6 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                           bookmarks::BookmarkModel* bookmark_model,
                           const omnibox::GroupConfigMap& suggestion_groups_map,
                           const TemplateURLService* turl_service) const;
-
- private:
-  std::optional<lens::ImageEncodingOptions> CreateTabPreviewEncodingOptions(
-     content::WebContents* web_contents);
-
-  base::WeakPtrFactory<SearchboxHandler> weak_ptr_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_SEARCHBOX_SEARCHBOX_HANDLER_H_

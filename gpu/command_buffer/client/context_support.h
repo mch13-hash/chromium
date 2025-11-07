@@ -14,14 +14,8 @@
 #include "ui/gfx/gpu_fence_handle.h"
 #include "ui/gfx/overlay_transform.h"
 
-class GrDirectContext;
-
 namespace gfx {
 class GpuFence;
-}
-
-namespace cc {
-struct ImageHeaderMetadata;
 }
 
 namespace gpu {
@@ -87,32 +81,6 @@ class ContextSupport {
   virtual void DeleteTransferCacheEntry(uint32_t type, uint32_t id) = 0;
 
   virtual unsigned int GetTransferBufferFreeSize() const = 0;
-
-  // Determines if hardware decode acceleration is supported for JPEG images.
-  virtual bool IsJpegDecodeAccelerationSupported() const = 0;
-
-  // Determines if hardware decode acceleration is supported for WebP images.
-  virtual bool IsWebPDecodeAccelerationSupported() const = 0;
-
-  // Determines if |image_metadata| corresponds to an image that can be decoded
-  // using hardware decode acceleration. If this method returns true, then the
-  // client can be confident that a call to
-  // RasterInterface::ScheduleImageDecode() will succeed.
-  virtual bool CanDecodeWithHardwareAcceleration(
-      const cc::ImageHeaderMetadata* image_metadata) const = 0;
-
-  // Returns true if the context provider automatically manages calls to
-  // GrDirectContext::resetContext under the hood to prevent GL state
-  // synchronization problems between the GLES2 interface and skia.
-  virtual bool HasGrContextSupport() const = 0;
-
-  // Sets the GrDirectContext that is to receive resetContext signals when the
-  // GL state is modified via direct calls to the GLES2 interface.
-  virtual void SetGrContext(GrDirectContext* gr) = 0;
-
-  virtual void WillCallGLFromSkia() = 0;
-
-  virtual void DidCallGLFromSkia() = 0;
 
  protected:
   ContextSupport() = default;

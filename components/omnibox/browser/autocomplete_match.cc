@@ -373,7 +373,6 @@ AutocompleteMatch& AutocompleteMatch::operator=(
 #if BUILDFLAG(IS_ANDROID)
   DestroyJavaObject();
   std::swap(java_match_, match.java_match_);
-  std::swap(matching_java_tab_, match.matching_java_tab_);
   UpdateJavaObjectNativeRef();
 #endif
   return *this;
@@ -1267,6 +1266,14 @@ bool AutocompleteMatch::HasInstantKeyword(
   const TemplateURL* turl =
       GetTemplateURLWithKeyword(template_url_service, associated_keyword, "");
   return turl && (turl->starter_pack_id() != 0 || turl->featured_by_policy());
+}
+
+bool AutocompleteMatch::ShouldHideBasedOnStarterPack(
+    const TemplateURLService* template_url_service) const {
+  const TemplateURL* turl =
+      template_url_service->GetTemplateURLForKeyword(keyword);
+  return from_keyword && turl &&
+         turl->starter_pack_id() == template_url_starter_pack_data::kGemini;
 }
 
 void AutocompleteMatch::GetKeywordUIState(

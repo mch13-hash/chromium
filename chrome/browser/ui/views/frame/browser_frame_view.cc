@@ -165,6 +165,10 @@ bool BrowserFrameView::CaptionButtonsOnLeadingEdge() const {
   return false;
 }
 
+bool BrowserFrameView::CaptionButtonsOnTrailingEdge() const {
+  return !CaptionButtonsOnLeadingEdge();
+}
+
 void BrowserFrameView::LayoutWebAppWindowTitle(
     const gfx::Rect& available_space,
     views::Label& window_title_label) const {
@@ -182,10 +186,6 @@ bool BrowserFrameView::ShouldShowWebAppFrameToolbar() const {
   if (browser_widget_->IsFullscreen() && ShouldHideTopUIInFullscreen()) {
     return false;
   }
-  return true;
-}
-
-bool BrowserFrameView::CanUserExitFullscreen() const {
   return true;
 }
 
@@ -233,17 +233,6 @@ bool BrowserFrameView::HasVisibleBackgroundTabShapes(
              TabStyle::TabSelectionState::kInactive,
              /*hovered=*/false, ShouldPaintAsActiveForState(active_state),
              *GetColorProvider()) != GetFrameColor(active_state);
-}
-
-bool BrowserFrameView::EverHasVisibleBackgroundTabShapes() const {
-  return HasVisibleBackgroundTabShapes(BrowserFrameActiveState::kActive) ||
-         HasVisibleBackgroundTabShapes(BrowserFrameActiveState::kInactive);
-}
-
-bool BrowserFrameView::CanDrawStrokes() const {
-  // Web apps should not draw strokes if they don't have a tab strip.
-  return !browser_view_->browser()->app_controller() ||
-         browser_view_->browser()->app_controller()->has_tab_strip();
 }
 
 SkColor BrowserFrameView::GetCaptionColor(
@@ -424,17 +413,3 @@ int BrowserFrameView::GetSystemMenuY() const {
 
 BEGIN_METADATA(BrowserFrameView)
 END_METADATA
-
-std::ostream& operator<<(std::ostream& os,
-                         const BrowserLayoutExclusionArea& exclusion) {
-  os << exclusion.content.ToString() << " +h: " << exclusion.horizontal_padding
-     << " +v: " << exclusion.vertical_padding;
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const BrowserLayoutParams& params) {
-  os << "client: " << params.visual_client_area.ToString() << " leading: { "
-     << params.leading_exclusion << "} trailing: { "
-     << params.trailing_exclusion << " }";
-  return os;
-}

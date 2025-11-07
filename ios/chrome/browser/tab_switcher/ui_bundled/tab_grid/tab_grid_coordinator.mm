@@ -47,10 +47,6 @@
 #import "ios/chrome/browser/menu/ui_bundled/tab_context_menu_delegate.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
 #import "ios/chrome/browser/reading_list/model/reading_list_browser_agent.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_mediator.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_menu_helper.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_presentation_delegate.h"
-#import "ios/chrome/browser/recent_tabs/ui_bundled/recent_tabs_table_view_controller.h"
 #import "ios/chrome/browser/saved_tab_groups/model/ios_tab_group_sync_util.h"
 #import "ios/chrome/browser/saved_tab_groups/model/tab_group_sync_service_factory.h"
 #import "ios/chrome/browser/search_engines/model/template_url_service_factory.h"
@@ -100,6 +96,7 @@
 #import "ios/chrome/browser/sync/model/sync_service_factory.h"
 #import "ios/chrome/browser/synced_sessions/model/distant_session.h"
 #import "ios/chrome/browser/synced_sessions/model/synced_sessions_util.h"
+#import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/coordinator/tab_grid_scene_agent.h"
 #import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/ui/base_grid_view_controller.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/grid_commands.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/grid_constants.h"
@@ -412,6 +409,9 @@ bool FindNavigatorShouldBePresentedInBrowser(Browser* browser) {
   CHECK_NE(page, TabGridPageTabGroups);
   [_mediator setActivePage:page];
 
+  SceneState* sceneState = self.regularBrowser->GetSceneState();
+  [[TabGridSceneAgent agentFromScene:sceneState] willEnterTabGrid];
+
   if (IsDiamondPrototypeEnabled()) {
     [[NSNotificationCenter defaultCenter]
         postNotificationName:kDiamondEnterTabGridNotification
@@ -420,7 +420,6 @@ bool FindNavigatorShouldBePresentedInBrowser(Browser* browser) {
 
   BOOL animated = !self.animationsDisabledForTesting;
 
-  SceneState* sceneState = self.regularBrowser->GetSceneState();
   [[NonModalDefaultBrowserPromoSchedulerSceneAgent agentFromScene:sceneState]
       logTabGridEntered];
 
@@ -570,6 +569,9 @@ bool FindNavigatorShouldBePresentedInBrowser(Browser* browser) {
                    completion:(ProceduralBlock)completion {
   DCHECK(viewController || self.bvcContainer);
 
+  SceneState* sceneState = self.regularBrowser->GetSceneState();
+  [[TabGridSceneAgent agentFromScene:sceneState] willExitTabGrid];
+
   __weak TabGridCoordinator* weakSelf = self;
 
   if (IsDiamondPrototypeEnabled()) {
@@ -613,7 +615,6 @@ bool FindNavigatorShouldBePresentedInBrowser(Browser* browser) {
     self.tabGridEnterTime = base::TimeTicks();
   }
 
-  SceneState* sceneState = self.regularBrowser->GetSceneState();
   sceneState.window.overrideUserInterfaceStyle =
       UIUserInterfaceStyleUnspecified;
 

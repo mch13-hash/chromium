@@ -182,6 +182,9 @@ LensSidePanelUntrustedUI::LensSidePanelUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean("composeboxShowContextMenuDescription", true);
   // Send event when escape is pressed.
   html_source->AddBoolean("composeboxCloseByEscape", true);
+  html_source->AddBoolean("composeboxShowRecentTabChip", false);
+  // Enable submit button.
+  html_source->AddBoolean("composeboxShowSubmit", true);
 
   // Add strings for post message communication with the remote UI.
   lens::ClientToAimMessage handshake_ping;
@@ -231,6 +234,10 @@ LensSidePanelUntrustedUI::LensSidePanelUntrustedUI(content::WebUI* web_ui)
   html_source->AddBoolean("composeboxSmartComposeEnabled", false);
   html_source->AddBoolean("composeboxShowDeepSearchButton", false);
   html_source->AddBoolean("composeboxShowCreateImageButton", false);
+  html_source->AddBoolean("dragAndDropEnabled", false);
+  html_source->AddBoolean("steadyComposeboxShowVoiceSearch", false);
+  html_source->AddBoolean("expandedComposeboxShowVoiceSearch", false);
+  html_source->AddBoolean("expandedSearchboxShowVoiceSearch", false);
 
   // If the ThemeSource isn't added here, since this WebUI is
   // chrome-untrusted, it will be unable to load stylesheets until a new tab
@@ -268,8 +275,7 @@ void LensSidePanelUntrustedUI::BindInterface(
 
   auto handler = std::make_unique<LensSearchboxHandler>(
       std::move(receiver), Profile::FromWebUI(web_ui()),
-      web_ui()->GetWebContents(),
-      /*metrics_reporter=*/nullptr, /*lens_searchbox_client=*/controller);
+      web_ui()->GetWebContents(), /*lens_searchbox_client=*/controller);
   controller->SetSidePanelSearchboxHandler(std::move(handler));
 }
 

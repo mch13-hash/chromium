@@ -39,6 +39,7 @@ import org.chromium.base.test.util.Features;
 import org.chromium.base.ui.KeyboardUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabClosingSource;
@@ -60,6 +61,7 @@ import java.util.Set;
 @Features.EnableFeatures({
     ChromeFeatureList.TASK_MANAGER_CLANK,
     ContentFeatureList.ANDROID_DEV_TOOLS_FRONTEND,
+    ContentFeatureList.ANDROID_CARET_BROWSING
 })
 public class KeyboardShortcutsTest {
 
@@ -80,6 +82,7 @@ public class KeyboardShortcutsTest {
     @Mock private TabRemover mTabRemover;
     @Mock private ToolbarManager mToolbarManager;
     @Mock private WebContents mWebContents;
+    @Mock private Profile mProfile;
 
     @Before
     public void setUp() {
@@ -95,6 +98,8 @@ public class KeyboardShortcutsTest {
     private void setUpTabModelSelector(List<Tab> tabs) {
         when(mTabModelSelector.getCurrentModel()).thenReturn(mTabModel);
         when(mTabModelSelector.getCurrentTab()).thenReturn(mTab);
+        when(mTab.getProfile()).thenReturn(mProfile);
+        when(mProfile.getOriginalProfile()).thenReturn(mProfile);
 
         when(mTabModel.getCount()).thenReturn(tabs.size());
         when(mTabModel.index()).thenReturn(0);
@@ -376,6 +381,18 @@ public class KeyboardShortcutsTest {
         verify(mMenuOrKeyboardActionController, times(1))
                 .onMenuOrKeyboardAction(
                         /* id= */ eq(R.id.open_tab_strip_context_menu), /* fromMenu= */ eq(false));
+    }
+
+    /** Test that pressing F7 triggers the caret browsing dialog. */
+    @Test
+    @SmallTest
+    public void testToggleCaretBrowsing() {
+        // Ensure we handle F7 key (this was previously ignored)
+        assertTrue(keyDown(KeyEvent.KEYCODE_F7, 0, true));
+
+        // Ensure we trigger the caret browsing dialog
+        verify(mMenuOrKeyboardActionController)
+                .onMenuOrKeyboardAction(eq(R.id.toggle_caret_browsing), eq(false));
     }
 
     private void testOpenBookmarks(

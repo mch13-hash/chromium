@@ -270,9 +270,7 @@ void PageImpl::Activate(
       // Even cross-origin, we allow if the main document has the special
       // header. See PrerenderHost::AllowCrossOriginSubframeNavigation() for
       // detail.
-      if (base::FeatureList::IsEnabled(
-              ::features::kPrerender2CrossOriginIframes) &&
-          type == ActivationType::kPrerendering &&
+      if (type == ActivationType::kPrerendering &&
           is_cross_origin_subframe_prerender_allowed_) {
         return true;
       }
@@ -331,7 +329,7 @@ void PageImpl::MaybeDispatchLoadEventsOnPrerenderActivation() {
     main_document_->DocumentOnLoadCompleted();
   }
 
-  if (first_contentful_paint_in_main_document_load_time_) {
+  if (first_contentful_paint_in_main_document_duration_) {
     main_document_->NotifyFirstContentfulPaint();
   }
 

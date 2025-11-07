@@ -165,7 +165,9 @@ void PrefHashFilter::RegisterProfilePrefs(
   registry->RegisterStringPref(
       user_prefs::kPreferenceResetTime,
       base::NumberToString(base::Time().ToInternalValue()));
-  registry->RegisterDictionaryPref(user_prefs::kTrackedPreferencesReset);
+  // TODO(crbug.com/454827188): Use delegate to handle event messaging instead
+  // of using this pref, kTrackedPreferencesReset.
+  registry->RegisterListPref(user_prefs::kTrackedPreferencesReset);
   // Register the preference to trigger a flush to disk.
   // It's a string preference to store a timestamp.
   registry->RegisterStringPref(
@@ -195,10 +197,10 @@ void PrefHashFilter::ClearResetTime(PrefService* user_prefs) {
 }
 
 // static
-void PrefHashFilter::SetResetTime(PrefService* user_prefs) {
-  user_prefs->SetString(
-      user_prefs::kPreferenceResetTime,
-      base::NumberToString(base::Time::Now().ToInternalValue()));
+void PrefHashFilter::SetResetTimeForTesting(PrefService* user_prefs,
+                                            base::Time time) {
+  user_prefs->SetString(user_prefs::kPreferenceResetTime,
+                        base::NumberToString(time.ToInternalValue()));
 }
 
 void PrefHashFilter::Initialize(base::Value::Dict& pref_store_contents) {
@@ -305,6 +307,7 @@ void PrefHashFilter::FinalizeFilterOnLoad(
     base::Value::Dict pref_store_contents,
     bool prefs_altered) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  std::set<std::string> reset_paths;
   bool did_reset = false;
 
   // Perform the initial synchronous validation pass (without the encryptor).
@@ -330,6 +333,7 @@ void PrefHashFilter::FinalizeFilterOnLoad(
               pref_store_contents, hash_store_transaction.get(),
               external_validation_hash_store_transaction.get())) {
         did_reset = true;
+        reset_paths.insert(it->first);
         prefs_altered = true;
       }
     }
@@ -343,6 +347,10 @@ void PrefHashFilter::FinalizeFilterOnLoad(
         base::NumberToString(base::Time::Now().ToInternalValue()));
     FilterUpdate(user_prefs::kPreferenceResetTime);
 
+    // Treat the setting of the reset time as a reset itself, so the async
+    // validation will skip it. This prevents the "double reset" side effect.
+    reset_paths.insert(user_prefs::kPreferenceResetTime);
+
     if (reset_on_load_observer_)
       reset_on_load_observer_->OnResetOnLoad();
   }
@@ -350,23 +358,34 @@ void PrefHashFilter::FinalizeFilterOnLoad(
 
   // If encrypted hashing is on, post a deferred task to re-validate with the
   // encryptor once it's available. Pass a clone of the pref store contents
-  // so the task operates on the exact state at load time.
-  if (encrypted_hashing_enabled_ && !did_reset) {
+  // so the task operates on the exact state at load time. Also pass the list of
+  // prefs already reset by the synchronous validation.
+  if (encrypted_hashing_enabled_) {
     deferred_task_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&PrefHashFilter::DeferredEncryptorRevalidation,
                        weak_ptr_factory_.GetWeakPtr(),
-                       pref_store_contents.Clone()));
+                       pref_store_contents.Clone(), std::move(reset_paths)));
   } else {
     // No deferred task will be posted, so validation is complete.
     // Log metrics now.
     MaybeRecordTrackedPreferenceResetCount(pref_store_contents);
+
     // If the feature is disabled, and we have a test callback, run it now
     // as no deferred task will be posted.
     if (on_deferred_revalidation_complete_for_testing_) {
       std::move(on_deferred_revalidation_complete_for_testing_).Run();
     }
   }
+
+  // The PrefService initialization is asynchronous. Post a task to
+  // patch the live PrefService with the resets found in the
+  // sync pass.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &PrefHashFilter::UpdateTrackedPreferencesResetListInPrefStore,
+          weak_ptr_factory_.GetWeakPtr(), pref_store_contents.Clone()));
 
   // Immediately call the callback with the original pref_store_contents to
   // allow startup to proceed without waiting for the encryptor.
@@ -375,7 +394,8 @@ void PrefHashFilter::FinalizeFilterOnLoad(
 }
 
 void PrefHashFilter::DeferredEncryptorRevalidation(
-    base::Value::Dict pref_store_contents_at_load) {
+    base::Value::Dict pref_store_contents_at_load,
+    const std::set<std::string>& already_reset_paths) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(encryptor_.has_value());
   const os_crypt_async::Encryptor* encryptor = &encryptor_.value();
@@ -393,6 +413,11 @@ void PrefHashFilter::DeferredEncryptorRevalidation(
 
   // First pass: Validate and reset any tampered preferences.
   for (const auto& [path, preference] : tracked_paths_) {
+    // Skip re-validating any preference that was already reset during the
+    // synchronous pass.
+    if (already_reset_paths.count(path)) {
+      continue;
+    }
     if (!pref_service_->FindPreference(path)) {
       continue;
     }
@@ -417,12 +442,27 @@ void PrefHashFilter::DeferredEncryptorRevalidation(
     if (preference->EnforceAndReport(pref_store_contents_at_load,
                                      transaction.get(),
                                      nullptr /* external_tx */, encryptor)) {
-      // The preference was invalid. Reset the *live* preference. This action
-      // will mark the PrefService as dirty and automatically schedule a new
-      // write operation, during which new encrypted hashes will be generated.
-      pref_service_->ClearPref(path);
+      // The preference was invalid. Update the *live* preference with the
+      // corrected value from the in-memory `pref_store_contents_at_load`
+      // dictionary, which `EnforceAndReport` has already modified.
+      const base::Value* corrected_value =
+          pref_store_contents_at_load.FindByDottedPath(path);
+      if (corrected_value) {
+        pref_service_->Set(path, corrected_value->Clone());
+      } else {
+        // If the corrected value is null (meaning the whole preference was
+        // corrupt and removed), then clear the live pref.
+        pref_service_->ClearPref(path);
+      }
       pref_to_write = user_prefs::kPreferenceResetTime;
     }
+  }
+
+  // If any preferences were reset, the `kTrackedPreferencesReset` list in
+  // `pref_store_contents_at_load` has been updated. Propagate this change to
+  // the live PrefService to ensure it's persisted.
+  if (pref_to_write == user_prefs::kPreferenceResetTime) {
+    UpdateTrackedPreferencesResetListInPrefStore(pref_store_contents_at_load);
   }
 
   // This is the final validation pass. Log metrics if we haven't already.
@@ -437,6 +477,27 @@ void PrefHashFilter::DeferredEncryptorRevalidation(
 
 base::WeakPtr<InterceptablePrefFilter> PrefHashFilter::AsWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
+}
+
+void PrefHashFilter::UpdateTrackedPreferencesResetListInPrefStore(
+    const base::Value::Dict& pref_store_contents_at_load) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // This task should only run after PrefService is created.
+  if (!pref_service_) {
+    // This path is hit by ProfilePrefStoreManagerTest, which reads the
+    // store before a PrefService is associated with the filter.
+    CHECK_IS_TEST();
+    return;
+  }
+
+  const base::Value::List* reset_list = pref_store_contents_at_load.FindList(
+      user_prefs::kTrackedPreferencesReset);
+  if (reset_list) {
+    pref_service_->SetList(user_prefs::kTrackedPreferencesReset,
+                           reset_list->Clone());
+  } else {
+    pref_service_->ClearPref(user_prefs::kTrackedPreferencesReset);
+  }
 }
 
 // static
@@ -551,10 +612,10 @@ void PrefHashFilter::MaybeRecordTrackedPreferenceResetCount(
   if (reset_metric_recorded_) {
     return;
   }
-  const base::Value::Dict* reset_dict =
-      pref_store_contents.FindDict(user_prefs::kTrackedPreferencesReset);
+  const base::Value::List* reset_list =
+      pref_store_contents.FindList(user_prefs::kTrackedPreferencesReset);
   UMA_HISTOGRAM_COUNTS_100("Settings.TrackedPreferenceResets.Count",
-                           reset_dict ? reset_dict->size() : 0);
+                           reset_list ? reset_list->size() : 0);
   reset_metric_recorded_ = true;
 }
 

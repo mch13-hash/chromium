@@ -57,13 +57,17 @@ class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
   // content::DevToolsManagerDelegate implementation.
   void Inspect(content::DevToolsAgentHost* agent_host) override;
   scoped_refptr<content::DevToolsAgentHost> OpenDevTools(
-      content::DevToolsAgentHost* agent_host) override;
+      content::DevToolsAgentHost* agent_host,
+      const content::DevToolsManagerDelegate::DevToolsOptions& devtools_options)
+      override;
   void Activate(content::DevToolsAgentHost* agent_host) override;
   void HandleCommand(content::DevToolsAgentHostClientChannel* channel,
                      base::span<const uint8_t> message,
                      NotHandledCallback callback) override;
   std::string GetTargetType(content::WebContents* web_contents) override;
   std::string GetTargetTitle(content::WebContents* web_contents) override;
+  std::optional<bool> ShouldReportAsTabTarget(
+      content::WebContents* web_contents) override;
 
   content::BrowserContext* CreateBrowserContext() override;
   void DisposeBrowserContext(content::BrowserContext*,

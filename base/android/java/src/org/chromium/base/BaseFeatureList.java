@@ -15,7 +15,7 @@ public class BaseFeatureList {
             new MutableFlagWithSafeDefault(
                     BaseFeatureMap.getInstance(),
                     BaseFeatures.BACKGROUND_NOT_PERCEPTIBLE_BINDING,
-                    false);
+                    true);
 
     public static final MutableFlagWithSafeDefault sEffectiveBindingState =
             new MutableFlagWithSafeDefault(
@@ -27,11 +27,15 @@ public class BaseFeatureList {
                     BaseFeatures.REBINDING_CHILD_SERVICE_CONNECTION_CONTROLLER,
                     false);
 
-    public static final MutableFlagWithSafeDefault sUpdateStateBeforeUnbinding =
+    public static final MutableFlagWithSafeDefault sRebindServiceBatchApi =
             new MutableFlagWithSafeDefault(
-                    BaseFeatureMap.getInstance(),
-                    BaseFeatures.UPDATE_STATE_BEFORE_UNBINDING,
-                    false);
+                    BaseFeatureMap.getInstance(), BaseFeatures.REBIND_SERVICE_BATCH_API, false);
+
+    public static final MutableBooleanParamWithSafeDefault sRebindServiceBatchApiFlushOnIdle =
+            sRebindServiceBatchApi.newBooleanParam("flush-on-idle", true);
+
+    public static final MutableIntParamWithSafeDefault sRebindServiceBatchApiBatchSize =
+            sRebindServiceBatchApi.newIntParam("batch-size", 300);
 
     public static final MutableFlagWithSafeDefault sUseIsUnboundCheck =
             new MutableFlagWithSafeDefault(

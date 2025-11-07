@@ -97,6 +97,7 @@
 // This file can be included from net/http even though
 // it is in net/websockets because it doesn't
 // introduce any link dependency to net/websockets.
+#include "net/socket/socket_pool_additional_capacity.h"
 #include "net/websockets/websocket_handshake_stream_base.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -199,35 +200,6 @@ class MockWebSocketHandshakeStream : public WebSocketHandshakeStreamBase {
  private:
   const StreamType type_;
   base::WeakPtrFactory<MockWebSocketHandshakeStream> weak_ptr_factory_{this};
-};
-
-// HttpStreamFactory subclass that can wait until a preconnect is complete.
-class MockHttpStreamFactoryForPreconnect : public HttpStreamFactory {
- public:
-  explicit MockHttpStreamFactoryForPreconnect(HttpNetworkSession* session)
-      : HttpStreamFactory(session) {}
-  ~MockHttpStreamFactoryForPreconnect() override = default;
-
-  void WaitForPreconnects() {
-    while (!preconnect_done_) {
-      waiting_for_preconnect_ = true;
-      loop_.Run();
-      waiting_for_preconnect_ = false;
-    }
-  }
-
- private:
-  // HttpStreamFactory methods.
-  void OnPreconnectsCompleteInternal() override {
-    preconnect_done_ = true;
-    if (waiting_for_preconnect_) {
-      loop_.QuitWhenIdle();
-    }
-  }
-
-  bool preconnect_done_ = false;
-  bool waiting_for_preconnect_ = false;
-  base::RunLoop loop_;
 };
 
 class StreamRequester : public HttpStreamRequest::Delegate {
@@ -458,10 +430,8 @@ void PreconnectHelperForURL(int num_streams,
                             SecureDnsPolicy secure_dns_policy,
                             HttpNetworkSession* session) {
   HttpNetworkSessionPeer peer(session);
-  auto mock_factory =
-      std::make_unique<MockHttpStreamFactoryForPreconnect>(session);
-  auto* mock_factory_ptr = mock_factory.get();
-  peer.SetHttpStreamFactory(std::move(mock_factory));
+  auto factory = std::make_unique<HttpStreamFactory>(session);
+  peer.SetHttpStreamFactory(std::move(factory));
 
   HttpRequestInfo request;
   request.method = "GET";
@@ -472,8 +442,10 @@ void PreconnectHelperForURL(int num_streams,
   request.traffic_annotation =
       MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
-  session->http_stream_factory()->PreconnectStreams(num_streams, request);
-  mock_factory_ptr->WaitForPreconnects();
+  base::RunLoop run_loop;
+  session->http_stream_factory()->PreconnectStreams(num_streams, request,
+                                                    run_loop.QuitClosure());
+  run_loop.Run();
 }
 
 void PreconnectHelper(const TestCase& test, HttpNetworkSession* session) {
@@ -506,6 +478,7 @@ class CapturePreconnectsTransportSocketPool : public TransportClientSocketPool {
       const CommonConnectJobParams* common_connect_job_params)
       : TransportClientSocketPool(/*max_sockets=*/0,
                                   /*max_sockets_per_group=*/0,
+                                  SocketPoolAdditionalCapacity::Create(),
                                   base::TimeDelta(),
                                   ProxyChain::Direct(),
                                   /*is_for_websockets=*/false,
@@ -3757,14 +3730,9 @@ TEST_P(HttpStreamFactoryTest, MultiIPAliases) {
   // created.  This will fail unless the session pool supports multiple
   // sessions aliasing a single IP.
   EXPECT_EQ(2, GetSpdySessionCount(session.get()));
-  // When HappyEyeballsV3 is enabled, we create separate groups based on the
-  // destination, even when the underlying connections share the same session.
-  int expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 3 : 2;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(2, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(2, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
                                  ProxyChain::Direct()));
@@ -3783,12 +3751,9 @@ TEST_P(HttpStreamFactoryTest, MultiIPAliases) {
   // Verify the session pool reused the second session.  This will fail unless
   // the session pool supports multiple sessions aliasing a single IP.
   EXPECT_EQ(2, GetSpdySessionCount(session.get()));
-  expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 4 : 2;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(2, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(2, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
                                  ProxyChain::Direct()));
@@ -3874,14 +3839,9 @@ TEST_P(HttpStreamFactoryTest, SpdyIPPoolingWithDnsAliases) {
   // created. This will fail unless the session pool supports multiple
   // sessions aliasing a single IP.
   EXPECT_EQ(1, GetSpdySessionCount(session.get()));
-  // When HappyEyeballsV3 is enabled, we create separate groups based on the
-  // destination, even when the underlying connections share the same session.
-  int expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 2 : 1;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(1, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(1, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
                                  ProxyChain::Direct()));
@@ -3902,12 +3862,9 @@ TEST_P(HttpStreamFactoryTest, SpdyIPPoolingWithDnsAliases) {
   // created. This will fail unless the session pool supports multiple
   // sessions aliasing a single IP.
   EXPECT_EQ(1, GetSpdySessionCount(session.get()));
-  expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 3 : 1;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(1, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(1, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
                                  ProxyChain::Direct()));
@@ -3932,12 +3889,9 @@ TEST_P(HttpStreamFactoryTest, SpdyIPPoolingWithDnsAliases) {
   // Verify the session pool reused the first session and no new session is
   // created.
   EXPECT_EQ(1, GetSpdySessionCount(session.get()));
-  expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 3 : 1;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(1, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(1, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
                                  ProxyChain::Direct()));
@@ -3958,12 +3912,9 @@ TEST_P(HttpStreamFactoryTest, SpdyIPPoolingWithDnsAliases) {
   // Verify the session pool reused the first session and no new session is
   // created. This will fail unless the session pool supports multiple
   // sessions aliasing a single IP.
-  expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 3 : 1;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(1, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(1, GetSpdySessionCount(session.get()));
   EXPECT_EQ(1, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
@@ -3986,12 +3937,9 @@ TEST_P(HttpStreamFactoryTest, SpdyIPPoolingWithDnsAliases) {
   // created. This will fail unless the session pool supports multiple
   // sessions aliasing a single IP.
   EXPECT_EQ(1, GetSpdySessionCount(session.get()));
-  expected_group_count =
-      base::FeatureList::IsEnabled(features::kHappyEyeballsV3) ? 3 : 1;
-  EXPECT_EQ(
-      expected_group_count,
-      GetPoolGroupCount(session.get(), HttpNetworkSession::NORMAL_SOCKET_POOL,
-                        ProxyChain::Direct()));
+  EXPECT_EQ(1, GetPoolGroupCount(session.get(),
+                                 HttpNetworkSession::NORMAL_SOCKET_POOL,
+                                 ProxyChain::Direct()));
   EXPECT_EQ(1, GetHandedOutCount(session.get(),
                                  HttpNetworkSession::NORMAL_SOCKET_POOL,
                                  ProxyChain::Direct()));

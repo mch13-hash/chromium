@@ -7,12 +7,22 @@ If you use your @google.com account, or a @chromium.org account linked to your
 @google.com account: You already ReAuth during your daily `gcert`, no further
 action is required. Feel free to stop reading now.
 
+If you use a @chromium.org account that isn't linked to your google.com account,
+with a Google-issued security key, on devices managed by Google (e.g. gLinux),
+simply run `git credential-luci reauth`, follow the prompts to complete ReAuth.
+You need to ReAuth every 20 hours (just like `gcert`).
+
+If you use a terminal persistence tool, such as screen, tmux, or shpool, refer
+to [the internal guide](go/gerrit-reauth#bookmark=id.gohr0ejjvi49) for
+additional instructions.
+
 Otherwise, follow this guide to ReAuth locally or remotely.
 
 If you aren't sure if your account is linked, follow
 [the steps here](http://go/chromium-account-support#how-can-i-check-if-my-gerrit-accounts-are-linked).
 
-For more information, see [go/gerrit-reauth](http://go/gerrit-reauth).
+For more information, see this internal doc:
+[go/gerrit-reauth](http://go/gerrit-reauth).
 ***
 
 [TOC]
@@ -55,9 +65,13 @@ If you work remotely over SSH or remote desktop, please follow steps in
 [ReAuth in git-cl remotely](#ReAuth-in-git_cl-remotely) to setup your
 environment.
 
-If you use Linux, you might need to
-[configure your system](#linux-security-keys-access) to make security keys
-usable.
+If you use Linux:
+
+1. You need to install a GUI-based `pinentry` program to enter security key
+   PINs. Certain security keys models mandate PIN entry at all times.
+
+1. You might also need to [configure your system](#linux-security-keys-access)
+   to make security keys usable.
 ***
 
 ## Prerequisites
@@ -77,14 +91,34 @@ The line "This key can only be used with a password" indicates a **U2F**
 security key. If the line is missing, the key is a **FIDO2** security key.
 Please include this info when reporting issues.
 
+*** promo
 **Important Note**: Passkeys won't be supported by ReAuth. A physical security
 key is required.
+***
 
-If you’re using a Google Workspace account, make sure
+**If you use Firefox**: You need to **allow** the website to request "extended
+information about your security key" when registering your security key (refer
+to the screenshot below).
+Otherwise the key won't be able to ReAuth (you'll see BAD_REQUEST error in the
+log). If you've already registered the key, remove it from the security key
+list, then add it again.
+
+![Firefox security key popup](./images/gerrit_reauth_firefox_sk.png)
+
+**If you’re using a Google Workspace account**, make sure
 "[2-Step Verification](https://myaccount.google.com/signinoptions/twosv)" is
 turned on.
 
 ![Two-step verification](./images/gerrit_reauth_2sv.png)
+
+*** note
+**Known Issue:** If you sign in to your Google account via an external identity provider
+such as **Active Directory, Entra ID, or Okta**, you may see `NO_AVAILABLE_CHALLENGES` error
+when you ReAuth immediately after registering your security key.
+
+You may need to **wait for a few hours** before your first ReAuth can proceed. We're still
+investigating the cause.
+***
 
 ### Accurate Timezone / Time
 
@@ -155,6 +189,40 @@ keys.
 The configuration steps vary by Linux distributions. We recommend following
 [Yubico’s guide](https://support.yubico.com/hc/en-us/articles/360013708900-Troubleshooting-using-your-YubiKey-with-Linux)
 , which we confirmed to be working on Ubuntu 24.04 LTS Desktop.
+
+### Linux: security key PIN entry program
+
+ReAuth doesn't require security key PINs. But PINs entry might be enforced by
+the security key manufacturer, or if you have configured your key to do so.
+
+On Linux, you need the `pinentry` program to input PINs. If you don't have this
+program, your security key will refuse to complete the ReAuth challenge. You
+typically see `BAD_REQUEST` or `PinRequiredError` in the logs depending on the
+security key.
+
+For the best experience, we recommend using a **GUI based pinentry** program.
+
+Terminal based pinentry only works with local ReAuth. If you don't need to
+ReAuth over SSH, feel free to use one.
+
+To install a GUI-based pinentry program:
+
+* Ubuntu, Debian: `sudo apt install pinentry-gnome3`
+* Fedora: `sudo dnf install pinentry-qt`
+
+After installing the package, your system should default to the newly installed
+GUI-based pinentry program.
+
+You can check the current pinentry program by running:
+
+```
+readlink -f $( which pinentry )
+```
+
+The output path's suffix should be a GUI based name, such as "-gnome" or "-qt".
+
+If the above path ends with terminal based name, such as "tty" or "curses", set
+`LUCI_AUTH_PINENTRY=pinentry-gnome3` environment variable to override.
 
 ## ReAuth in Gerrit Web UI
 
@@ -276,7 +344,7 @@ should see "ReAuth succeed" in the command prompt.
 For the first security key touch, there might be a delay before your security
 key starts blinking. This is caused by `luci-auth-fido2-plugin` bootstrapping.
 
-#### I’m using a Windows client, I want to SSH into Linux
+### I’m using a Windows client, I want to SSH into Linux
 
 First, start `luci-auth-ssh-helper` in daemon mode on a TCP port (we use 10899
 in the example). The helper will listen for incoming ReAuth challenges.
@@ -381,11 +449,27 @@ If you run into issues, please report to
 - The security key you're using (e.g. manufacturer, model, etc.)
 - Whether the security key is registered as a FIDO2 or U2F key (see
   [Prerequisites](#prerequisites))
+- The following environment variables: `SSH_AUTH_SOCK`, `SSH_CONNECTION` and
+  `GOOGLE_AUTH_WEBAUTHN_PLUGIN`
 
 Note, when sharing debug logs, please edit out the value after `Signature:`
 field (if it's present) and any other values if you wish.
 
 ## FAQs
+
+**ReAuth in `screen`, `tmux`, `shpool`, etc.**
+You need to manually set `GOOGLE_AUTH_WEBAUTHN_PLUGIN` environment variable for
+ReAuth to work. This is in addition to the instructions above.
+
+If you're a Googler, follow
+[the internal guide](go/gerrit-reauth#bookmark=id.gohr0ejjvi49).
+
+Otherwise, set the environment variable depending on your situation:
+
+* To ReAuth locally: `GOOGLE_AUTH_WEBAUTHN_PLUGIN=luci-auth-fido2-plugin`
+* To ReAuth over SSH: `GOOGLE_AUTH_WEBAUTHN_PLUGIN=luci-auth-ssh-plugin`
+
+Then run `git credential-luci reauth`.
 
 **I accidentally shared the `Signature:` in the debug logs\!**
 

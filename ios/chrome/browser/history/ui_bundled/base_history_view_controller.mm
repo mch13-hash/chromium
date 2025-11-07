@@ -34,7 +34,6 @@
 #import "ios/chrome/browser/metrics/model/new_tab_page_uma.h"
 #import "ios/chrome/browser/net/model/crurl.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
-#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/features.h"
 #import "ios/chrome/browser/shared/coordinator/alert/action_sheet_coordinator.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
@@ -585,27 +584,27 @@ static const base::TimeDelta kDelayUntilReadyToRemoveLoadingIndicatorsMs =
 
 - (UITableViewCell*)tableView:(UITableView*)tableView
         cellForRowAtIndexPath:(NSIndexPath*)indexPath {
-  UITableViewCell* cellToReturn = [super tableView:tableView
-                             cellForRowAtIndexPath:indexPath];
   TableViewItem* item = [self.tableViewModel itemAtIndexPath:indexPath];
-  cellToReturn.userInteractionEnabled = !(item.type == kItemTypeEntriesStatus);
   if (item.type == kItemTypeHistoryEntry) {
     HistoryEntryItem* URLItem =
         base::apple::ObjCCastStrict<HistoryEntryItem>(item);
-    TableViewURLCell* URLCell =
-        base::apple::ObjCCastStrict<TableViewURLCell>(cellToReturn);
-    CrURL* crurl = [[CrURL alloc] initWithGURL:URLItem.URL];
-    [self.imageDataSource
-        faviconForPageURL:crurl
-               completion:^(FaviconAttributes* attributes) {
-                 // Only set favicon if the cell hasn't been reused.
-                 if ([URLCell.cellUniqueIdentifier
-                         isEqualToString:URLItem.uniqueIdentifier]) {
-                   DCHECK(attributes);
-                   [URLCell.faviconView configureWithAttributes:attributes];
-                 }
-               }];
+    if (!URLItem.faviconAttributes) {
+      CrURL* crurl = [[CrURL alloc] initWithGURL:URLItem.URL];
+      [self.imageDataSource
+          faviconForPageURL:crurl
+                 completion:^(FaviconAttributes* attributes, bool cached) {
+                   URLItem.faviconAttributes = attributes;
+                   if (!cached && attributes.faviconImage) {
+                     [tableView reconfigureRowsAtIndexPaths:@[ indexPath ]];
+                   }
+                 }];
+    }
   }
+
+  UITableViewCell* cellToReturn = [super tableView:tableView
+                             cellForRowAtIndexPath:indexPath];
+  cellToReturn.userInteractionEnabled = !(item.type == kItemTypeEntriesStatus);
+
   return cellToReturn;
 }
 

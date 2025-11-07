@@ -344,7 +344,8 @@ std::unique_ptr<aura::Window> AshTestBase::CreateAppWindow(
     const gfx::Rect& bounds_in_screen,
     chromeos::AppType app_type,
     int shell_window_id,
-    views::WidgetDelegate* delegate) {
+    views::WidgetDelegate* delegate,
+    bool show) {
   views::test::TestWidgetBuilder builder;
   if (delegate) {
     builder.SetDelegate(delegate);
@@ -362,6 +363,7 @@ std::unique_ptr<aura::Window> AshTestBase::CreateAppWindow(
           .SetBounds(bounds_in_screen.IsEmpty() ? gfx::Rect(0, 0, 300, 300)
                                                 : bounds_in_screen)
           .SetContext(Shell::GetPrimaryRootWindow())
+          .SetShow(show)
           .SetWindowId(shell_window_id)
           .BuildOwnedByNativeWidget();
   return base::WrapUnique(widget->GetNativeWindow());
@@ -372,8 +374,10 @@ std::unique_ptr<aura::Window> AshTestBase::CreateTestWindow(
     aura::client::WindowType type,
     int shell_window_id) {
   if (type != aura::client::WINDOW_TYPE_NORMAL) {
-    return base::WrapUnique(CreateTestWindowInShellWithDelegateAndType(
-        nullptr, type, shell_window_id, bounds_in_screen));
+    return base::WrapUnique(
+        CreateTestWindowInShell({.bounds = bounds_in_screen,
+                                 .window_type = type,
+                                 .window_id = shell_window_id}));
   }
 
   return CreateAppWindow(bounds_in_screen, chromeos::AppType::NON_APP,
@@ -386,38 +390,15 @@ std::unique_ptr<aura::Window> AshTestBase::CreateToplevelTestWindow(
   aura::test::TestWindowDelegate* delegate =
       aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate();
   return base::WrapUnique<aura::Window>(
-      CreateTestWindowInShellWithDelegateAndType(
-          delegate, aura::client::WINDOW_TYPE_NORMAL, shell_window_id,
-          bounds_in_screen));
+      CreateTestWindowInShell({.delegate = delegate,
+                               .bounds = bounds_in_screen,
+                               .window_id = shell_window_id}));
 }
 
-aura::Window* AshTestBase::CreateTestWindowInShellWithId(int id) {
-  return CreateTestWindowInShellWithDelegate(NULL, id, gfx::Rect());
-}
-
-aura::Window* AshTestBase::CreateTestWindowInShellWithBounds(
-    const gfx::Rect& bounds) {
-  return CreateTestWindowInShellWithDelegate(NULL, 0, bounds);
-}
-
-aura::Window* AshTestBase::CreateTestWindowInShellWithDelegate(
-    aura::WindowDelegate* delegate,
-    int id,
-    const gfx::Rect& bounds) {
-  return CreateTestWindowInShellWithDelegateAndType(
-      delegate, aura::client::WINDOW_TYPE_NORMAL, id, bounds);
-}
-
-aura::Window* AshTestBase::CreateTestWindowInShellWithDelegateAndType(
-    aura::WindowDelegate* delegate,
-    aura::client::WindowType type,
-    int id,
-    const gfx::Rect& bounds) {
-  return TestWindowBuilder({.delegate = delegate,
-                            .bounds = bounds,
-                            .window_type = type,
-                            .window_id = id})
-      .SetWindowTitle(u"Window " + base::NumberToString16(id))
+aura::Window* AshTestBase::CreateTestWindowInShell(
+    aura::test::WindowBuilderParams params) {
+  return TestWindowBuilder(params)
+      .SetWindowTitle(u"Window " + base::NumberToString16(params.window_id))
       .AllowAllWindowStates()
       .Build()
       .release();

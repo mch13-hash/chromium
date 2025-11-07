@@ -9,7 +9,6 @@
 
 #include "base/callback_list.h"
 #include "base/functional/callback.h"
-#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/glic/glic_metrics.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
@@ -56,6 +55,9 @@ class GlicShareImageHandler {
                           const gfx::Size& downscaled_size,
                           const std::string& image_extension,
                           std::vector<lens::mojom::LatencyLogPtr> log_data);
+
+  // Attempt to display an error toast
+  void MaybeShowErrorToast(tabs::TabInterface* tab);
 
   // Attempts to send the received context. The glic panel may not be ready,
   // however, and in that case, this function will begin polling for readiness

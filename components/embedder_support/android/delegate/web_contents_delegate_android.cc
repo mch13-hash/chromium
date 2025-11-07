@@ -44,8 +44,8 @@
 #include "components/embedder_support/android/web_contents_delegate_jni_headers/WebContentsDelegateAndroid_jni.h"
 
 using base::android::AttachCurrentThread;
-using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertUTF16ToJavaString;
+using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 using content::ColorChooser;
@@ -144,8 +144,9 @@ void WebContentsDelegateAndroid::NavigationStateChanged(
     content::InvalidateTypes changed_flags) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_navigationStateChanged(env, obj,
                                                          changed_flags);
 }
@@ -154,16 +155,18 @@ void WebContentsDelegateAndroid::VisibleSecurityStateChanged(
     WebContents* source) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_visibleSSLStateChanged(env, obj);
 }
 
 void WebContentsDelegateAndroid::ActivateContents(WebContents* contents) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_activateContents(env, obj);
 }
 
@@ -185,8 +188,9 @@ void WebContentsDelegateAndroid::RendererUnresponsive(
     base::RepeatingClosure hang_monitor_restarter) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_rendererUnresponsive(env, obj);
 }
 
@@ -195,8 +199,9 @@ void WebContentsDelegateAndroid::RendererResponsive(
     content::RenderWidgetHost* render_widget_host) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_rendererResponsive(env, obj);
 }
 
@@ -209,8 +214,9 @@ bool WebContentsDelegateAndroid::IsWebContentsCreationOverridden(
     const GURL& target_url) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
   ScopedJavaLocalRef<jobject> java_gurl =
       url::GURLAndroid::FromNativeGURL(env, target_url);
   return !Java_WebContentsDelegateAndroid_shouldCreateWebContents(env, obj,
@@ -220,8 +226,9 @@ bool WebContentsDelegateAndroid::IsWebContentsCreationOverridden(
 void WebContentsDelegateAndroid::CloseContents(WebContents* source) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_closeContents(env, obj);
 }
 
@@ -233,9 +240,10 @@ bool WebContentsDelegateAndroid::DidAddMessageToConsole(
     const std::u16string& source_id) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return WebContentsDelegate::DidAddMessageToConsole(
         source, log_level, message, line_no, source_id);
+  }
   ScopedJavaLocalRef<jstring> jmessage(ConvertUTF16ToJavaString(env, message));
   ScopedJavaLocalRef<jstring> jsource_id(
       ConvertUTF16ToJavaString(env, source_id));
@@ -260,21 +268,17 @@ bool WebContentsDelegateAndroid::DidAddMessageToConsole(
       env, obj, jlevel, jmessage, line_no, jsource_id);
 }
 
-// This is either called from TabContents::DidNavigateMainFramePostCommit() with
-// an empty GURL or responding to RenderViewHost::OnMsgUpateTargetURL(). In
-// Chrome, the latter is not always called, especially not during history
-// navigation. So we only handle the first case and pass the source TabContents'
-// url to Java to update the UI.
+// Called when the target URL under the cursor changes. For example, when
+// the user hovers over a link. Passes the URL to the Java side.
 void WebContentsDelegateAndroid::UpdateTargetURL(WebContents* source,
                                                  const GURL& url) {
-  if (!url.is_empty())
-    return;
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
-  Java_WebContentsDelegateAndroid_onUpdateUrl(
-      env, obj, url::GURLAndroid::FromNativeGURL(env, source->GetVisibleURL()));
+  }
+  Java_WebContentsDelegateAndroid_onUpdateTargetUrl(
+      env, obj, url::GURLAndroid::FromNativeGURL(env, url));
 }
 
 content::KeyboardEventProcessingResult
@@ -313,8 +317,9 @@ bool WebContentsDelegateAndroid::HandleKeyboardEvent(
   if (!key_event.is_null()) {
     JNIEnv* env = AttachCurrentThread();
     ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-    if (obj.is_null())
+    if (obj.is_null()) {
       return true;
+    }
     Java_WebContentsDelegateAndroid_handleKeyboardEvent(env, obj, key_event);
   }
   return true;
@@ -323,8 +328,9 @@ bool WebContentsDelegateAndroid::HandleKeyboardEvent(
 bool WebContentsDelegateAndroid::TakeFocus(WebContents* source, bool reverse) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return WebContentsDelegate::TakeFocus(source, reverse);
+  }
   return Java_WebContentsDelegateAndroid_takeFocus(env, obj, reverse);
 }
 
@@ -332,16 +338,18 @@ void WebContentsDelegateAndroid::ShowRepostFormWarningDialog(
     WebContents* source) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_showRepostFormWarningDialog(env, obj);
 }
 
 bool WebContentsDelegateAndroid::ShouldBlockMediaRequest(const GURL& url) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
   ScopedJavaLocalRef<jobject> j_gurl =
       url::GURLAndroid::FromNativeGURL(env, url);
   return Java_WebContentsDelegateAndroid_shouldBlockMediaRequest(env, obj,
@@ -353,10 +361,11 @@ void WebContentsDelegateAndroid::EnterFullscreenModeForTab(
     const blink::mojom::FullscreenOptions& options) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_enterFullscreenModeForTab(
-      env, obj, reinterpret_cast<jlong>(requesting_frame),
+      env, obj, requesting_frame->GetJavaRenderFrameHost(),
       options.prefers_navigation_bar, options.prefers_status_bar,
       options.display_id);
 }
@@ -366,10 +375,11 @@ void WebContentsDelegateAndroid::FullscreenStateChangedForTab(
     const blink::mojom::FullscreenOptions& options) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_fullscreenStateChangedForTab(
-      env, obj, reinterpret_cast<jlong>(requesting_frame),
+      env, obj, requesting_frame->GetJavaRenderFrameHost(),
       options.prefers_navigation_bar, options.prefers_status_bar,
       options.display_id);
 }
@@ -378,8 +388,9 @@ void WebContentsDelegateAndroid::ExitFullscreenModeForTab(
     WebContents* web_contents) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return;
+  }
   Java_WebContentsDelegateAndroid_exitFullscreenModeForTab(env, obj);
 }
 
@@ -439,8 +450,9 @@ bool WebContentsDelegateAndroid::IsFullscreenForTabOrPending(
     const WebContents* web_contents) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
   return Java_WebContentsDelegateAndroid_isFullscreenForTabOrPending(env, obj);
 }
 
@@ -466,40 +478,45 @@ void WebContentsDelegateAndroid::OnDidBlockNavigation(
 int WebContentsDelegateAndroid::GetTopControlsHeight() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return 0;
+  }
   return Java_WebContentsDelegateAndroid_getTopControlsHeight(env, obj);
 }
 
 int WebContentsDelegateAndroid::GetTopControlsMinHeight() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return 0;
+  }
   return Java_WebContentsDelegateAndroid_getTopControlsMinHeight(env, obj);
 }
 
 int WebContentsDelegateAndroid::GetBottomControlsHeight() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return 0;
+  }
   return Java_WebContentsDelegateAndroid_getBottomControlsHeight(env, obj);
 }
 
 int WebContentsDelegateAndroid::GetBottomControlsMinHeight() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return 0;
+  }
   return Java_WebContentsDelegateAndroid_getBottomControlsMinHeight(env, obj);
 }
 
 bool WebContentsDelegateAndroid::ShouldAnimateBrowserControlsHeightChanges() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
   return Java_WebContentsDelegateAndroid_shouldAnimateBrowserControlsHeightChanges(
       env, obj);
 }
@@ -508,8 +525,9 @@ bool WebContentsDelegateAndroid::DoBrowserControlsShrinkRendererSize(
     content::WebContents* contents) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
   return Java_WebContentsDelegateAndroid_controlsResizeView(env, obj);
 }
 
@@ -517,8 +535,9 @@ int WebContentsDelegateAndroid::GetVirtualKeyboardHeight(
     content::WebContents* contents) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return false;
+  }
   return Java_WebContentsDelegateAndroid_getVirtualKeyboardHeight(env, obj);
 }
 
@@ -527,8 +546,9 @@ blink::mojom::DisplayMode WebContentsDelegateAndroid::GetDisplayMode(
   JNIEnv* env = base::android::AttachCurrentThread();
 
   ScopedJavaLocalRef<jobject> obj = GetJavaDelegate(env);
-  if (obj.is_null())
+  if (obj.is_null()) {
     return blink::mojom::DisplayMode::kUndefined;
+  }
 
   return static_cast<blink::mojom::DisplayMode>(
       Java_WebContentsDelegateAndroid_getDisplayModeChecked(env, obj));

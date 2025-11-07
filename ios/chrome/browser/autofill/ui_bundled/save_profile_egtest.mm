@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #import <memory>
 #import <string_view>
 
@@ -66,7 +61,7 @@ constexpr char kFormElementSubmit[] = "submit_profile";
 constexpr base::TimeDelta kTypingCoolDownPeriod = base::Milliseconds(50);
 
 // Email value used by the tests.
-constexpr char kEmail[] = "foo1@gmail.com";
+constexpr std::string_view kEmail = "foo1@gmail.com";
 
 // Histogram bucket representing renderer errors.
 constexpr int kRendererErrorHistogramBucket = 8;
@@ -126,7 +121,8 @@ id<GREYMatcher> ModalMigrationButtonMatcher() {
 // Matcher for a country entry with the given accessibility label.
 id<GREYMatcher> CountryEntry(NSString* label) {
   return grey_allOf(chrome_test_util::ButtonWithAccessibilityLabel(label),
-                    grey_sufficientlyVisible(), nil);
+                    grey_userInteractionEnabled(), grey_sufficientlyVisible(),
+                    nil);
 }
 
 // Matcher for the search bar.
@@ -213,19 +209,6 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
 #endif
 - (AppLaunchConfiguration)appConfigurationForTestCase {
   AppLaunchConfiguration config;
-
-  if ([self isRunningTest:@selector(testUserData_LocalEditViaBottomSheet)] ||
-      [self
-          isRunningTest:@selector(testUserData_LocalHideBottomSheetOnCancel)] ||
-      [self isRunningTest:@selector
-            (MAYBE_testEditBottomSheetAlertBySwipingDown)]) {
-    config.features_enabled.push_back(
-        kAutofillDynamicallyLoadsFieldsForAddressInput);
-  }
-
-  if ([self isRunningTest:@selector(FLAKY_testSaveWithoutBadge)]) {
-    config.features_enabled.push_back(kAutofillBadgeRemoval);
-  }
 
   if ([self isRunningTest:@selector(testUserData_AccountSave)] ||
       [self
@@ -444,15 +427,16 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
 
   // Populate the email field.
   // TODO(crbug.com/40916974): This should use grey_typeText when fixed.
-  for (int i = 0; kEmail[i] != '\0'; ++i) {
-    NSString* letter = base::SysUTF8ToNSString(std::string(1, kEmail[i]));
-    if (kEmail[i] == '@') {
-      [ChromeEarlGrey simulatePhysicalKeyboardEvent:letter
+  for (char letter : kEmail) {
+    if (letter == '@') {
+      [ChromeEarlGrey simulatePhysicalKeyboardEvent:@"@"
                                               flags:UIKeyModifierShift];
       continue;
     }
 
-    [ChromeEarlGrey simulatePhysicalKeyboardEvent:letter flags:0];
+    [ChromeEarlGrey
+        simulatePhysicalKeyboardEvent:[NSString stringWithFormat:@"%c", letter]
+                                flags:0];
   }
 
   // Submit the form.
@@ -475,35 +459,6 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
                   @"Profile should have been updated.");
 }
 
-// Ensures that the profile is saved to Chrome after submitting and editing the
-// form.
-- (void)testUserData_LocalEdit {
-  if ([AutofillAppInterface isDynamicallyLoadFieldsOnInputEnabled]) {
-    EARL_GREY_TEST_SKIPPED(@"This test is not relevant when the fields "
-                           @"are loaded dynamically on input.");
-  }
-
-  // Fill and submit the form.
-  [self fillPresidentProfileAndShowSaveModal];
-
-  // Edit the profile.
-  [[EarlGrey selectElementWithMatcher:ModalEditButtonMatcher()]
-      performAction:grey_tap()];
-
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::TextFieldForCellWithLabelId(
-                                   IDS_IOS_AUTOFILL_CITY)]
-      performAction:grey_replaceText(@"New York")];
-
-  // Save the profile.
-  [[EarlGrey selectElementWithMatcher:ModalButtonMatcher()]
-      performAction:grey_tap()];
-
-  // Ensure profile is saved locally.
-  GREYAssertEqual(1U, [AutofillAppInterface profilesCount],
-                  @"Profile should have been saved.");
-}
-
 // Ensures that the profile is saved to Account after submitting the form.
 - (void)testUserData_AccountSave {
   [SigninEarlGrey signinWithFakeIdentity:[FakeSystemIdentity fakeIdentity1]];
@@ -518,7 +473,7 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
 
   id<GREYMatcher> footerMatcher = grey_text(
       l10n_util::GetNSStringF(IDS_IOS_AUTOFILL_SAVE_ADDRESS_IN_ACCOUNT_FOOTER,
-                              base::UTF8ToUTF16(std::string(kEmail))));
+                              base::UTF8ToUTF16(kEmail)));
 
   [[EarlGrey selectElementWithMatcher:footerMatcher]
       assertWithMatcher:grey_sufficientlyVisible()];
@@ -563,11 +518,6 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
 // Ensures that the profile is saved to Account after submitting and editing the
 // form.
 - (void)testUserData_AccountEdit {
-  if ([AutofillAppInterface isDynamicallyLoadFieldsOnInputEnabled]) {
-    EARL_GREY_TEST_SKIPPED(@"This test is not relevant when the fields "
-                           @"are loaded dynamically on input.");
-  }
-
   [SigninEarlGrey signinWithFakeIdentity:[FakeSystemIdentity fakeIdentity1]];
 
   [self fillPresidentProfileAndShowSaveModal];
@@ -576,14 +526,12 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
   [[EarlGrey selectElementWithMatcher:ModalEditButtonMatcher()]
       performAction:grey_tap()];
 
-  [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::TextFieldForCellWithLabelId(
-                                   IDS_IOS_AUTOFILL_CITY)]
+  [[EarlGrey selectElementWithMatcher:TextFieldWithLabel(@"City")]
       performAction:grey_replaceText(@"New York")];
 
   id<GREYMatcher> footerMatcher = grey_text(
       l10n_util::GetNSStringF(IDS_IOS_AUTOFILL_SAVE_ADDRESS_IN_ACCOUNT_FOOTER,
-                              base::UTF8ToUTF16(std::string(kEmail))));
+                              base::UTF8ToUTF16(kEmail)));
 
   [[EarlGrey selectElementWithMatcher:footerMatcher]
       assertWithMatcher:grey_sufficientlyVisible()];
@@ -627,7 +575,7 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
 
   id<GREYMatcher> footerMatcher = grey_text(l10n_util::GetNSStringF(
       IDS_IOS_AUTOFILL_ADDRESS_MIGRATE_IN_ACCOUNT_FOOTER,
-      base::UTF8ToUTF16(std::string(kEmail))));
+      base::UTF8ToUTF16(kEmail)));
   // Check if there is footer suggesting it's a migration prompt.
   [[EarlGrey selectElementWithMatcher:footerMatcher]
       assertWithMatcher:grey_sufficientlyVisible()];
@@ -657,8 +605,10 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
       performAction:grey_replaceText(@"New York")];
 
   [[EarlGrey
-      selectElementWithMatcher:grey_accessibilityLabel(l10n_util::GetNSString(
-                                   IDS_IOS_AUTOFILL_COUNTRY))]
+      selectElementWithMatcher:grey_allOf(grey_accessibilityLabel(
+                                              l10n_util::GetNSString(
+                                                  IDS_IOS_AUTOFILL_COUNTRY)),
+                                          grey_userInteractionEnabled(), nil)]
       performAction:grey_tap()];
 
   // Focus the search bar.
@@ -741,7 +691,7 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
 
   id<GREYMatcher> footerMatcher = grey_text(
       l10n_util::GetNSStringF(IDS_IOS_AUTOFILL_SAVE_ADDRESS_IN_ACCOUNT_FOOTER,
-                              base::UTF8ToUTF16(std::string(kEmail))));
+                              base::UTF8ToUTF16(kEmail)));
 
   [[EarlGrey selectElementWithMatcher:footerMatcher]
       assertWithMatcher:grey_sufficientlyVisible()];
@@ -937,8 +887,6 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
   [SigninEarlGrey signOut];
 }
 
-
-
 // Tests that multiple submissions on the same form are deduped when deduping is
 // enabled where only one submission per form element is allowed when.
 - (void)testSubmissionDetectionWithDeduping {
@@ -1054,10 +1002,6 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
           forHistogram:@"Autofill.iOS.FormSubmission.OutcomeV2"]);
 }
 
-
-
-
-
 // Tests submission count reporting with the scheduled task for the 2 types of
 // form submission, regular and programmatic.
 // TODO(crbug.com/428189566): Re-enable after the test is fixed for
@@ -1145,8 +1089,6 @@ void TypeTextInXframeField(NSString* fieldID, NSString* text) {
           }),
       @"Timed out waiting for the form submission metrics.");
 }
-
-
 
 // Tests submission count reporting when unloading a page.
 // TODO(crbug.com/428189566): Re-enable after the test is fixed for

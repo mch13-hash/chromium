@@ -7,26 +7,28 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
 import type {SetupListModuleWrapperElement} from './setup_list_module_wrapper.js';
 
 export function getHtml(this: SetupListModuleWrapperElement) {
-  return html`
+  // clang-format off
+  return html`<!--_html_template_start_-->
 <div id="container"
     ?hidden="${this.isModuleHidden_()}"
     @module-ready="${this.onModuleReady_}"
     @disable-module="${this.onHideModule_}"
     @dismiss-module-instance="${this.onHideModule_}">
   <div id="moduleElement">
-    <setup-list id="setupList" maxPromos=${this.maxPromos}
-        maxCompletedPromos=${this.maxCompletedPromos}></setup-list>
+    <setup-list id="setupList" maxPromos="${this.maxPromos}"
+        maxCompletedPromos="${this.maxCompletedPromos}">
+    </setup-list>
   </div>
 </div>
 <cr-toast id="undoToast" duration="10000">
   <div id="undoToastMessage">${this.undoData_?.message || ''}</div>
   ${this.undoData_?.undo ? html `
-    <cr-button id="undoButton"
-        aria-label="$i18n{undoDescription}"
+    <cr-button id="undoButton" aria-label="$i18n{undoDescription}"
         @click="${this.onUndoButtonClick_}">
       $i18n{undo}
     </cr-button>
   ` : ''}
 </cr-toast>
-`;
+<!--_html_template_end_-->`;
+  // clang-format on
 }

@@ -7698,6 +7698,15 @@ class ServiceWorkerSyntheticResponseBrowserTest
             return nullptr;
           }
 
+          if (base::Contains(request.GetURL().GetQuery(), "redirect")) {
+            auto response =
+                std::make_unique<net::test_server::BasicHttpResponse>();
+            response->set_code(net::HTTP_TEMPORARY_REDIRECT);
+            response->AddCustomHeader(
+                "Location", request.GetURL().GetPath() + "?query=bar");
+            return response;
+          }
+
           const bool is_slow =
               base::Contains(request.GetURL().GetQuery(), "server_slow");
 
@@ -7995,4 +8004,56 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerSyntheticResponseBrowserTest,
                      "Math.ceil(performance.getEntriesByType('navigation')[0]."
                      "responseStart) < 2000"));
 }
+
+IN_PROC_BROWSER_TEST_P(ServiceWorkerSyntheticResponseBrowserTest, Redirect) {
+  // TODO(crbug.com/450598950): Test is flaky only on the dry-run mode. With the
+  // dry-run mode, ServiceWorker doesn't handle actual network requests, so
+  // perhaps this is the issue in the navigation code?
+  if (IsDryRunMode()) {
+    return;
+  }
+
+  SetUpMockContentBrowserClient();
+  // For the fist navigation, it sends a network request, but the server
+  // delivers a redirect response. It successfully navigates to the redirected
+  // page.
+  GURL initial_url = https_server()->GetURL(
+      kHostname, base::StrCat({kTargetPath, "foo&redirect"}));
+  GURL redirected_url =
+      https_server()->GetURL(kHostname, base::StrCat({kTargetPath, "bar"}));
+  EXPECT_TRUE(NavigateToURL(shell(), initial_url, redirected_url));
+}
+
+IN_PROC_BROWSER_TEST_P(ServiceWorkerSyntheticResponseBrowserTest,
+                       IncognitoDryRun) {
+  if (!IsDryRunMode()) {
+    return;
+  }
+
+  SetUpMockContentBrowserClient();
+  Shell* incognito_shell = CreateOffTheRecordBrowser();
+  // For the fist navigation, it sends a network request. In the dry-run mode,
+  // the synthetic response in the incognito mode.
+  GURL url =
+      https_server()->GetURL(kHostname, base::StrCat({kTargetPath, "foo"}));
+  EXPECT_TRUE(NavigateToURL(incognito_shell, url));
+  EXPECT_EQ("[SyntheticResponse] Response from the network",
+            EvalJs(incognito_shell->web_contents()->GetPrimaryMainFrame(),
+                   "document.body.innerText;"));
+
+  // The second navigation. The browser should have stored the response header
+  // from the previous navigation, and receive the response header locally.
+  GURL second_url = https_server()->GetURL(
+      kHostname, base::StrCat({kTargetPath, "bar&inline_script_without_csp"}));
+  EXPECT_TRUE(NavigateToURL(incognito_shell, second_url));
+  histogram_tester().ExpectBucketCount(
+      "ServiceWorker.SyntheticResponse.Eligibility",
+      static_cast<int>(
+          ServiceWorkerMetrics::SyntheticResponseEligibility::kEligible),
+      1);
+  // With the dry-run mode in Incognito mode, inline scripts are not blocked.
+  EXPECT_EQ(true, EvalJs(incognito_shell->web_contents()->GetPrimaryMainFrame(),
+                         "window.is_inline_script_executed"));
+}
+
 }  // namespace content

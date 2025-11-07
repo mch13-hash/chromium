@@ -227,6 +227,10 @@ bool FakeBaseTabStripController::IsTabPinned(int index) const {
   return index < num_pinned_tabs_;
 }
 
+bool FakeBaseTabStripController::IsBrowserClosing() const {
+  return false;
+}
+
 void FakeBaseTabStripController::SelectTab(int index, const ui::Event& event) {
   if (!IsValidIndex(index) || active_index_ == index) {
     return;
@@ -269,7 +273,7 @@ int FakeBaseTabStripController::HasAvailableDragActions() const {
 void FakeBaseTabStripController::OnDropIndexUpdate(std::optional<int> index,
                                                    bool drop_before) {}
 
-void FakeBaseTabStripController::CreateNewTab() {
+void FakeBaseTabStripController::CreateNewTab(NewTabTypes context) {
   AddTab(num_tabs_, TabActive::kActive);
 }
 

@@ -88,5 +88,11 @@ extern NSString* const kToolsMenuWhatsNewId;
 extern NSString* const kToolsMenuPriceNotifications;
 // Edit Actions item accessibility Identifier.
 extern NSString* const kToolsMenuEditActionsId;
+// New Tab Group accessibility Identifier.
+extern NSString* const kToolsMenuNewTabGroupId;
+// Move Tab to Group accessibility Identifier.
+extern NSString* const kToolsMenuMoveTabToGroupId;
+// Add Tab to Group accessibility Identifier.
+extern NSString* const kToolsMenuAddTabToGroupId;
 
 #endif  // IOS_CHROME_BROWSER_POPUP_MENU_UI_BUNDLED_POPUP_MENU_CONSTANTS_H_

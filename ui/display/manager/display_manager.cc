@@ -1486,8 +1486,7 @@ const Display& DisplayManager::GetFakePrimaryDisplay() {
     // propagate to allocation code and cause errors.
     // https://crbug.com/1057501
     gfx::DisplayColorSpaces display_color_spaces(
-        gfx::ColorSpace::CreateSRGB(),
-        DisplaySnapshot::PrimarySharedImageFormat());
+        gfx::ColorSpace::CreateSRGB(), DisplaySnapshot::PrimaryFormat());
     fake_display->SetColorSpaces(display_color_spaces);
   }
   return *fake_display;
@@ -1512,6 +1511,15 @@ size_t DisplayManager::GetNumExternalDisplays() const {
 
 bool DisplayManager::IsActiveDisplayId(int64_t display_id) const {
   return ContainsDisplayWithId(active_display_list_, display_id);
+}
+
+bool DisplayManager::IsConnectedDisplayId(int64_t display_id) const {
+  for (int64_t id : connected_display_id_list_) {
+    if (id == display_id) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool DisplayManager::IsInMirrorMode() const {

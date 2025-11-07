@@ -7,6 +7,7 @@
 
 #include <queue>
 
+#include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "chrome/browser/ash/chromebox_for_meetings/artemis/command_source.h"
 #include "chrome/browser/ash/chromebox_for_meetings/artemis/log_source.h"
@@ -150,7 +151,7 @@ class DataAggregatorService : public CfmObserver,
   void AppendEntriesToActivePayload(
       const std::string& source_name,
       const std::vector<std::string>& serialized_entries);
-  bool IsPayloadReadyForUpload() const;
+  bool DidActivePayloadReachMaxSize() const;
   void AddActivePayloadToPendingQueue();
   void EnqueueNextPendingTransportPayload();
   void InitiateEnqueueRequest();
@@ -173,8 +174,7 @@ class DataAggregatorService : public CfmObserver,
   mojo::Remote<chromeos::cfm::mojom::MeetDevicesInfo> device_info_remote_;
 
   // The current payload that is to be eventually Enqueue()'d to the
-  // CfmLogger. This will collect data until certain conditions are met
-  // (see IsPayloadReadyForUpload() method for details).
+  // CfmLogger. This will collect data until the payload reaches a max size.
   proto::TransportPayload active_transport_payload_;
 
   // A queue of currently pending transport payloads that are waiting

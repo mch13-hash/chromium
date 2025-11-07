@@ -59,6 +59,30 @@ inline void TrimURL(const CHAR* spec, int* begin, int* len,
   }
 }
 
+// This shrinks the input URL string to eliminate "should-be-trimmed"
+// characters. The returned value is a pair of the trimmed string and its offset
+// from the beginning of the input URL.
+template <typename CHAR>
+inline std::pair<std::basic_string_view<CHAR>, size_t> TrimUrl(
+    std::basic_string_view<CHAR> spec,
+    bool trim_path_end = true) {
+  size_t offset = 0;
+  // Strip leading whitespace and control characters.
+  while (!spec.empty() && ShouldTrimFromURL(spec[0])) {
+    spec = spec.substr(1);
+    ++offset;
+  }
+
+  if (trim_path_end) {
+    // Strip trailing whitespace and control characters. We need the empty()
+    // test for when the input string is all blanks.
+    while (!spec.empty() && ShouldTrimFromURL(spec[spec.length() - 1])) {
+      spec = spec.substr(0, spec.length() - 1);
+    }
+  }
+  return {spec, offset};
+}
+
 // Counts the number of consecutive slashes or backslashes starting at the given
 // offset in the given string of the given length. A slash and backslash can be
 // mixed.
@@ -133,32 +157,28 @@ void ParsePathInternal(const char16_t* spec,
                        Component* ref);
 
 // Internal functions in url_parse.cc that parse non-special URLs, which are
-// similar to `ParseNonSpecialURL` functions in url_parse.h, but with
+// similar to `ParseNonSpecialUrl` functions in url_parse.h, but with
 // `trim_path_end` parameter that controls whether to trim path end or not.
-Parsed ParseNonSpecialURLInternal(std::string_view url, bool trim_path_end);
-Parsed ParseNonSpecialURLInternal(std::u16string_view url, bool trim_path_end);
+Parsed ParseNonSpecialUrlInternal(std::string_view url, bool trim_path_end);
+Parsed ParseNonSpecialUrlInternal(std::u16string_view url, bool trim_path_end);
 
 // Given a spec and a pointer to the character after the colon following the
 // special scheme, this parses it and fills in the structure, Every item in the
 // parsed structure is filled EXCEPT for the scheme, which is untouched.
-void ParseAfterSpecialScheme(const char* spec,
-                             int spec_len,
+void ParseAfterSpecialScheme(std::string_view spec,
                              int after_scheme,
                              Parsed* parsed);
-void ParseAfterSpecialScheme(const char16_t* spec,
-                             int spec_len,
+void ParseAfterSpecialScheme(std::u16string_view spec,
                              int after_scheme,
                              Parsed* parsed);
 
 // Given a spec and a pointer to the character after the colon following the
 // non-special scheme, this parses it and fills in the structure, Every item in
 // the parsed structure is filled EXCEPT for the scheme, which is untouched.
-void ParseAfterNonSpecialScheme(const char* spec,
-                                int spec_len,
+void ParseAfterNonSpecialScheme(std::string_view spec,
                                 int after_scheme,
                                 Parsed* parsed);
-void ParseAfterNonSpecialScheme(const char16_t* spec,
-                                int spec_len,
+void ParseAfterNonSpecialScheme(std::u16string_view spec,
                                 int after_scheme,
                                 Parsed* parsed);
 

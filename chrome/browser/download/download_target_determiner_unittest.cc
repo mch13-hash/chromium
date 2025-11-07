@@ -72,7 +72,7 @@
 #include "content/public/common/webplugininfo.h"
 #endif
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "extensions/common/extension.h"
 #endif
 
@@ -1621,10 +1621,10 @@ TEST_F(DownloadTargetDeterminerTest, ContinueWithConfirmation_SaveAs) {
   RunTestCasesWithActiveItem(base::span_from_ref(kTestCase), 1);
 }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 // These test cases are run with "Prompt for download" user preference set to
 // true. For non-trusted extensions, download should cause prompting.
-// Android doesn't support extensions.
+// Desktop platforms, including desktop Android, support extensions.
 TEST_F(DownloadTargetDeterminerTest, PromptAlways_NonTrustedExtension) {
   const DownloadTestCase kPromptingTestCases[] = {
       {// 0: Automatic Browser Extension download. - Shouldn't prompt for
@@ -1726,7 +1726,7 @@ TEST_F(DownloadTargetDeterminerTest, DownloadRestrictions_TrustedExtension) {
                              std::size(kPromptingTestCases));
 }
 
-#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 
 // If the download path is managed, then we don't show any prompts.
 // Note that if the download path is managed, then PromptForDownload() is false.
@@ -2714,7 +2714,26 @@ TEST_F(DownloadTargetDeterminerTest, TestSanitizeEnvVariable) {
        DownloadItem::TARGET_DISPOSITION_PROMPT,
 
        EXPECT_CRDOWNLOAD},
-      {// 3: File name is an env var.
+      {// 3: Double extension bug leading to dangerous extensions after removing env var.
+       SAVE_AS, download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+       DownloadFileType::NOT_DANGEROUS, "http://example.com/foo2.lnk %%",
+       "application/octet-stream", FILE_PATH_LITERAL(""),
+
+       FILE_PATH_LITERAL("foo2.download"),
+       DownloadItem::TARGET_DISPOSITION_PROMPT,
+
+       EXPECT_CRDOWNLOAD},
+      {// 4: Unicode char bug leading to dangerous extensions after removing env var.
+       // NOTE: The space before "%%" is a non-breaking space (U+00A0), not a normal space.
+       SAVE_AS, download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+       DownloadFileType::NOT_DANGEROUS, "http://example.com/foo2.lnk %%",
+       "application/octet-stream", FILE_PATH_LITERAL(""),
+
+       FILE_PATH_LITERAL("foo2.download"),
+       DownloadItem::TARGET_DISPOSITION_PROMPT,
+
+       EXPECT_CRDOWNLOAD},
+      {// 5: File name is an env var.
        SAVE_AS, download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
        DownloadFileType::NOT_DANGEROUS, "http://example.com/%foo.txt%",
        "text/plain", FILE_PATH_LITERAL(""),

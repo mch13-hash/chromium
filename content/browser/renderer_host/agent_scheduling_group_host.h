@@ -32,7 +32,6 @@
 
 namespace IPC {
 class ChannelProxy;
-class Message;
 }  // namespace IPC
 
 namespace content {
@@ -129,8 +128,7 @@ class CONTENT_EXPORT AgentSchedulingGroupHost
   friend std::ostream& operator<<(std::ostream& os, LifecycleState state);
 
   // IPC::Listener
-  bool OnMessageReceived(const IPC::Message& message) override;
-  void OnBadMessageReceived(const IPC::Message& message) override;
+  void OnBadMessageReceived() override;
   void OnAssociatedInterfaceRequest(
       const std::string& interface_name,
       mojo::ScopedInterfaceEndpointHandle handle) override;
@@ -150,10 +148,7 @@ class CONTENT_EXPORT AgentSchedulingGroupHost
   static int32_t GetNextID();
 
   // The RenderProcessHost this AgentSchedulingGroup is assigned to.
-  //
-  // TODO(crbug.com/40061679): Change back to `raw_ref` after the ad-hoc
-  // debugging is no longer needed to investigate the bug.
-  const base::SafeRef<RenderProcessHost> process_;
+  const raw_ref<RenderProcessHost> process_;
 
   int32_t id_for_debugging_{GetNextID()};
 

@@ -123,7 +123,7 @@ constexpr auto kHistogramValue = base::MakeFixedFlatMap<ContentSettingsType,
     {ContentSettingsType::MIDI, 102},
     {ContentSettingsType::ALL_SCREEN_CAPTURE, 103},
     {ContentSettingsType::COOKIE_CONTROLS_METADATA, 104},
-    {ContentSettingsType::TPCD_TRIAL, 105},
+    // Removed TPCD_TRIAL in M144.
     {ContentSettingsType::AUTO_PICTURE_IN_PICTURE, 106},
     {ContentSettingsType::TPCD_METADATA_GRANTS, 107},
     {ContentSettingsType::FILE_SYSTEM_ACCESS_EXTENDED_PERMISSION, 108},
@@ -133,7 +133,7 @@ constexpr auto kHistogramValue = base::MakeFixedFlatMap<ContentSettingsType,
     {ContentSettingsType::SMART_CARD_GUARD, 112},
     {ContentSettingsType::SMART_CARD_DATA, 113},
     {ContentSettingsType::WEB_PRINTING, 114},
-    {ContentSettingsType::TOP_LEVEL_TPCD_TRIAL, 115},
+    // Removed TOP_LEVEL_TPCD_TRIAL in M143.
     {ContentSettingsType::AUTOMATIC_FULLSCREEN, 116},
     {ContentSettingsType::SUB_APP_INSTALLATION_PROMPTS, 117},
     {ContentSettingsType::SPEAKER_SELECTION, 118},
@@ -142,7 +142,7 @@ constexpr auto kHistogramValue = base::MakeFixedFlatMap<ContentSettingsType,
     {ContentSettingsType::POINTER_LOCK, 121},
     {ContentSettingsType::REVOKED_ABUSIVE_NOTIFICATION_PERMISSIONS, 122},
     {ContentSettingsType::TRACKING_PROTECTION, 123},
-    {ContentSettingsType::TOP_LEVEL_TPCD_ORIGIN_TRIAL, 124},
+    // Removed TOP_LEVEL_TPCD_ORIGIN_TRIAL in M143.
     {ContentSettingsType::DISPLAY_MEDIA_SYSTEM_AUDIO, 125},
     {ContentSettingsType::JAVASCRIPT_OPTIMIZER, 126},
     {ContentSettingsType::STORAGE_ACCESS_HEADER_ORIGIN_TRIAL, 127},
@@ -248,6 +248,34 @@ void RecordActiveExpiryEvent(content_settings::ProviderType provider_type,
                     GetProviderNameForHistograms(provider_type),
                     ".ContentSettingsType"}),
       content_setting_type);
+}
+
+void RecordContentSettingChange(ContentSetting content_setting_value,
+                                ContentSettingsType content_setting_type) {
+  switch (content_setting_value) {
+    case CONTENT_SETTING_ALLOW:
+      content_settings_uma_util::RecordContentSettingsHistogram(
+          "Permissions.SiteSettingsChanged.Allow", content_setting_type);
+      break;
+    case CONTENT_SETTING_BLOCK:
+      content_settings_uma_util::RecordContentSettingsHistogram(
+          "Permissions.SiteSettingsChanged.Block", content_setting_type);
+      break;
+    case CONTENT_SETTING_DEFAULT:
+      content_settings_uma_util::RecordContentSettingsHistogram(
+          "Permissions.SiteSettingsChanged.Default", content_setting_type);
+      break;
+    case CONTENT_SETTING_ASK:
+      content_settings_uma_util::RecordContentSettingsHistogram(
+          "Permissions.SiteSettingsChanged.Ask", content_setting_type);
+      break;
+    case CONTENT_SETTING_SESSION_ONLY:
+      content_settings_uma_util::RecordContentSettingsHistogram(
+          "Permissions.SiteSettingsChanged.SessionOnly", content_setting_type);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 }  // namespace content_settings_uma_util

@@ -42,8 +42,8 @@ import org.chromium.components.browser_ui.widget.ListItemBuilder;
 import org.chromium.components.browser_ui.widget.test.R;
 import org.chromium.ui.listmenu.BasicListMenu;
 import org.chromium.ui.listmenu.ListMenu;
-import org.chromium.ui.listmenu.ListMenuFlyoutController;
 import org.chromium.ui.listmenu.ListMenuSubmenuItemProperties;
+import org.chromium.ui.listmenu.ListMenuUtils;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -95,29 +95,13 @@ public class BrowserUiListMenuRenderTest {
         mRenderTestRule.setNightModeEnabled(nightMode);
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
-                    ListMenu.Delegate delegate = item -> {};
+                    ListMenu.Delegate delegate = (item, view) -> {};
                     BasicListMenu listMenu =
                             BrowserUiListMenuUtils.getBasicListMenu(activity, data, delegate);
                     listMenu.setupCallbacksRecursively(
-                            () -> {},
-                            true,
-                            new ListMenuFlyoutController<BasicListMenu>(
-                                    new ListMenuFlyoutController.FlyoutHandler<BasicListMenu>() {
-                                        @Override
-                                        public List<
-                                                        ListMenuFlyoutController.FlyoutPopupEntry<
-                                                                BasicListMenu>>
-                                                getFlyoutWindows() {
-                                            return Collections.emptyList();
-                                        }
+                            /* dismissDialog= */ () -> {},
+                            ListMenuUtils.createHierarchicalMenuController(activity));
 
-                                        @Override
-                                        public void addFlyoutWindow(
-                                                ListItem item, View view, int levelOfHoveredItem) {}
-
-                                        @Override
-                                        public void removeFlyoutWindows(int removeFromIndex) {}
-                                    }));
                     mView = listMenu.getContentView();
                     mView.setBackground(
                             AppCompatResources.getDrawable(activity, R.drawable.menu_bg_tinted));

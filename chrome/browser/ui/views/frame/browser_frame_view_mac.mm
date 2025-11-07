@@ -29,9 +29,9 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/browser_view_layout.h"
 #include "chrome/browser/ui/views/frame/browser_widget.h"
 #include "chrome/browser/ui/views/frame/caption_button_placeholder_container.h"
+#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/tab_strip_view_interface.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
@@ -136,8 +136,8 @@ void BrowserFrameViewMac::OnFullscreenStateChanged() {
   }
 
   if (browser_view()->UsesImmersiveFullscreenMode()) {
-    browser_view()->immersive_mode_controller()->SetEnabled(
-        browser_view()->IsFullscreen());
+    ImmersiveModeController::From(browser_view()->browser())
+        ->SetEnabled(browser_view()->IsFullscreen());
     UpdateFullscreenTopUI();
 
     // browser_view()->DeprecatedLayoutImmediately() is not needed since top
@@ -162,8 +162,19 @@ bool BrowserFrameViewMac::CaptionButtonsOnLeadingEdge() const {
   // In "partial" RTL mode (where the OS is in LTR mode while Chrome is in RTL
   // mode, or vice versa), the traffic lights are on the trailing edge rather
   // than the leading edge.
-  return base::i18n::IsRTL() == (NSApp.userInterfaceLayoutDirection ==
-                                 NSUserInterfaceLayoutDirectionRightToLeft);
+  if (!GetWidget()) {
+    return true;
+  }
+
+  NSWindow* const window = GetWidget()->GetNativeWindow().GetNativeNSWindow();
+  if (!window) {
+    return true;
+  }
+
+  NSUserInterfaceLayoutDirection direction =
+      [window windowTitlebarLayoutDirection];
+  return base::i18n::IsRTL() ==
+         (direction == NSUserInterfaceLayoutDirectionRightToLeft);
 }
 
 gfx::Rect BrowserFrameViewMac::GetBoundsForTabStripRegion(
@@ -210,12 +221,19 @@ gfx::Rect BrowserFrameViewMac::GetBoundsForWebAppFrameToolbar(
 }
 
 BrowserLayoutParams BrowserFrameViewMac::GetBrowserLayoutParams() const {
+  auto params = BrowserFrameView::GetBrowserLayoutParams();
   if (browser_view()->IsFullscreen()) {
     // No insets for caption buttons in fullscreen, since caption buttons are on
-    // a separate pane that slides in.
-    return BrowserLayoutParams{.visual_client_area = GetBoundsForClientView()};
+    // a separate pane that slides in. However, preserve the height of the
+    // caption area to ensure that the toolbar renders correctly (this is kind
+    // of a hack but it prevents having to insert random hard-coded constants -
+    // which is worse - see https://crbug.com/450817281).
+    params.leading_exclusion.content.set_width(0);
+    params.leading_exclusion.horizontal_padding = 0;
+    params.trailing_exclusion.content.set_width(0);
+    params.trailing_exclusion.horizontal_padding = 0;
   }
-  return BrowserFrameView::GetBrowserLayoutParams();
+  return params;
 }
 
 int BrowserFrameViewMac::GetTopInset(bool restored) const {
@@ -258,13 +276,13 @@ void BrowserFrameViewMac::UpdateFullscreenTopUI() {
 
     // Update the immersive controller about content fullscreen changes.
     if (mapped_style == remote_cocoa::mojom::ToolbarVisibilityStyle::kNone) {
-      browser_view()->immersive_mode_controller()->OnContentFullscreenChanged(
-          true);
+      ImmersiveModeController::From(browser_view()->browser())
+          ->OnContentFullscreenChanged(true);
     } else if (old_style.has_value() &&
                old_style ==
                    remote_cocoa::mojom::ToolbarVisibilityStyle::kNone) {
-      browser_view()->immersive_mode_controller()->OnContentFullscreenChanged(
-          false);
+      ImmersiveModeController::From(browser_view()->browser())
+          ->OnContentFullscreenChanged(false);
     }
 
     // The layout changes further down are not needed in immersive fullscreen.
@@ -348,7 +366,7 @@ void BrowserFrameViewMac::LayoutWebAppWindowTitle(
   // immersive fullscreen, it is drawn in a way that isn't detected by the
   // DCHECK in Label. As such, disable the DCHECK.
   window_title_label.SetSkipSubpixelRenderingOpacityCheck(
-      browser_view()->IsImmersiveModeEnabled());
+      ImmersiveModeController::From(browser_view()->browser())->IsEnabled());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -434,102 +452,15 @@ void BrowserFrameViewMac::PaintChildren(const views::PaintInfo& info) {
   // allow painting of the frame's children, which fixes a flickering bug:
   // 1400287.
   if (browser_view()->UsesImmersiveFullscreenTabbedMode() ||
-      !browser_view()->immersive_mode_controller()->IsRevealed()) {
+      !ImmersiveModeController::From(browser_view()->browser())->IsRevealed()) {
     BrowserFrameView::PaintChildren(info);
   }
 }
 
 BrowserFrameViewMac::BoundsAndMargins
-BrowserFrameViewMac::GetCaptionButtonBoundsNative() const {
+BrowserFrameViewMac::GetCaptionButtonBounds() const {
   BoundsAndMargins result;
 
-  // Verify that this is not an out-of-process window.
-  const auto native_window = GetWidget()->GetNativeWindow();
-  if (auto* const host =
-          views::NativeWidgetMacNSWindowHost::GetFromNativeWindow(
-              native_window);
-      host && host->application_host()) {
-    return result;
-  }
-
-  // Verify that there is a valid NSWindow.
-  NSWindow* ns_window = native_window.GetNativeNSWindow();
-  if (!ns_window) {
-    return result;
-  }
-
-  // Build a list of caption button bounds.
-  std::vector<gfx::RectF> button_rects;
-
-  // Also track some other data that will be useful for calculating the visual
-  // margins of the buttons against the window border.
-  float min_x = width();
-  float max_x = 0;
-  float min_y = height();
-
-  // Chrome coordinates are reversed in RTL but not in the Mac API, so we might
-  // have to flip them.
-  const bool is_rtl = base::i18n::IsRTL();
-
-  // Build the list. If any of the buttons are not present or are zero size,
-  // abort (this will fall back to previous hard-coded values).
-  for (NSButton* button :
-       {[ns_window standardWindowButton:NSWindowCloseButton],
-        [ns_window standardWindowButton:NSWindowMiniaturizeButton],
-        [ns_window standardWindowButton:NSWindowZoomButton]}) {
-    if (!button) {
-      return result;
-    }
-    NSRect ns_rect = [button convertRect:[button bounds] toView:nil];
-
-    // When converting from Mac to Chrome coordinates:
-    //  - Y axis is inverted (Mac coordinates start at bottom-left).
-    //  - X axis is inverted in RTL mode only (Mac coordinates are invariant
-    //    while Chrome reverses them).
-    button_rects.emplace_back(
-        gfx::RectF(is_rtl ? width() - (ns_rect.origin.x + ns_rect.size.width)
-                          : ns_rect.origin.x,
-                   height() - (ns_rect.origin.y + ns_rect.size.height),
-                   ns_rect.size.width, ns_rect.size.height));
-    const auto& rect = button_rects.back();
-    if (rect.IsEmpty()) {
-      return result;
-    }
-    min_x = std::min(min_x, rect.x());
-    max_x = std::max(max_x, rect.right());
-    min_y = std::min(min_y, rect.y());
-  }
-
-  // Calculate the margins that the buttons are using.
-  const float block_margin = min_y;
-  const float inline_margin =
-      CaptionButtonsOnLeadingEdge() ? min_x : width() - max_x;
-
-  // Accumulate the button bounds.
-  for (const auto& rect : button_rects) {
-    result.bounds.Union(rect);
-  }
-
-  // Apply the margins on the exterior of the region, so that the padding around
-  // the buttons appears visually symmetrical.
-  result.margins = gfx::OutsetsF::VH(block_margin, inline_margin);
-
-  return result;
-}
-
-BrowserFrameViewMac::BoundsAndMargins
-BrowserFrameViewMac::GetCaptionButtonBounds() const {
-  BoundsAndMargins result = GetCaptionButtonBoundsNative();
-  if (!result.bounds.IsEmpty()) {
-    return result;
-  }
-
-  // If that doesn't work, fall back to some hard-coded constants. These will
-  // apply for app windows, since the app is out of process and the caption
-  // buttons can't be retrieved. Note that the app window actually positions its
-  // buttons slightly differently from a standard browser window (it's unclear
-  // why).
-  //
   // These are empirically determined; feel free to change them if they're
   // not precise.
   if (@available(macOS 26, *)) {
@@ -538,6 +469,11 @@ BrowserFrameViewMac::GetCaptionButtonBounds() const {
   } else {
     result.bounds = gfx::RectF(20, 11, 54, 16);
     result.margins = gfx::OutsetsF::VH(11, 20);
+  }
+
+  // Mirror for when caption buttons are on the "wrong" side.
+  if (!CaptionButtonsOnLeadingEdge()) {
+    result.bounds.set_x(width() - (result.bounds.x() + result.bounds.width()));
   }
 
   return result;
@@ -644,9 +580,6 @@ int BrowserFrameViewMac::TopUIFullscreenYOffset() const {
   CGFloat title_bar_height =
       NSHeight([NSWindow frameRectForContentRect:NSZeroRect
                                        styleMask:NSWindowStyleMaskTitled]);
-  if (browser_view()->UsesImmersiveFullscreenMode()) {
-    return menu_bar_height == 0 ? 0 : menu_bar_height + title_bar_height;
-  }
   return [[fullscreen_toolbar_controller_ menubarTracker] menubarFraction] *
          (menu_bar_height + title_bar_height);
 }

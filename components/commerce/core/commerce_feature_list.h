@@ -38,7 +38,6 @@ extern const char kPriceInsightsShowFeedbackParam[];
 extern const base::FeatureParam<bool> kPriceInsightsShowFeedback;
 extern const char kPriceInsightsUseCacheParam[];
 extern const base::FeatureParam<bool> kPriceInsightsUseCache;
-BASE_DECLARE_FEATURE(kPriceTrackingPromo);
 BASE_DECLARE_FEATURE(kTabResumptionShopCard);
 BASE_DECLARE_FEATURE(kShopCardImpressionLimits);
 
@@ -170,6 +169,7 @@ extern const char kShopCardArm2[];
 extern const char kShopCardArm3[];
 extern const char kShopCardArm4[];
 extern const char kShopCardArm5[];
+extern const char kShopCardArm6[];
 extern const char kShopCardFrontPosition[];
 extern const char kShopCardMaxImpressions[];
 

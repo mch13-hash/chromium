@@ -128,6 +128,8 @@ int GetLayoutConstant(LayoutConstant constant) {
       return touch_ui ? 0 : 2;
     case TOOLBAR_STANDARD_SPACING:
       return touch_ui ? 12 : 9;
+    case TOOLBAR_HEIGHT_SIDE_PANEL_INSET:
+      return 8;
     case PAGE_INFO_ICON_SIZE:
       return 20;
     case DOWNLOAD_ICON_SIZE:
@@ -136,6 +138,8 @@ int GetLayoutConstant(LayoutConstant constant) {
       return 8;
     case VERTICAL_TAB_STRIP_HORIZONTAL_PADDING:
       return 12;
+    case VERTICAL_TAB_STRIP_BOTTOM_BUTTON_PADDING:
+      return 4;
     default:
       break;
   }

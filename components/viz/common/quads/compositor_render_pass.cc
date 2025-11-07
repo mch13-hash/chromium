@@ -12,6 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/traced_value.h"
 #include "base/values.h"
@@ -119,11 +120,20 @@ void CompositorRenderPass::SetAll(
 }
 
 void CompositorRenderPass::AsValueInto(
-    base::trace_event::TracedValue* value) const {
-  RenderPassInternal::AsValueInto(value);
+    base::trace_event::TracedValue* value,
+    const std::unordered_map<ResourceId, size_t>& resource_id_to_index_map)
+    const {
+  RenderPassInternal::AsValueInto(value, resource_id_to_index_map);
+
+  value->SetString("id", base::NumberToString(id.GetUnsafeValue()));
 
   value->SetString("subtree_capture_id", subtree_capture_id.ToString());
   cc::MathUtil::AddToTracedValue("subtree_size", subtree_size, value);
+
+  if (view_transition_element_resource_id.IsValid()) {
+    value->SetString("view_transition_element_resource_id",
+                     view_transition_element_resource_id.ToString());
+  }
 
   // id.value() is a 64-bit uint even on 32-bit architectures, so
   // using reinterpret_cast for the intentional conversion to a TracedValue::Id.

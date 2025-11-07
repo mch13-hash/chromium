@@ -7,27 +7,83 @@
 #include <memory>
 #include <utility>
 
+#include "ash/constants/ash_features.h"
 #include "base/functional/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_audio_stream_consumer.h"
 #include "chromeos/ash/components/boca/spotlight/spotlight_constants.h"
 #include "chromeos/ash/components/boca/spotlight/spotlight_frame_consumer.h"
 #include "remoting/client/common/remoting_client.h"
+#include "remoting/proto/audio.pb.h"
+#include "remoting/protocol/audio_stub.h"
+#include "remoting/protocol/frame_consumer.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 
 namespace ash::boca {
+namespace {
+
+class RemotingClientWrapperImpl
+    : public RemotingClientIOProxyImpl::RemotingClientWrapper {
+ public:
+  RemotingClientWrapperImpl(
+      base::OnceClosure quit_closure,
+      remoting::protocol::FrameConsumer* frame_consumer,
+      base::WeakPtr<remoting::protocol::AudioStub> audio_stream_consumer,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
+      : remoting_client_(
+            std::make_unique<remoting::RemotingClient>(std::move(quit_closure),
+                                                       frame_consumer,
+                                                       audio_stream_consumer,
+                                                       url_loader_factory)) {}
+
+  RemotingClientWrapperImpl(const RemotingClientWrapperImpl&) = delete;
+  RemotingClientWrapperImpl& operator=(const RemotingClientWrapperImpl&) =
+      delete;
+
+  ~RemotingClientWrapperImpl() override = default;
+
+  void StartSession(std::string_view support_access_code,
+                    remoting::OAuthTokenInfo oauth_token_info) override {
+    remoting_client_->StartSession(support_access_code,
+                                   std::move(oauth_token_info));
+  }
+
+  void StopSession() override { remoting_client_->StopSession(); }
+
+  void AddObserver(remoting::ClientStatusObserver* observer) override {
+    remoting_client_->AddObserver(observer);
+  }
+
+  void RemoveObserver(remoting::ClientStatusObserver* observer) override {
+    remoting_client_->RemoveObserver(observer);
+  }
+
+ private:
+  const std::unique_ptr<remoting::RemotingClient> remoting_client_;
+};
+
+}  // namespace
 
 RemotingClientIOProxyImpl::RemotingClientIOProxyImpl(
     std::unique_ptr<network::PendingSharedURLLoaderFactory>
         pending_url_loader_factory,
     SpotlightFrameConsumer::FrameReceivedCallback frame_received_callback,
-    SpotlightCrdStateUpdatedCallback status_updated_callback)
+    SpotlightAudioStreamConsumer::AudioPacketReceivedCallback
+        audio_packet_received_callback,
+    SpotlightCrdStateUpdatedCallback status_updated_callback,
+    CreateRemotingClientWrapperCb create_remoting_client_wrapper_cb)
     : pending_url_loader_factory_(std::move(pending_url_loader_factory)),
       frame_received_callback_(std::move(frame_received_callback)),
-      status_updated_callback_(std::move(status_updated_callback)) {
+      audio_packet_received_callback_(
+          std::move(audio_packet_received_callback)),
+      status_updated_callback_(std::move(status_updated_callback)),
+      create_remoting_client_wrapper_cb_(
+          std::move(create_remoting_client_wrapper_cb)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
@@ -60,17 +116,27 @@ void RemotingClientIOProxyImpl::StartCrdClient(
   frame_consumer_ = std::make_unique<SpotlightFrameConsumer>(
       base::BindRepeating(&RemotingClientIOProxyImpl::OnFrameReceived,
                           weak_factory_.GetWeakPtr()));
-  remoting_client_ = std::make_unique<remoting::RemotingClient>(
+
+  // Only consume audio when the Boca Audio for Kiosk flag is enabled.
+  base::WeakPtr<SpotlightAudioStreamConsumer> audio_consumer_ptr = nullptr;
+  if (ash::features::IsBocaAudioForKioskEnabled()) {
+    audio_stream_consumer_ = std::make_unique<SpotlightAudioStreamConsumer>(
+        base::BindRepeating(&RemotingClientIOProxyImpl::OnAudioPacketReceived,
+                            weak_factory_.GetWeakPtr()));
+    audio_consumer_ptr = audio_stream_consumer_->GetWeakPtr();
+  }
+
+  remoting_client_wrapper_ = create_remoting_client_wrapper_cb_.Run(
       base::BindPostTask(
           base::SingleThreadTaskRunner::GetCurrentDefault(),
           base::BindOnce(&RemotingClientIOProxyImpl::HandleCrdSessionEnded,
                          weak_factory_.GetWeakPtr())),
-      frame_consumer_.get(),
-      /*audio_stream_consumer=*/nullptr, shared_url_loader_factory_);
+      frame_consumer_.get(), std::move(audio_consumer_ptr),
+      shared_url_loader_factory_);
 
   VLOG(1) << "[Boca] Starting CRD client for teacher";
-  remoting_client_->StartSession(crd_connection_code,
-                                 {oauth_access_token, authorized_helper_email});
+  remoting_client_wrapper_->StartSession(
+      crd_connection_code, {oauth_access_token, authorized_helper_email});
 }
 
 void RemotingClientIOProxyImpl::StopCrdClient(
@@ -80,8 +146,8 @@ void RemotingClientIOProxyImpl::StopCrdClient(
   crd_session_ended_callback_.Reset();
   // Since we are explicitly stopping the session, remove observer first since
   // we do not need to be notified about the disconnect event.
-  remoting_client_->RemoveObserver(this);
-  remoting_client_->StopSession();
+  remoting_client_wrapper_->RemoveObserver(this);
+  remoting_client_wrapper_->StopSession();
 
   // The `remoting::RemotingClient` waits two seconds before sending the
   // disconnect signal to the host. This delayed task runs on the Unretained
@@ -93,11 +159,23 @@ void RemotingClientIOProxyImpl::StopCrdClient(
   // not require this delay as it is a messy work around.
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE,
-      base::BindOnce(&RemotingClientIOProxyImpl::ResetRemotingClient,
-                     weak_factory_.GetWeakPtr(), std::move(remoting_client_),
-                     std::move(frame_consumer_),
-                     std::move(on_stopped_callback)),
+      base::BindOnce(
+          &RemotingClientIOProxyImpl::ResetRemotingClient,
+          weak_factory_.GetWeakPtr(), std::move(remoting_client_wrapper_),
+          std::move(frame_consumer_), std::move(on_stopped_callback)),
       base::Seconds(3));
+}
+
+// static
+std::unique_ptr<RemotingClientIOProxyImpl::RemotingClientWrapper>
+RemotingClientIOProxyImpl::CreateRemotingClientWrapper(
+    base::OnceClosure quit_closure,
+    remoting::protocol::FrameConsumer* frame_consumer,
+    base::WeakPtr<remoting::protocol::AudioStub> audio_stream_consumer,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
+  return std::make_unique<RemotingClientWrapperImpl>(
+      std::move(quit_closure), frame_consumer, audio_stream_consumer,
+      url_loader_factory);
 }
 
 void RemotingClientIOProxyImpl::HandleCrdSessionEnded() {
@@ -121,12 +199,18 @@ void RemotingClientIOProxyImpl::OnFrameReceived(
   frame_received_callback_.Run(std::move(bitmap), std::move(frame));
 }
 
+void RemotingClientIOProxyImpl::OnAudioPacketReceived(
+    std::unique_ptr<remoting::AudioPacket> packet) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  audio_packet_received_callback_.Run(std::move(packet));
+}
+
 void RemotingClientIOProxyImpl::ResetRemotingClient(
-    std::unique_ptr<remoting::RemotingClient> remoting_client,
+    std::unique_ptr<RemotingClientWrapper> remoting_client_wrapper,
     std::unique_ptr<SpotlightFrameConsumer> frame_consumer,
     base::OnceClosure on_stopped_callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  remoting_client.reset();
+  remoting_client_wrapper.reset();
   frame_consumer.reset();
   std::move(on_stopped_callback).Run();
 }

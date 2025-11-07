@@ -737,7 +737,12 @@ bool DiceWebSigninInterceptor::ShouldShowEnterpriseDialog(
   }
 
   // If the user has declined profile creation twice, stop asking them.
-  if (HasUserDeclinedProfileCreation(intercepted_account_info.email)) {
+  // When in `ChromeSigninUserChoice::kAlwaysAsk` setting mode, the decline
+  // is not remembered, so the user can still see the dialog.
+  if (SigninPrefs(*profile_->GetPrefs())
+          .GetChromeSigninInterceptionUserChoice(intercepted_account_info.gaia) !=
+      ChromeSigninUserChoice::kAlwaysAsk &&
+      HasUserDeclinedProfileCreation(intercepted_account_info.email)) {
     return false;
   }
 
@@ -1430,7 +1435,7 @@ void DiceWebSigninInterceptor::OnEnterpriseProfileCreationResult(
     if (GetPrimaryAccountInfo(identity_manager_).IsEmpty()) {
       identity_manager_->GetPrimaryAccountMutator()->SetPrimaryAccount(
           account_info.account_id, signin::ConsentLevel::kSignin,
-          signin_metrics::AccessPoint::kChromeSigninInterceptBubble);
+          signin_metrics::AccessPoint::kEnterpriseDialogAfterSigninInterception);
     } else {
       DCHECK_EQ(GetPrimaryAccountInfo(identity_manager_).account_id,
                 account_info.account_id);

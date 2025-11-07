@@ -7,13 +7,13 @@
 
 #include <memory>
 
-#include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_api.mojom.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
 #include "chrome/browser/ui/webui/metrics_reporter/metrics_reporter.h"
 #include "chrome/browser/ui/webui_browser/bookmark_bar.mojom.h"
 #include "chrome/browser/ui/webui_browser/browser.mojom.h"
 #include "chrome/browser/ui/webui_browser/extensions_bar.mojom.h"
 #include "chrome/browser/ui/webui_browser/webui_browser_window.h"
+#include "components/browser_apis/tab_strip/tab_strip_api.mojom.h"
 #include "components/guest_contents/common/guest_contents.mojom.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_controller.h"
@@ -70,8 +70,6 @@ class WebUIBrowserUI : public ui::MojoWebUIController,
   void BindInterface(mojo::PendingReceiver<searchbox::mojom::PageHandler>
                          pending_page_handler);
   void BindInterface(
-      mojo::PendingReceiver<metrics_reporter::mojom::PageMetricsHost> receiver);
-  void BindInterface(
       mojo::PendingReceiver<guest_contents::mojom::GuestContentsHost> receiver);
   void BindInterface(
       mojo::PendingReceiver<tabs_api::mojom::TabStripService> receiver);
@@ -105,6 +103,7 @@ class WebUIBrowserUI : public ui::MojoWebUIController,
       mojo::PendingRemote<webui_browser::mojom::Page> page,
       mojo::PendingReceiver<webui_browser::mojom::PageHandler> receiver)
       override;
+  void GetTabStripInset(GetTabStripInsetCallback callback) override;
 
   // bookmark_bar::mojom::PageHandlerFactory:
   void CreatePageHandler(mojo::PendingRemote<bookmark_bar::mojom::Page> page,
@@ -122,7 +121,6 @@ class WebUIBrowserUI : public ui::MojoWebUIController,
   // UIs.
   const std::vector<ui::ElementIdentifier>& GetKnownElementIdentifiers() const;
 
-  MetricsReporter metrics_reporter_;
   std::unique_ptr<RealboxHandler> realbox_handler_;
   std::unique_ptr<WebUIBrowserBookmarkBarPageHandler>
       bookmark_bar_page_handler_;

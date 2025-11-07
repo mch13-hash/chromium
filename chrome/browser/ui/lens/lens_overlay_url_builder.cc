@@ -18,8 +18,10 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/url_search_params.h"
 #include "net/base/url_util.h"
+#include "third_party/lens_server_proto/lens_overlay_cluster_info.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_knowledge_intent_query.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_knowledge_query.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_request_id.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_selection_type.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_stickiness_signals.pb.h"
 #include "third_party/lens_server_proto/lens_overlay_translate_stickiness_signals.pb.h"
@@ -466,13 +468,15 @@ bool IsAimQuery(const GURL& url) {
   return param_value == kAimModeParameterValue;
 }
 
-bool ShouldOpenSearchURLInNewTab(const GURL& url) {
+bool ShouldOpenSearchURLInNewTab(const GURL& url, bool is_aim_feature_enabled) {
   std::string param_value;
   net::GetValueForKeyInQuery(url, kModeParameterKey, &param_value);
   const bool is_shopping_mode = param_value == kShoppingModeParameterValue;
+  const bool is_aim_in_side_panel_enabled =
+      is_aim_feature_enabled && lens::features::ShouldShowAimInSidePanel();
   return IsValidSearchResultsUrl(url) &&
          (is_shopping_mode ||
-          (IsAimQuery(url) && !lens::features::ShouldShowAimInSidePanel()));
+          (IsAimQuery(url) && !is_aim_in_side_panel_enabled));
 }
 
 GURL GetSearchResultsUrlFromRedirectUrl(const GURL& url) {
@@ -587,7 +591,8 @@ std::optional<base::TimeDelta> ExtractTimeInSecondsFromQueryIfExists(
     const GURL& target) {
   // Make sure that the target specifies a t=.
   std::string t_string;
-  if (!net::GetValueForKeyInQuery(target, kVideoTimestampQueryParameter, &t_string)) {
+  if (!net::GetValueForKeyInQuery(target, kVideoTimestampQueryParameter,
+                                  &t_string)) {
     return {};
   }
 

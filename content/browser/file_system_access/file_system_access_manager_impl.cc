@@ -31,6 +31,7 @@
 #include "build/build_config.h"
 #include "components/services/storage/public/cpp/buckets/bucket_id.h"
 #include "components/services/storage/public/cpp/buckets/bucket_locator.h"
+#include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/file_system_access/features.h"
 #include "content/browser/file_system_access/file_system_access.pb.h"
 #include "content/browser/file_system_access/file_system_access_access_handle_host_impl.h"
@@ -157,6 +158,16 @@ void ShowFilePickerOnUIThread(
   }
 
   DCHECK(outermost_rfh->IsInPrimaryMainFrame());
+
+  if (!GetContentClient()->browser()->IsFileSystemAccessApiFilePickerAllowed(
+          content::WebContents::FromRenderFrameHost(rfh))) {
+    std::move(callback).Run(file_system_access_error::FromStatus(
+                                FileSystemAccessStatus::kPermissionDenied,
+                                "File Picker for file system access APIs not "
+                                "allowed at this time."),
+                            {});
+    return;
+  }
 
   if (rfh->IsNestedWithinFencedFrame()) {
     std::move(callback).Run(

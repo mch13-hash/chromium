@@ -140,6 +140,12 @@ WebAppBrowserController::WebAppBrowserController(
 
 WebAppBrowserController::~WebAppBrowserController() = default;
 
+WebAppBrowserController* WebAppBrowserController::From(
+    BrowserWindowInterface* browser) {
+  auto* result = AppBrowserController::From(browser);
+  return result ? result->AsWebAppBrowserController() : nullptr;
+}
+
 bool WebAppBrowserController::HasMinimalUiButtons() const {
   if (has_tab_strip()) {
     return false;
@@ -229,6 +235,18 @@ bool WebAppBrowserController::HasPendingUpdate() const {
   }
   const WebApp* app = registrar().GetAppById(app_id());
   return app && app->pending_update_info().has_value();
+}
+
+bool WebAppBrowserController::HasPendingUpdateNotIgnoredByUser() const {
+  if (!base::FeatureList::IsEnabled(features::kWebAppPredictableAppUpdating)) {
+    return false;
+  }
+  const WebApp* app = registrar().GetAppById(app_id());
+  if (!app || !app->pending_update_info().has_value()) {
+    return false;
+  }
+  CHECK(app->pending_update_info()->has_was_ignored());
+  return !app->pending_update_info()->was_ignored();
 }
 
 void WebAppBrowserController::CreateMetadataAndTriggerAppUpdateDialog(
@@ -643,6 +661,12 @@ void WebAppBrowserController::OnTabInserted(content::WebContents* contents) {
 
   WebAppTabHelper* tab_helper = WebAppTabHelper::FromWebContents(contents);
   tab_helper->SetIsInAppWindow(app_id());
+
+  if (!did_notify_first_tab_) {
+    did_notify_first_tab_ = true;
+    tab_helper->NotifyIsFirstWebContentsInAppWindow(
+        base::PassKey<WebAppBrowserController>());
+  }
 }
 
 void WebAppBrowserController::OnTabRemoved(content::WebContents* contents) {

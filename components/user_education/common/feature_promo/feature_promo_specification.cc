@@ -53,7 +53,6 @@ bool IsAllowedKeyedNotice(const base::Feature& promo_feature) {
           "IPH_DesktopPWAsLinkCapturingLaunch",
           "IPH_DesktopPWAsLinkCapturingLaunchAppInTab",
           "IPH_ExplicitBrowserSigninPreferenceRemembered",
-          "IPH_SignoutWebIntercept",
           "IPH_PwaQuietNotification",
       });
   return kAllowedPromoNames.contains(promo_feature.name);
@@ -84,7 +83,7 @@ bool IsAllowedCustomUiPromo(const base::Feature& promo_feature) {
   // Add the text names of allowlisted rotating promos here:
   static constexpr auto kAllowedPromoNames =
       base::MakeFixedFlatSet<std::string_view>(
-          {"IPH_ExtensionsZeroStatePromo"});
+          {"IPH_ExtensionsZeroStatePromo", "IPH_iOSLensPromoDesktop"});
   return kAllowedPromoNames.contains(promo_feature.name);
 }
 

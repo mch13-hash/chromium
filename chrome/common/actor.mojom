@@ -18,8 +18,8 @@ union ToolTarget {
 
   // An x,y pair representing a location relative to the origin at the top-left
   // corner of the local root frame (i.e. the blink::WebWidget/RenderWidget). In
-  // physical pixels.
-  gfx.mojom.Point coordinate;
+  // DIP.
+  gfx.mojom.Point coordinate_dip;
 };
 
 // Attributes of the Node target returned from hit test on last observed APC.
@@ -227,6 +227,25 @@ enum ActionResultCode {
   // testing.
   kTargetNodeInteractionPointObscured = 32,
 
+  // The tool took too long to execute.
+  kToolTimeout = 33,
+
+  // The task triggered a file picker.
+  kFilePickerTriggered = 34,
+
+  // File picker was confirmed.
+  kFilePickerConfirmed = 35,
+
+  // File picker was cancelled.
+  kFilePickerCancelled = 36,
+
+  // The execution engine already had an existing action sequence when a new
+  // sequence was provided.
+  kExecutionEngineExistingAction = 37,
+
+  // Navigation to external protocol was blocked
+  kExternalProtocolNavigationBlocked = 38,
+
   // Please see the comment above about adding new values.
 
   ///////////////////////////////////////////////////////////////////////
@@ -307,7 +326,8 @@ enum ActionResultCode {
   kSelectOptionDisabled = 602,
 
   // The invoking the tool resulted in an unexpected value.
-  kSelectUnexpectedValue = 603,
+  // DEPRECATED: Unused
+  // kSelectUnexpectedValue = 603,
 
   // Please see the comment above about adding new values.
 
@@ -328,6 +348,9 @@ enum ActionResultCode {
 
   // The key down event for one of the chars was suppressed by Blink.
   kTypeKeyDownSuppressed = 704,
+
+  // The text to type is not valid UTF-8 string.
+  kTypeInvalidTextEncoding = 705,
 
   // Please see the comment above about adding new values.
 
@@ -352,6 +375,10 @@ enum ActionResultCode {
 
   // History navigation committed to an error page.
   kHistoryErrorPage = 805,
+
+  // The navigation entry at the current offset changed between validation and
+  // time of use.
+  kHistoryNavigationEntryChanged = 806,
 
   // Please see the comment above about adding new values.
 
@@ -378,6 +405,22 @@ enum ActionResultCode {
 
   // The page changed before the credential selected by the user was filled.
   kLoginPageChangedDuringSelection = 905,
+
+  // The task is in a background tab and filling requires device reauth. The
+  // user needs to focus that tab first.
+  kLoginDeviceReauthRequired = 906,
+
+  // The screen-lock-based authentication attempt failed (likely the user
+  // cancelled it).
+  kLoginDeviceReauthFailed = 907,
+
+  // Please see the comment above about adding new values.
+
+  ///////////////////////////////////////////////////////////////////////
+  // Codes 1000-1099: Errors for media control.
+
+  // The media control action failed because there is no media on the page.
+  kMediaControlNoMedia = 1000,
 
   // Please see the comment above about adding new values.
 };
@@ -434,12 +477,6 @@ enum JournalEntryType {
   kInstant,
 };
 
-// The track to log the journal entry on.
-enum JournalTrack {
-  kFrontEnd,
-  kActor,
-};
-
 // Details of a journal entry.
 struct JournalDetails {
   string key;
@@ -457,14 +494,14 @@ struct JournalEntry {
   // The task ID associated with this entry.
   TaskId task_id;
 
-  // The track the event should occur on.
-  JournalTrack track;
-
   // The time the event occurred at.
   mojo_base.mojom.Time timestamp;
 
   // The event name.
   string event;
+
+  // Track UUID.
+  uint64 track_uuid;
 
   // Specific details of the event logged.
   array<JournalDetails> details;

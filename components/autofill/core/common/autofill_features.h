@@ -20,19 +20,34 @@ BASE_DECLARE_FEATURE(kAutofillAcrossIframesIosThrottling);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAcrossIframesIosTriggerFormExtraction);
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillAddressDiscardWhitespaceInHouseNumber);
-COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAddressSuggestionsOnTyping);
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::FeatureParam<int>
+    kAutofillOnTypingMinNumberCharactersToMatch;
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::FeatureParam<int>
+    kAutofillOnTypingMaxNumberCharactersToMatch;
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::FeatureParam<int>
+    kAutofillOnTypingMinMissingCharactersNumber;
+COMPONENT_EXPORT(AUTOFILL)
+extern const base::FeatureParam<std::string> kAutofillOnTypingFieldTypes;
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillAddressSuggestionsOnTypingHasStrikeDatabase);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAddressUserDeclinedSaveSurvey);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAddressUserPerceptionSurvey);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillAllowFillingModifiedInitialValues);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiAlwaysTriggerServerModel);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiDedupeEntities);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiCreateEntityDataManager);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillAiIdentityAndTravelPrefs);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiIgnoreCapabilityCheck);
 COMPONENT_EXPORT(AUTOFILL)
@@ -41,27 +56,6 @@ extern const base::FeatureParam<bool>
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiFillingSurvey);
 COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyVehicleInfoTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyFlightReservationTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyDriversLicenseTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyPassportTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyNationalIDTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyRedressNumberTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyKTNTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiSavePromptSurvey);
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::FeatureParam<std::string>
@@ -69,9 +63,6 @@ extern const base::FeatureParam<std::string>
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::FeatureParam<std::string>
     kAutofillAiSavePromptSurveyDeclinedTriggerId;
-COMPONENT_EXPORT(AUTOFILL)
-extern const base::FeatureParam<std::string>
-    kAutofillAiFillingSurveyVehicleInfoTriggerId;
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAiIgnoreGeoIp);
 COMPONENT_EXPORT(AUTOFILL)
@@ -129,7 +120,6 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillCreditCardUserPerceptionSurvey);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAddressUserDeclinedSuggestionSurvey);
-COMPONENT_EXPORT(AUTOFILL) BASE_DECLARE_FEATURE(kAutofillDetectFieldVisibility);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillDeduplicateAccountAddresses);
 COMPONENT_EXPORT(AUTOFILL)
@@ -160,9 +150,10 @@ COMPONENT_EXPORT(AUTOFILL)
 extern const base::FeatureParam<int>
     kAutofillNameAndEmailProfileNotSelectedThreshold;
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillEnableSupportForParsingWithSharedLabels);
+extern const base::FeatureParam<std::string>
+    kAutofillNameAndEmailProfileNicknameRegex;
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillExtractOnlyOnAdmissibleUrls);
+BASE_DECLARE_FEATURE(kAutofillEnableSupportForParsingWithSharedLabels);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillExtractOnlyNonAdFrames);
 COMPONENT_EXPORT(AUTOFILL)
@@ -192,17 +183,19 @@ BASE_DECLARE_FEATURE(kAutofillSupportLastNamePrefix);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillSupportSplitZipCode);
 COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillSupportPresentationRole);
+COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillSynchronousAfterParsing);
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillZipCodeValidationAndMerging);
+BASE_DECLARE_FEATURE(kAutofillExtendZipCodeValidation);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillAcceptDomMutationAfterAutofillSubmission);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillFixFormTracking);
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillUseSubmittedFormInHtmlSubmission);
+BASE_DECLARE_FEATURE(kAutofillUseChildrenAndReformatMergeMode);
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillUnifyRationalizationAndSectioningOrder);
+BASE_DECLARE_FEATURE(kAutofillUseSubmittedFormInHtmlSubmission);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillPreferSavedFormAsSubmittedForm);
 COMPONENT_EXPORT(AUTOFILL)
@@ -286,8 +279,6 @@ COMPONENT_EXPORT(AUTOFILL)
 extern const base::FeatureParam<int>
     kAutofillEnableCacheForRegexMatchingCacheSizeParam;
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillUnionTypesForAutofillAi);
-COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillUKMExperimentalFields);
 COMPONENT_EXPORT(AUTOFILL)
 extern const base::FeatureParam<std::string>
@@ -345,6 +336,8 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillUseStructuralSignatureInsteadOfSecondary);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillConsiderServerOnlyFormsInKeyMetrics);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillFixRewriterRules);
 
 #if BUILDFLAG(IS_ANDROID)
 COMPONENT_EXPORT(AUTOFILL)
@@ -355,6 +348,8 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillDeepLinkAutofillOptions);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableKeyboardAccessoryChipRedesign);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillEnableKeyboardAccessoryChipWidthAdjustment);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableSecurityTouchEventFilteringAndroid);
 COMPONENT_EXPORT(AUTOFILL)
@@ -370,6 +365,8 @@ bool IsMacViewsAutofillPopupExperimentEnabled();
 #endif  // BUILDFLAG(IS_APPLE)
 
 COMPONENT_EXPORT(AUTOFILL) BASE_DECLARE_FEATURE(kYourSavedInfoSettingsPage);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kYourSavedInfoBrandingInSettings);
 
 // The features in this namespace contains are not meant to be rolled out. They
 // are are only intended for manual testing purposes.

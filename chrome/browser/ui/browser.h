@@ -104,10 +104,6 @@ namespace web_modal {
 class WebContentsModalDialogHost;
 }
 
-namespace views {
-class View;
-}
-
 // This enum is not a member of `Browser` so that it can be forward
 // declared in `unload_controller.h` to avoid circular includes.
 enum class BrowserClosingStatus {
@@ -133,16 +129,16 @@ class Browser : public TabStripModelObserver,
                 public DesktopBrowserWindowCapabilitiesDelegate {
  public:
   // Possible elements of the Browser window.
-  enum WindowFeature {
-    FEATURE_NONE = 0,
-    FEATURE_TITLEBAR = 1 << 0,
-    FEATURE_TABSTRIP = 1 << 1,
-    FEATURE_TOOLBAR = 1 << 2,
-    FEATURE_LOCATIONBAR = 1 << 3,
-    FEATURE_BOOKMARKBAR = 1 << 4,
-    // TODO(crbug.com/40639933): Add FEATURE_PAGECONTROLS to describe the
+  enum class WindowFeature {
+    kFeatureNone,
+    kFeatureTitleBar,
+    kFeatureTabStrip,
+    kFeatureToolbar,
+    kFeatureLocationBar,
+    kFeatureBookmarkBar,
+    // TODO(crbug.com/40639933): Add kFeaturePageControls to describe the
     // presence of per-page controls such as Content Settings Icons, which
-    // should be decoupled from FEATURE_LOCATIONBAR as they have independent
+    // should be decoupled from kFeatureLocationBar as they have independent
     // presence in Web App browsers.
   };
 
@@ -168,14 +164,6 @@ class Browser : public TabStripModelObserver,
   // Represents the result of the user being warned before closing the browser.
   // See WarnBeforeClosingCallback and WarnBeforeClosing() below.
   enum class WarnBeforeClosingResult { kOkToClose, kDoNotClose };
-
-  // Represents the result of a browser creation request.
-  enum class CreationStatus {
-    kOk,
-    kErrorNoProcess,
-    kErrorProfileUnsuitable,
-    kErrorLoadingKiosk,
-  };
 
   // Represents the source of a browser creation request.
   enum class CreationSource {
@@ -372,10 +360,7 @@ class Browser : public TabStripModelObserver,
   static std::unique_ptr<Browser> DeprecatedCreateOwnedForTesting(
       const CreateParams& params);
 
-  // Returns whether a browser window can currently be created for the specified
-  // profile. This condition may change during runtime for a given `profile`
-  // (e.g. a profile may support Browser windows but creating a Browser is
-  // disallowed during shutdown).
+  // Refer to `GetCreationStatusForProfile()`.
   static CreationStatus GetCreationStatusForProfile(Profile* profile);
 
   Browser(const Browser&) = delete;
@@ -474,12 +459,11 @@ class Browser : public TabStripModelObserver,
   bool should_trigger_session_restore() const {
     return should_trigger_session_restore_;
   }
-  const web_app::AppBrowserController* app_controller() const {
-    return GetAppBrowserController();
-  }
-  web_app::AppBrowserController* app_controller() {
-    return GetAppBrowserController();
-  }
+
+  // Remove these functions and migrate to using
+  // AppBrowserController::IsWebApp()` and `AppBrowserController::From()`.
+  const web_app::AppBrowserController* app_controller() const;
+  web_app::AppBrowserController* app_controller();
   BrowserWindowFeatures* browser_window_features() const {
     return features_.get();
   }
@@ -592,15 +576,13 @@ class Browser : public TabStripModelObserver,
   // 2. The Browser window is hidden, and a task is posted that results in
   //    deleting the Browser (Views is responsible for posting the task). This
   //    phase can not be stopped. During this phase is_delete_scheduled()
-  //    returns true. IsBrowserClosing() is nearly identical to
-  //    is_delete_scheduled(), it's set just before removing the tabs.
+  //    returns true.
   //
   // Note that there are other cases that may delay closing, such as downloads,
   // but that is done before any of these steps.
-  // TODO(crbug.com/40064092): See about unifying IsBrowserClosing() and
-  // is_delete_scheduled().
+  // TODO(crbug.com/40064092): See about unifying IsAttemptingToCloseBrowser()
+  // and is_delete_scheduled().
   bool IsAttemptingToCloseBrowser() const override;
-  bool IsBrowserClosing() const;
   bool is_delete_scheduled() const { return is_delete_scheduled_; }
 
   // Invoked when the window containing us is closing. Performs the necessary
@@ -788,9 +770,7 @@ class Browser : public TabStripModelObserver,
     return &unload_controller_;
   }
 
-
   // BrowserWindowInterface overrides:
-  views::WebView* GetWebView() override;
   Profile* GetProfile() override;
   const Profile* GetProfile() const override;
   void OpenGURL(const GURL& gurl, WindowOpenDisposition disposition) override;
@@ -807,9 +787,7 @@ class Browser : public TabStripModelObserver,
       BrowserDidCloseCallback callback) override;
   base::CallbackListSubscription RegisterBrowserCloseCancelled(
       BrowserCloseCancelledCallback callback) override;
-  views::View* TopContainer() override;
   base::WeakPtr<BrowserWindowInterface> GetWeakPtr() override;
-  views::View* LensOverlayView() override;
   base::CallbackListSubscription RegisterActiveTabDidChange(
       ActiveTabChangeCallback callback) override;
   tabs::TabInterface* GetActiveTabInterface() override;
@@ -827,13 +805,11 @@ class Browser : public TabStripModelObserver,
   base::CallbackListSubscription RegisterDidBecomeInactive(
       DidBecomeInactiveCallback callback) override;
   ExclusiveAccessManager* GetExclusiveAccessManager() override;
-  ImmersiveModeController* GetImmersiveModeController() override;
   BrowserActions* GetActions() override;
   Type GetType() const override;
-  web_app::AppBrowserController* GetAppBrowserController() override;
-  const web_app::AppBrowserController* GetAppBrowserController() const override;
   std::vector<tabs::TabInterface*> GetAllTabInterfaces() override;
   Browser* GetBrowserForMigrationOnly() override;
+  const Browser* GetBrowserForMigrationOnly() const override;
   bool IsTabModalPopupDeprecated() const override;
   bool CanShowCallToAction() const override;
   std::unique_ptr<ScopedWindowCallToAction> ShowCallToAction() override;
@@ -887,15 +863,15 @@ class Browser : public TabStripModelObserver,
 
   // Used to describe why a tab is being detached. This is used by
   // TabDetachedAtImpl.
-  enum DetachType {
+  enum class DetachType {
     // Result of TabDetachedAt.
-    DETACH_TYPE_DETACH,
+    kDetach,
 
     // Result of TabReplacedAt.
-    DETACH_TYPE_REPLACE,
+    kReplace,
 
     // Result of the tab strip not having any significant tabs.
-    DETACH_TYPE_EMPTY
+    kEmpty
   };
 
   // Tracks whether a tabstrip call to action UI is showing.
@@ -987,13 +963,15 @@ class Browser : public TabStripModelObserver,
   void EnumerateDirectory(content::WebContents* web_contents,
                           scoped_refptr<content::FileSelectListener> listener,
                           const base::FilePath& path) override;
-  bool CanUseWindowingControls(
-      content::RenderFrameHost* requesting_frame) override;
   void OnWebApiWindowResizableChanged() override;
   bool GetCanResize() override;
+#if !BUILDFLAG(IS_ANDROID)
+  bool CanUseWindowingControls(
+      content::RenderFrameHost* requesting_frame) override;
   void MinimizeFromWebAPI() override;
   void MaximizeFromWebAPI() override;
   void RestoreFromWebAPI() override;
+#endif
   ui::mojom::WindowShowState GetWindowShowState() const override;
   bool CanEnterFullscreenModeForTab(
       content::RenderFrameHost* requesting_frame) override;
@@ -1067,8 +1045,6 @@ class Browser : public TabStripModelObserver,
   void SetWebContentsBlocked(content::WebContents* web_contents,
                              bool blocked) override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost(
-      content::WebContents* web_contents) override;
-  void OnWebContentsModalDialogFirstShown(
       content::WebContents* web_contents) override;
 
   // Overridden from BookmarkTabHelperObserver:
@@ -1227,11 +1203,6 @@ class Browser : public TabStripModelObserver,
   bool SupportsWindowFeatureImpl(WindowFeature feature,
                                  bool check_can_support) const;
 
-
-  // Returns true if we can start the shutdown sequence for the browser, i.e.
-  // the last browser window is being closed.
-  bool ShouldStartShutdown() const;
-
   // Returns true if a BackgroundContents should be created in response to a
   // WebContents::CreateNewWindow() call.
   bool ShouldCreateBackgroundContents(
@@ -1332,11 +1303,11 @@ class Browser : public TabStripModelObserver,
 
   // In-progress download termination handling /////////////////////////////////
 
-  enum CancelDownloadConfirmationState {
-    NOT_PROMPTED,          // We have not asked the user.
-    WAITING_FOR_RESPONSE,  // We have asked the user and have not received a
-                           // reponse yet.
-    RESPONSE_RECEIVED      // The user was prompted and made a decision already.
+  enum class CancelDownloadConfirmationState {
+    kNotPrompted,         // We have not asked the user.
+    kWaitingForResponse,  // We have asked the user and have not received a
+                          // response yet.
+    kResponseReceived     // The user was prompted and made a decision already.
   };
 
   // State used to figure-out whether we should prompt the user for confirmation

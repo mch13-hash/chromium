@@ -8,26 +8,52 @@
 #import <UIKit/UIKit.h>
 
 #import "base/apple/foundation_util.h"
+#import "base/strings/sys_string_conversions.h"
+#import "ios/chrome/browser/download/model/download_filter_util.h"
+#import "ios/chrome/browser/download/model/external_app_util.h"
+#import "ios/chrome/browser/download/ui/download_list/download_list_action_delegate.h"
 #import "ios/chrome/browser/download/ui/download_list/download_list_consumer.h"
 #import "ios/chrome/browser/download/ui/download_list/download_list_group_item.h"
 #import "ios/chrome/browser/download/ui/download_list/download_list_grouping_util.h"
 #import "ios/chrome/browser/download/ui/download_list/download_list_item.h"
 #import "ios/chrome/browser/download/ui/download_list/download_list_mutator.h"
+#import "ios/chrome/browser/download/ui/download_list/download_list_table_view_cell_content_configuration.h"
+#import "ios/chrome/browser/download/ui/download_list/download_list_table_view_header.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_cell.h"
 #import "ios/chrome/browser/shared/ui/table_view/cells/table_view_text_header_footer_item.h"
-#import "ios/chrome/browser/shared/ui/table_view/content_configuration/image_content_configuration.h"
 #import "ios/chrome/browser/shared/ui/table_view/content_configuration/table_view_cell_content_configuration.h"
 #import "ios/chrome/browser/shared/ui/table_view/table_view_illustrated_empty_view.h"
 #import "ios/chrome/browser/shared/ui/table_view/table_view_model.h"
 #import "ios/chrome/browser/shared/ui/table_view/table_view_utils.h"
+#import "ios/chrome/common/string_util.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/util/button_util.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util.h"
 
 namespace {
+/// Constants for cancel button styling.
+static const CGFloat kCancelButtonIconSize = 30;
 
-/// Size for the file icon image in the download list cells.
-constexpr CGFloat kFileIconImageSize = 44.0;
+NSString* const kCancelButtonPrimaryActionIdentifier =
+    @"kCancelButtonPrimaryActionIdentifier";
+
+// Helper function to create the attributed string with a link.
+NSAttributedString* GetAttributedString(NSString* message) {
+  NSDictionary* textAttributes =
+      [TableViewIllustratedEmptyView defaultTextAttributesForSubtitle];
+  NSDictionary* linkAttributes = @{
+    NSForegroundColorAttributeName : [UIColor colorNamed:kBlueColor],
+    NSFontAttributeName :
+        [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline],
+    NSUnderlineStyleAttributeName : @(NSUnderlineStyleNone),
+    NSLinkAttributeName : GetFilesAppUrl().absoluteString,
+  };
+
+  return AttributedStringFromStringWithLink(message, textAttributes,
+                                            linkAttributes);
+}
 
 }  // namespace
 
@@ -37,6 +63,11 @@ typedef UITableViewDiffableDataSource<DownloadListGroupItem*, DownloadListItem*>
     DownloadListDiffableDataSource;
 typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
     DownloadListSnapshot;
+
+@interface DownloadListTableViewController () <
+    TableViewIllustratedEmptyViewDelegate>
+@property(nonatomic, strong) DownloadListTableViewHeader* filterHeaderView;
+@end
 
 @implementation DownloadListTableViewController {
   DownloadListDiffableDataSource* _diffableDataSource;
@@ -56,8 +87,15 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
   self.navigationItem.rightBarButtonItem = closeButton;
 
   // Configure table view.
-  [TableViewCellContentConfiguration registerCellForTableView:self.tableView];
+  // Register cells for both the base configuration and download-specific
+  // configuration.
+  [DownloadListTableViewCellContentConfiguration
+      registerCellForTableView:self.tableView];
   RegisterTableViewHeaderFooter<TableViewTextHeaderFooterView>(self.tableView);
+
+  // Setup filter header view.
+  [self setupFilterHeaderView];
+
   [self configureDiffableDataSource];
 
   // Load download records.
@@ -66,7 +104,52 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
 
 #pragma mark - Private
 
-/// Dismisses the view controller when close button is tapped.
+- (void)setupFilterHeaderView {
+  self.filterHeaderView = [[DownloadListTableViewHeader alloc] init];
+  self.filterHeaderView.mutator = self.mutator;
+  [self updateTableHeaderViewFrame];
+}
+
+- (void)updateTableHeaderViewFrame {
+  if (!self.filterHeaderView) {
+    return;
+  }
+
+  [self.filterHeaderView setNeedsLayout];
+  [self.filterHeaderView layoutIfNeeded];
+
+  CGFloat width = self.tableView.bounds.size.width;
+  CGSize fittingSize = [self.filterHeaderView
+      systemLayoutSizeFittingSize:CGSizeMake(
+                                      width,
+                                      UILayoutFittingCompressedSize.height)];
+
+  CGRect newFrame = CGRectMake(0, 0, width, fittingSize.height);
+  if (!CGRectEqualToRect(self.filterHeaderView.frame, newFrame)) {
+    self.filterHeaderView.frame = newFrame;
+    // Reassign to trigger table view layout update.
+    if (self.tableView.tableHeaderView == self.filterHeaderView) {
+      self.tableView.tableHeaderView = self.filterHeaderView;
+    }
+  }
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  [self updateTableHeaderViewFrame];
+}
+
+#pragma mark - Mutator setter override
+
+- (void)setMutator:(id<DownloadListMutator>)mutator {
+  _mutator = mutator;
+  // Update the filter view's mutator when it's set.
+  if (self.filterHeaderView) {
+    self.filterHeaderView.mutator = mutator;
+  }
+}
+
+/// Dismisses the view controller when the close button is tapped.
 - (void)closeButtonTapped {
   [self.downloadListHandler hideDownloadList];
 }
@@ -88,23 +171,60 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
 /// path.
 - (UITableViewCell*)cellForItem:(DownloadListItem*)item
                     atIndexPath:(NSIndexPath*)indexPath {
-  ImageContentConfiguration* imageConfiguration =
-      [[ImageContentConfiguration alloc] init];
-  imageConfiguration.image = item.fileTypeIcon;
-  imageConfiguration.imageSize =
-      CGSizeMake(kFileIconImageSize, kFileIconImageSize);
+  // Use the new DownloadListTableViewCellContentConfiguration
+  DownloadListTableViewCellContentConfiguration* configuration =
+      [DownloadListTableViewCellContentConfiguration
+          configurationWithDownloadListItem:item];
 
-  TableViewCellContentConfiguration* configuration =
-      [[TableViewCellContentConfiguration alloc] init];
-  configuration.title = item.fileName;
-  configuration.subtitle = item.detailText;
-  configuration.leadingConfiguration = imageConfiguration;
-
-  UITableViewCell* cell =
-      [TableViewCellContentConfiguration dequeueTableViewCell:self.tableView];
+  UITableViewCell* cell = [DownloadListTableViewCellContentConfiguration
+      dequeueTableViewCell:self.tableView];
   cell.contentConfiguration = configuration;
-
+  [self configureCancelButtonForCell:cell
+                       configuration:configuration
+                                item:item];
   return cell;
+}
+
+/// Configures the cancel button accessory for the given cell and item.
+- (void)configureCancelButtonForCell:(UITableViewCell*)cell
+                       configuration:
+                           (DownloadListTableViewCellContentConfiguration*)
+                               configuration
+                                item:(DownloadListItem*)item {
+  if (configuration.showCancelButton) {
+    UIButton* cancelButton =
+        base::apple::ObjCCast<UIButton>(cell.accessoryView);
+    if (!cancelButton) {
+      // Create and configure cancel button if it does not exist.
+      cancelButton = SecondaryActionButton();
+      cancelButton.translatesAutoresizingMaskIntoConstraints = YES;
+      UIImage* cancelButtonImage =
+          SymbolWithPalette(DefaultSymbolWithPointSize(kXMarkCircleFillSymbol,
+                                                       kCancelButtonIconSize),
+                            @[
+                              [UIColor colorNamed:kGrey600Color],
+                              [UIColor colorNamed:kGrey200Color],
+                            ]);
+      [cancelButton setImage:cancelButtonImage forState:UIControlStateNormal];
+      cancelButton.frame =
+          CGRectMake(0, 0, kCancelButtonIconSize, kCancelButtonIconSize);
+      cancelButton.accessibilityLabel = l10n_util::GetNSString(
+          IDS_IOS_DOWNLOAD_LIST_CANCEL_ACCESSIBILITY_LABEL);
+      cell.accessoryView = cancelButton;
+    }
+    __weak __typeof(self) weakSelf = self;
+    UIAction* primaryAction =
+        [UIAction actionWithTitle:@""
+                            image:nil
+                       identifier:kCancelButtonPrimaryActionIdentifier
+                          handler:^(__kindof UIAction* action) {
+                            [weakSelf.mutator cancelDownloadItem:item];
+                          }];
+    [cancelButton addAction:primaryAction
+           forControlEvents:UIControlEventTouchUpInside];
+  } else {
+    cell.accessoryView = nil;
+  }
 }
 
 #pragma mark - UITableViewDelegate
@@ -116,7 +236,15 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
 
 - (void)tableView:(UITableView*)tableView
     performPrimaryActionForRowAtIndexPath:(NSIndexPath*)indexPath {
-  // TODO(crbug.com/440222083): Implement download primary action handling.
+  DownloadListItem* item =
+      [_diffableDataSource itemIdentifierForIndexPath:indexPath];
+
+  CHECK(item);
+
+  base::FilePath filePath = item.filePath;
+  std::string mimeType = base::SysNSStringToUTF8(item.mimeType);
+
+  [self.downloadRecordHandler openFileWithPath:filePath mimeType:mimeType];
 }
 
 - (UIContextMenuConfiguration*)tableView:(UITableView*)tableView
@@ -247,14 +375,14 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
         UINavigationItemLargeTitleDisplayModeNever;
     if (!self.tableView.backgroundView) {
       UIImage* emptyImage = [UIImage imageNamed:@"download_list_empty"];
-      TableViewIllustratedEmptyView* emptyView =
-          [[TableViewIllustratedEmptyView alloc]
-              initWithFrame:self.view.bounds
-                      image:emptyImage
-                      title:l10n_util::GetNSString(
-                                IDS_IOS_DOWNLOAD_LIST_NO_ENTRIES_TITLE)
-                   subtitle:l10n_util::GetNSString(
-                                IDS_IOS_DOWNLOAD_LIST_NO_ENTRIES_MESSAGE)];
+      TableViewIllustratedEmptyView* emptyView = [[TableViewIllustratedEmptyView
+          alloc] initWithFrame:self.view.bounds
+                         image:emptyImage
+                         title:l10n_util::GetNSString(
+                                   IDS_IOS_DOWNLOAD_LIST_NO_ENTRIES_TITLE)
+            attributedSubtitle:GetAttributedString(l10n_util::GetNSString(
+                                   IDS_IOS_DOWNLOAD_LIST_NO_ENTRIES_MESSAGE))];
+      emptyView.delegate = self;
       self.tableView.backgroundView = emptyView;
     }
   } else {
@@ -262,6 +390,21 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
     self.navigationItem.largeTitleDisplayMode =
         UINavigationItemLargeTitleDisplayModeAlways;
     self.tableView.backgroundView = nil;
+  }
+  if (self.filterHeaderView && self.filterHeaderView.isHidden == NO) {
+    [self.filterHeaderView setAttributionTextShown:!empty];
+  }
+}
+
+- (void)setDownloadListHeaderShown:(BOOL)shown {
+  if (shown) {
+    // Show the filter view if it's not already set.
+    if (self.tableView.tableHeaderView != self.filterHeaderView) {
+      self.tableView.tableHeaderView = self.filterHeaderView;
+    }
+  } else {
+    // Hide the filter view by setting tableHeaderView to nil.
+    self.tableView.tableHeaderView = nil;
   }
 }
 
@@ -271,6 +414,18 @@ typedef NSDiffableDataSourceSnapshot<DownloadListGroupItem*, DownloadListItem*>
 - (void)presentationControllerWillDismiss:
     (UIPresentationController*)presentationController {
   [self.downloadListHandler hideDownloadList];
+}
+#pragma mark - TableViewIllustratedEmptyViewDelegate
+
+// Invoked when a link in `view`'s subtitle is tapped.
+- (void)tableViewIllustratedEmptyView:(TableViewIllustratedEmptyView*)view
+                   didTapSubtitleLink:(NSURL*)URL {
+  if (!URL) {
+    return;
+  }
+  [[UIApplication sharedApplication] openURL:URL
+                                     options:@{}
+                           completionHandler:nil];
 }
 
 @end

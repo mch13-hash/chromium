@@ -10,7 +10,9 @@
 #import "components/pref_registry/pref_registry_syncable.h"
 #import "components/prefs/pref_service.h"
 #import "components/signin/public/base/signin_metrics.h"
-#import "ios/chrome/browser/authentication/ui_bundled/signin/add_account_signin/add_account_signin_coordinator.h"
+#import "ios/chrome/browser/authentication/add_account_signin/coordinator/add_account_signin_coordinator.h"
+#import "ios/chrome/browser/authentication/trusted_vault_reauthentication/coordinator/trusted_vault_reauthentication_coordinator.h"
+#import "ios/chrome/browser/authentication/trusted_vault_reauthentication/coordinator/trusted_vault_reauthentication_coordinator_delegate.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/consistency_promo_signin/consistency_promo_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/history_sync/history_sync_signin_coordinator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/instant_signin/instant_signin_coordinator.h"
@@ -20,8 +22,6 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_in_progress.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_screen_provider.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/two_screens_signin/two_screens_signin_coordinator.h"
-#import "ios/chrome/browser/authentication/ui_bundled/trusted_vault_reauthentication/trusted_vault_reauthentication_coordinator.h"
-#import "ios/chrome/browser/authentication/ui_bundled/trusted_vault_reauthentication/trusted_vault_reauthentication_coordinator_delegate.h"
 #import "ios/chrome/browser/shared/coordinator/chrome_coordinator/animated_coordinator.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
@@ -183,14 +183,14 @@ using signin_metrics::PromoAction;
 }
 
 + (SigninCoordinator*)
-    upgradeSigninPromoCoordinatorWithBaseViewController:
+    fullscreenSigninPromoCoordinatorWithBaseViewController:
         (UIViewController*)viewController
-                                                browser:(Browser*)browser
-                                           contextStyle:
-                                               (SigninContextStyle)contextStyle
-                      changeProfileContinuationProvider:
-                          (const ChangeProfileContinuationProvider&)
-                              changeProfileContinuationProvider {
+                                                   browser:(Browser*)browser
+                                              contextStyle:(SigninContextStyle)
+                                                               contextStyle
+                         changeProfileContinuationProvider:
+                             (const ChangeProfileContinuationProvider&)
+                                 changeProfileContinuationProvider {
   CHECK(changeProfileContinuationProvider);
   AccessPoint accessPoint = AccessPoint::kFullscreenSigninPromo;
   PromoAction promoAction = PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO;

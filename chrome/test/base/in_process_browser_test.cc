@@ -61,6 +61,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar_controller_util.h"
 #include "chrome/common/chrome_constants.h"
@@ -155,6 +156,10 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #endif
+
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#include "chrome/browser/ui/ui_features.h"
+#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 
 namespace {
 
@@ -355,6 +360,10 @@ void InProcessBrowserTest::Initialize() {
   disabled_features.push_back(
       extensions_features::kExtensionDisableUnsupportedDeveloper);
 
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+  // Disable session restore infobar the experiment as it causes test failures.
+  disabled_features.push_back(features::kSessionRestoreInfobar);
+#endif
   // In-product help can conflict with tests' expected window activation and
   // focus. Individual tests can re-enable IPH.
   block_all_iph_feature_list_.InitWithNoFeaturesAllowed();
@@ -595,10 +604,8 @@ void InProcessBrowserTest::CreatedBrowserMainParts(
       std::make_unique<OSCryptAsyncExtraSetUp>());
 }
 
-void InProcessBrowserTest::SelectFirstBrowser() {
-  const BrowserList* browser_list = BrowserList::GetInstance();
-  if (!browser_list->empty())
-    browser_ = browser_list->get(0);
+void InProcessBrowserTest::SetBrowser(BrowserWindowInterface* browser) {
+  browser_ = browser ? browser->GetBrowserForMigrationOnly() : nullptr;
 }
 
 void InProcessBrowserTest::RecordPropertyFromMap(
@@ -665,7 +672,7 @@ void InProcessBrowserTest::RunUntilBrowserProcessQuits() {
 // navigation to tests, which should make sure navigations succeed when
 // appropriate. See https://crbug.com/425335
 bool InProcessBrowserTest::AddTabAtIndexToBrowser(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     int index,
     const GURL& url,
     ui::PageTransition transition,
@@ -674,7 +681,7 @@ bool InProcessBrowserTest::AddTabAtIndexToBrowser(
 }
 
 bool InProcessBrowserTest::AddTabAtIndexToBrowser(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     int index,
     const GURL& url,
     ui::PageTransition transition) {
@@ -834,7 +841,7 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
   // Pump startup related events.
   content::RunAllPendingInMessageLoop();
 
-  SelectFirstBrowser();
+  SetBrowser(GetLastActiveBrowserWindowInterfaceWithAnyProfile());
   if (browser_ && !browser_->tab_strip_model()->empty()) {
     base::WeakPtr<content::WebContents> tab =
         browser_->tab_strip_model()->GetActiveWebContents()->GetWeakPtr();

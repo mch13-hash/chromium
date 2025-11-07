@@ -111,6 +111,7 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/content_data.h"
 #include "third_party/blink/renderer/core/svg/svg_graphics_element.h"
 #include "third_party/blink/renderer/core/svg/svg_style_element.h"
@@ -1417,14 +1418,25 @@ bool AXObjectCacheImpl::IsRelevantPseudoElement(const Node& node) {
   }
 
   // The remaining possible pseudo-element types are not relevant.
-  if (node.IsBackdropPseudoElement() || node.IsViewTransitionPseudoElement()) {
-    return false;
+  switch (To<PseudoElement>(node).GetPseudoId()) {
+    case kPseudoIdBackdrop:
+    case kPseudoIdOverscrollAreaParent:
+    case kPseudoIdOverscrollClientArea:
+    case kPseudoIdViewTransition:
+    case kPseudoIdViewTransitionGroup:
+    case kPseudoIdViewTransitionGroupChildren:
+    case kPseudoIdViewTransitionImagePair:
+    case kPseudoIdViewTransitionOld:
+    case kPseudoIdViewTransitionNew:
+      return false;
+
+    default:
+      // If this is reached, then a new pseudo-element type was added and is not
+      // yet handled by accessibility. See  PseudoElementTagName() in
+      // pseudo_element.cc for all possible types.
+      SANITIZER_NOTREACHED() << "Unhandled type of pseudo-element on: " << node;
   }
 
-  // If this is reached, then a new pseudo-element type was added and is not
-  // yet handled by accessibility. See  PseudoElementTagName() in
-  // pseudo_element.cc for all possible types.
-  SANITIZER_NOTREACHED() << "Unhandled type of pseudo-element on: " << node;
   return false;
 }
 
@@ -4015,7 +4027,9 @@ void AXObjectCacheImpl::FireTreeUpdatedEventForAXID(
     return;
   }
 
-  CHECK(!ax_object->IsMissingParent(), base::NotFatalUntil::M140)
+  // TODO(crbug.com/452392024): Investigate why this fails, fix it, and move to
+  // a CHECK.
+  DUMP_WILL_BE_CHECK(!ax_object->IsMissingParent())
       << tree_update->ToString() << " on " << ax_object;
 
   // Update cached attributes for all changed nodes before serialization,
@@ -4088,7 +4102,9 @@ void AXObjectCacheImpl::FireTreeUpdatedEventForNode(
     return;
   }
 
-  CHECK(!ax_object->IsMissingParent(), base::NotFatalUntil::M140)
+  // TODO(crbug.com/452392024): Investigate why this fails, fix it, and move to
+  // a CHECK.
+  DUMP_WILL_BE_CHECK(!ax_object->IsMissingParent())
       << tree_update->ToString() << " on " << ax_object;
 
   base::AutoReset<ax::mojom::blink::EventFrom> event_from_resetter(

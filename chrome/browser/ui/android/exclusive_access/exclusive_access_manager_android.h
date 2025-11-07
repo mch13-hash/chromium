@@ -28,11 +28,12 @@ class ExclusiveAccessManagerAndroid {
 
   void Destroy(JNIEnv* env);
 
-  void EnterFullscreenModeForTab(JNIEnv* env,
-                                 jlong requesting_frame,
-                                 bool prefersNavigationBar,
-                                 bool prefersStatusBar,
-                                 jlong displayId);
+  void EnterFullscreenModeForTab(
+      JNIEnv* env,
+      const jni_zero::JavaRef<jobject>& jrender_frame_host_android,
+      bool prefersNavigationBar,
+      bool prefersStatusBar,
+      jlong displayId);
 
   void ExitFullscreenModeForTab(
       JNIEnv* env,
@@ -60,6 +61,8 @@ class ExclusiveAccessManagerAndroid {
   void LostPointerLock(JNIEnv* env);
 
   void ExitExclusiveAccess(JNIEnv* env);
+
+  bool HasExclusiveAccess(JNIEnv* env);
 
   void OnTabDeactivated(JNIEnv* env,
                         const jni_zero::JavaRef<jobject>& jweb_contents);

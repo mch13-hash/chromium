@@ -52,14 +52,6 @@ class TestContextSupport : public gpu::ContextSupport {
   void DeleteTransferCacheEntry(uint32_t entry_type,
                                 uint32_t entry_id) override;
   unsigned int GetTransferBufferFreeSize() const override;
-  bool IsJpegDecodeAccelerationSupported() const override;
-  bool IsWebPDecodeAccelerationSupported() const override;
-  bool CanDecodeWithHardwareAcceleration(
-      const cc::ImageHeaderMetadata* image_metadata) const override;
-  bool HasGrContextSupport() const override;
-  void SetGrContext(GrDirectContext* gr) override;
-  void WillCallGLFromSkia() override;
-  void DidCallGLFromSkia() override;
 
   void CallAllSyncPointCallbacks();
 

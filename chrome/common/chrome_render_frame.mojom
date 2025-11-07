@@ -74,7 +74,7 @@ interface ChromeRenderFrame {
       => (array<uint8> image_data,
           gfx.mojom.Size original_size,
           gfx.mojom.Size downscaled_size,
-          string encoded_extension,
+          string mime_type,
           array<lens.mojom.LatencyLog> log_data);
 
   // For WebUI testing, this message requests JavaScript to be executed at a
@@ -92,10 +92,6 @@ interface ChromeRenderFrame {
   // Tells the render frame to load any blocked plugins matching the given
   // identifier (empty string matches all).
   LoadBlockedPlugins(string identifier);
-
-  // Indicates that the frame should collect draggable regions set using the
-  // app-region CSS property.
-  SetSupportsDraggableRegions(bool supports_draggable_regions);
 
   // Sets whether the frame needs to defer media loading when it is in
   // background.

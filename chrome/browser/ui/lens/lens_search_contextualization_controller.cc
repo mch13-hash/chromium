@@ -5,9 +5,11 @@
 #include "chrome/browser/ui/lens/lens_search_contextualization_controller.h"
 
 #include "base/functional/bind.h"
+#include "base/strings/string_split.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/content_extraction/inner_html.h"
+#include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_image_helper.h"
 #include "chrome/browser/ui/lens/lens_overlay_proto_converter.h"
 #include "chrome/browser/ui/lens/lens_overlay_side_panel_coordinator.h"
@@ -18,8 +20,10 @@
 #include "components/content_extraction/content/browser/inner_text.h"
 #include "components/lens/lens_features.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "pdf/buildflags.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -280,7 +284,7 @@ void LensSearchContextualizationController::ResetState() {
 void LensSearchContextualizationController::SetPageContent(
     std::vector<lens::PageContent> page_contents,
     lens::MimeType primary_content_type) {
-  page_contents_ = std::move(page_contents);
+  page_contents_ = page_contents;
   primary_content_type_ = primary_content_type;
 }
 
@@ -425,19 +429,18 @@ void LensSearchContextualizationController::UpdatePageContextualizationPart2(
           lens_search_controller_->GetTabInterface()->GetContents());
   if (pdf_helper) {
     pdf_helper->GetMostVisiblePageIndex(base::BindOnce(
-        &LensSearchContextualizationController::UpdatePageContextualizationPart3,
+        &LensSearchContextualizationController::UpdatePageContext,
         weak_ptr_factory_.GetWeakPtr(), page_contents, primary_content_type,
         page_count, bitmap));
     return;
   }
 #endif  // BUILDFLAG(ENABLE_PDF)
 
-  UpdatePageContextualizationPart3(page_contents, primary_content_type,
-                                   page_count, bitmap,
-                                   /*most_visible_page=*/std::nullopt);
+  UpdatePageContext(page_contents, primary_content_type, page_count, bitmap,
+                    /*most_visible_page=*/std::nullopt);
 }
 
-void LensSearchContextualizationController::UpdatePageContextualizationPart3(
+void LensSearchContextualizationController::UpdatePageContext(
     std::vector<lens::PageContent> page_contents,
     lens::MimeType primary_content_type,
     std::optional<uint32_t> page_count,
@@ -446,7 +449,7 @@ void LensSearchContextualizationController::UpdatePageContextualizationPart3(
   // It's possible the Lens session could have been closed while updating the
   // page context. Return early and do not run the callback as it should have
   // been cleared.
-  if (state_ == State::kOff || !on_page_context_updated_callback_) {
+  if (state_ == State::kOff) {
     return;
   }
 
@@ -465,7 +468,7 @@ void LensSearchContextualizationController::UpdatePageContextualizationPart3(
         !lens_search_controller_->lens_overlay_controller()
              ->IsOverlayInitializing()) {
       lens_search_controller_->lens_overlay_controller()->ClearAllSelections();
-      GetSearchboxController()->HandleThumbnailCreatedBitmap(bitmap);
+      lens_search_controller_->HandleThumbnailCreatedBitmap(bitmap);
     }
   }
   last_retrieved_most_visible_page_ = most_visible_page;
@@ -502,7 +505,9 @@ void LensSearchContextualizationController::UpdatePageContextualizationPart3(
         // this will happen automatically as a result of the
         // SendUpdatedPageContent call below.
         GetQueryController()->MaybeRestartQueryFlow();
-        std::move(on_page_context_updated_callback_).Run();
+        if (on_page_context_updated_callback_) {
+          std::move(on_page_context_updated_callback_).Run();
+        }
         return;
       }
 
@@ -514,7 +519,9 @@ void LensSearchContextualizationController::UpdatePageContextualizationPart3(
           sending_bitmap ? bitmap : SkBitmap());
 
       // Run the callback that the page context has finished updating.
-      std::move(on_page_context_updated_callback_).Run();
+      if (on_page_context_updated_callback_) {
+        std::move(on_page_context_updated_callback_).Run();
+      }
       return;
     }
   }
@@ -558,7 +565,9 @@ void LensSearchContextualizationController::UpdatePageContextualizationPart3(
       ->OnFollowUpPageContentRetrieved(primary_content_type);
 
   // Run the callback that the page context has finished updating.
-  std::move(on_page_context_updated_callback_).Run();
+  if (on_page_context_updated_callback_) {
+    std::move(on_page_context_updated_callback_).Run();
+  }
 }
 
 void LensSearchContextualizationController::MaybeGetInnerText(
@@ -818,8 +827,11 @@ void LensSearchContextualizationController::CaptureScreenshot(
 
   view->CopyFromSurface(
       /*src_rect=*/gfx::Rect(), /*output_size=*/gfx::Size(),
-      base::BindPostTask(base::SequencedTaskRunner::GetCurrentDefault(),
-                         std::move(callback)));
+      base::BindPostTask(
+          base::SequencedTaskRunner::GetCurrentDefault(),
+          base::BindOnce([](const viz::CopyOutputBitmapWithMetadata& result) {
+            return result.bitmap;
+          }).Then(std::move(callback))));
 }
 
 void LensSearchContextualizationController::DidCaptureScreenshot(
@@ -972,7 +984,7 @@ void LensSearchContextualizationController::
       pdf_current_page, GetUiScaleFactor(), base::TimeTicks::Now());
 
   // Pass the thumbnail to the searchbox controller.
-  GetSearchboxController()->HandleThumbnailCreatedBitmap(bitmap_to_send);
+  lens_search_controller_->HandleThumbnailCreatedBitmap(bitmap_to_send);
 
   state_ = State::kActive;
   TryUpdatePageContextualization(std::move(callback));
@@ -980,7 +992,8 @@ void LensSearchContextualizationController::
 
 void LensSearchContextualizationController::FetchViewportImageBoundingBoxes(
     OnScreenshotTakenCallback callback,
-    const SkBitmap& bitmap) {
+    const viz::CopyOutputBitmapWithMetadata& result) {
+  const SkBitmap& bitmap = result.bitmap;
   content::RenderFrameHost* render_frame_host =
       lens_search_controller_->GetTabInterface()
           ->GetContents()

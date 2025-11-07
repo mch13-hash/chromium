@@ -117,8 +117,8 @@ GURL CreateFilesystemURL(content::RenderFrameHost* rfh) {
 
 GURL CreateFileURL(const base::FilePath::CharType file_name[] =
                        FILE_PATH_LITERAL("title1.html")) {
-  GURL file_url =
-      ui_test_utils::GetTestUrl(base::FilePath(), base::FilePath(file_name));
+  GURL file_url = chrome_test_utils::GetTestUrl(base::FilePath(),
+                                                base::FilePath(file_name));
   EXPECT_EQ(url::kFileScheme, file_url.GetScheme());
 
   return file_url;
@@ -1211,25 +1211,23 @@ IN_PROC_BROWSER_TEST_F(PermissionsSecurityModelHTTPS,
       main_rfh->GetBrowserContext()->GetPermissionController();
   url::Origin origin = url::Origin::Create(GetMainFrameURL());
 
-  SetPermissionControllerOverrideForDevTools(
-      permission_controller, origin, origin, blink::PermissionType::GEOLOCATION,
-      blink::mojom::PermissionStatus::GRANTED);
+  SetPermissionControllerOverride(permission_controller, origin, origin,
+                                  blink::PermissionType::GEOLOCATION,
+                                  blink::mojom::PermissionStatus::GRANTED);
 
   CheckPermissionState(main_rfh, /*notifications_allowed=*/false,
                        /*geolocation_allowed=*/true, /*camera_allowed=*/false);
 
-  SetPermissionControllerOverrideForDevTools(
-      permission_controller, origin, origin,
-      blink::PermissionType::VIDEO_CAPTURE,
-      blink::mojom::PermissionStatus::GRANTED);
+  SetPermissionControllerOverride(permission_controller, origin, origin,
+                                  blink::PermissionType::VIDEO_CAPTURE,
+                                  blink::mojom::PermissionStatus::GRANTED);
 
   CheckPermissionState(main_rfh, /*notifications_allowed=*/false,
                        /*geolocation_allowed=*/true, /*camera_allowed=*/true);
 
-  SetPermissionControllerOverrideForDevTools(
-      permission_controller, origin, origin,
-      blink::PermissionType::NOTIFICATIONS,
-      blink::mojom::PermissionStatus::GRANTED);
+  SetPermissionControllerOverride(permission_controller, origin, origin,
+                                  blink::PermissionType::NOTIFICATIONS,
+                                  blink::mojom::PermissionStatus::GRANTED);
 
   CheckPermissionState(main_rfh, /*notifications_allowed=*/true,
                        /*geolocation_allowed=*/true, /*camera_allowed=*/true);

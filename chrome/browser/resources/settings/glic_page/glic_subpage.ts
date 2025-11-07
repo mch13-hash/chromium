@@ -46,6 +46,7 @@ export enum SettingsGlicPageFeaturePrefName {
   TABSTRIP_BUTTON_ENABLED = 'glic.pinned_to_tabstrip',
   USER_STATUS = 'glic.user_status',
   DEFAULT_TAB_CONTEXT_ENABLED = 'glic.default_tab_context_enabled',
+  WEB_ACTUATION_ENABLED = 'glic.user_enabled_actuation_on_web',
 }
 
 // browser_element_identifiers constants
@@ -186,6 +187,38 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         type: String,
         computed: `computeSpark_()`,
       },
+
+      isEnterpriseAccountDataProtected_: {
+        type: Boolean,
+        computed: `computeIsEnterpriseAccountDataProtected_(prefs.${
+            SettingsGlicPageFeaturePrefName.USER_STATUS}.value)`,
+      },
+
+      webActuationFeatureEnabled_: {
+        type: Boolean,
+        value: () => {
+          return loadTimeData.getBoolean('glicWebActuationFeatureEnabled') &&
+              loadTimeData.getBoolean('glicActorEnabled');
+        },
+      },
+
+      webActuationEnabledExpanded_: {
+        type: Boolean,
+        value: false,
+      },
+
+      webActuationSubLabel_: {
+        type: String,
+        computed: `computeWebActuationSubLabel_(prefs.${
+            SettingsGlicPageFeaturePrefName.USER_STATUS}.value)`,
+      },
+
+      webActuationLearnMoreUrl_: {
+        type: String,
+        computed: `computeWebActuationLearnMoreUrl_(prefs.${
+            SettingsGlicPageFeaturePrefName.USER_STATUS}.value)`,
+
+      },
     };
   }
 
@@ -197,6 +230,10 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
           `prefs.${
               SettingsGlicPageFeaturePrefName
                   .DEFAULT_TAB_CONTEXT_ENABLED}.value)`,
+      'onWebActuationEnabledChanged_(' +
+          `prefs.${
+              SettingsGlicPageFeaturePrefName.WEB_ACTUATION_ENABLED}.value)`,
+
     ];
   }
 
@@ -225,6 +262,11 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   declare private defaultTabAccessSubLabel_: string;
   declare private defaultTabAccessLearnMoreUrl_: string;
   declare private spark_: string;
+  declare private isEnterpriseAccountDataProtected_: boolean;
+  declare private webActuationSubLabel_: string;
+  declare private webActuationLearnMoreUrl_: string;
+  declare private webActuationFeatureEnabled_: boolean;
+  declare private webActuationEnabledExpanded_: boolean;
 
   override async connectedCallback() {
     super.connectedCallback();
@@ -367,6 +409,10 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         (enabled ? '.Enabled' : '.Disabled'));
   }
 
+  private onWebActuationEnabledChanged_(enabled: boolean) {
+    this.webActuationEnabledExpanded_ = enabled;
+  }
+
   private onActivityRowClick_() {
     OpenWindowProxyImpl.getInstance().openUrl(
         this.i18n('glicActivityButtonUrl'));
@@ -402,6 +448,8 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
     this.metricsBrowserProxy_.recordAction(
         AiPageActions
             .GLIC_SHORTCUTS_DEFAULT_TAB_ACCESS_TOGGLE_LEARN_MORE_CLICKED);
+    OpenWindowProxyImpl.getInstance().openUrl(
+        this.defaultTabAccessLearnMoreUrl_);
   }
 
   private onGeminiPersonalContextClick_() {
@@ -425,58 +473,61 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         'Glic.Settings.TabstripButton.' + (enabled ? 'Enabled' : 'Disabled'));
   }
 
+  private computeIsEnterpriseAccountDataProtected_(
+      userStatus: GlicUserStatusPref|undefined): boolean {
+    return this.glicUserStatusCheckFeatureEnabled_ &&
+        !!userStatus?.isEnterpriseAccountDataProtected;
+  }
+
   private computeLocationSubLabel_(userStatus: GlicUserStatusPref|undefined):
       string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicLocationToggleSublabelDataProtected') :
         this.i18n('glicLocationToggleSublabel');
   }
 
   private computeLocationLearnMoreUrl_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         '' :
         this.i18n('glicLocationToggleLearnMoreUrl');
   }
 
   private computeMicrophoneSubLabel_(userStatus: GlicUserStatusPref|undefined):
       string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicMicrophoneToggleSublabelDataProtected') :
         this.i18n('glicMicrophoneToggleSublabel');
   }
 
   private computeTabAccessSubLabel_(userStatus: GlicUserStatusPref|undefined):
       string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicTabAccessToggleSublabelDataProtected') :
         this.i18n('glicTabAccessToggleSublabel');
   }
 
   private computeTabAccessLearnMoreUrl_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicTabAccessToggleLearnMoreUrlDataProtected') :
         this.i18n('glicTabAccessToggleLearnMoreUrl');
   }
 
+  // i18nAdvanced is needed to allow for translating strings containing HTML.
+  // The glicDefaultTabAccessToggleSublabel strings contain <ph> elements which
+  // are translated to <a> tags to provide a link in the label.
   private computeDefaultTabAccessSubLabel_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
-        this.i18n('glicDefaultTabAccessToggleSublabelDataProtected') :
-        this.i18n('glicDefaultTabAccessToggleSublabel');
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
+        this.i18nAdvanced('glicDefaultTabAccessToggleSublabelDataProtected')
+            .toString() :
+        this.i18nAdvanced('glicDefaultTabAccessToggleSublabel').toString();
   }
 
   private computeDefaultTabAccessLearnMoreUrl_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicDefaultTabAccessToggleLearnMoreUrlDataProtected') :
         this.i18n('glicDefaultTabAccessToggleLearnMoreUrl');
   }
@@ -490,6 +541,31 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   // SettingsViewMixin implementation.
   override focusBackButton() {
     this.shadowRoot!.querySelector('settings-subpage')!.focusBackButton();
+  }
+
+  private onWebActuationToggleChange_(event: CustomEvent) {
+    const target = event.target as SettingsToggleButtonElement;
+    const enabled = target.checked;
+    this.metricsBrowserProxy_.recordAction(
+        'Glic.Settings.WebActuation' + (enabled ? '.Enabled' : '.Disabled'));
+  }
+
+  private onWebActuationExpand_() {
+    this.webActuationEnabledExpanded_ = !this.webActuationEnabledExpanded_;
+  }
+
+  private onWebActuationToggleLearnMoreClick_() {
+    this.metricsBrowserProxy_.recordAction(
+        AiPageActions.GLIC_SHORTCUTS_WEB_ACTUATION_TOGGLE_LEARN_MORE_CLICKED);
+    OpenWindowProxyImpl.getInstance().openUrl(this.webActuationLearnMoreUrl_);
+  }
+
+  private computeWebActuationSubLabel_(): string {
+    return this.i18nAdvanced('glicWebActuationToggleSublabel').toString();
+  }
+
+  private computeWebActuationLearnMoreUrl_(): string {
+    return loadTimeData.getString('glicWebActuationToggleLearnMoreUrl');
   }
 }
 

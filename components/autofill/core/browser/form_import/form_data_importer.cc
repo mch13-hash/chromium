@@ -556,11 +556,7 @@ AutofillProfile FormDataImporter::ConstructProfileFromObservedValues(
       candidate_profile.HasRawInfo(ADDRESS_HOME_ZIP_PREFIX);
 
   if (!SetPhoneNumber(candidate_profile, combined_phone)) {
-    candidate_profile.ClearFields({PHONE_HOME_WHOLE_NUMBER});
     import_metadata.phone_import_status = PhoneImportStatus::kInvalid;
-    LOG_AF(import_log_buffer)
-        << LogMessage::kImportAddressProfileFromFormRemoveInvalidValue
-        << "Phone number." << CTag{};
   } else if (!combined_phone.IsEmpty()) {
     import_metadata.phone_import_status = PhoneImportStatus::kValid;
   }
@@ -726,6 +722,11 @@ bool FormDataImporter::ExtractAddressProfileFromSection(
   // we would return false here if it fails, but that breaks the metrics.
   bool finalized_import = candidate_profile.FinalizeAfterImport();
 
+  // Remove invalid values of types that are optional in some countries.
+  // This is done after `FinalizeAfterImport()` to ensure that formatted
+  // invalid values are also removed.
+  RemoveInvalidValues(candidate_profile, import_log_buffer, import_metadata);
+
   // Reject the profile if the validation requirements are not met.
   // `ValidateNonEmptyValues()` goes first to collect metrics.
   bool has_invalid_information =
@@ -822,19 +823,9 @@ bool FormDataImporter::ProcessExtractedCreditCard(
     const std::optional<CreditCard>& extracted_credit_card,
     bool is_credit_card_upstream_enabled,
     ukm::SourceId ukm_source_id) {
-  // If a flow without interactive authentication was completed and the user
-  // didn't update the result that was filled into the form, re-auth opt-in flow
-  // might be offered.
-  if (auto* mandatory_reauth_manager =
-          client_->GetPaymentsAutofillClient()
-              ->GetOrCreatePaymentsMandatoryReauthManager();
-      credit_card_import_type_ != CreditCardImportType::kNewCard &&
-      mandatory_reauth_manager &&
-      mandatory_reauth_manager->ShouldOfferOptin(
-          payment_method_type_if_non_interactive_authentication_flow_completed_)) {
-    payment_method_type_if_non_interactive_authentication_flow_completed_
-        .reset();
-    mandatory_reauth_manager->StartOptInFlow();
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillPrioritizeSaveCardOverMandatoryReauth) &&
+      ProceedWithCardMandatoryReauthOptInIfApplicable()) {
     return true;
   }
 
@@ -843,10 +834,14 @@ bool FormDataImporter::ProcessExtractedCreditCard(
     return false;
   }
 
-  // If a virtual card was extracted from the form, return as we do not do
-  // anything with virtual cards beyond this point.
+  // If a virtual card was extracted from the form, we do not do anything with
+  // virtual cards beyond this point. If
+  // `kAutofillPrioritizeSaveCardOverMandatoryReauth` is enabled, try to offer
+  // mandatory re-auth before returning.
   if (credit_card_import_type_ == CreditCardImportType::kVirtualCard) {
-    return false;
+    return base::FeatureList::IsEnabled(
+               features::kAutofillPrioritizeSaveCardOverMandatoryReauth) &&
+           ProceedWithCardMandatoryReauthOptInIfApplicable();
   }
 
   // Do not offer upload save for google domain.
@@ -871,9 +866,39 @@ bool FormDataImporter::ProcessExtractedCreditCard(
   }
 
   // Proceed with card or CVC saving if applicable.
-  return credit_card_save_manager_->ProceedWithSavingIfApplicable(
-      submitted_form, *extracted_credit_card, credit_card_import_type_,
-      is_credit_card_upstream_enabled, ukm_source_id);
+  if (credit_card_save_manager_->ProceedWithSavingIfApplicable(
+          submitted_form, *extracted_credit_card, credit_card_import_type_,
+          is_credit_card_upstream_enabled, ukm_source_id)) {
+    return true;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillPrioritizeSaveCardOverMandatoryReauth) &&
+      ProceedWithCardMandatoryReauthOptInIfApplicable()) {
+    // Try to offer mandatory re-auth as the last step.
+    return true;
+  }
+
+  return false;
+}
+
+bool FormDataImporter::ProceedWithCardMandatoryReauthOptInIfApplicable() {
+  // If a flow without interactive authentication was completed and the user
+  // didn't update the result that was filled into the form, re-auth opt-in
+  // flow might be offered.
+  if (auto* mandatory_reauth_manager =
+          client_->GetPaymentsAutofillClient()
+              ->GetOrCreatePaymentsMandatoryReauthManager();
+      credit_card_import_type_ != CreditCardImportType::kNewCard &&
+      mandatory_reauth_manager &&
+      mandatory_reauth_manager->ShouldOfferOptin(
+          payment_method_type_if_non_interactive_authentication_flow_completed_)) {
+    payment_method_type_if_non_interactive_authentication_flow_completed_
+        .reset();
+    mandatory_reauth_manager->StartOptInFlow();
+    return true;
+  }
+  return false;
 }
 
 bool FormDataImporter::ProcessIbanImportCandidate(Iban& extracted_iban) {

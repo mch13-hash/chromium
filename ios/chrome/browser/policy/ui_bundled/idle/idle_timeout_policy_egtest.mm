@@ -22,7 +22,6 @@
 #import "ios/chrome/browser/shared/public/snackbar/snackbar_constants.h"
 #import "ios/chrome/browser/signin/model/fake_system_identity.h"
 #import "ios/chrome/common/string_util.h"
-#import "ios/chrome/common/ui/confirmation_alert/constants.h"
 #import "ios/chrome/grit/ios_branded_strings.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/earl_grey/chrome_actions.h"
@@ -40,11 +39,6 @@ using chrome_test_util::ButtonWithAccessibilityLabelId;
 using policy_test_utils::SetPolicy;
 
 namespace {
-
-// Wait a bit more than kSnackbarMessageDuration to avoid flakiness due to
-// time lags.
-constexpr base::TimeDelta kSnackbarDisappearanceTimeout =
-    kSnackbarMessageDuration + base::Seconds(4);
 
 // Returns a matcher for the idle timeout dialog's "Continue using Chrome"
 // button.
@@ -143,17 +137,17 @@ void WaitForIdleTimeoutScreenAndClickContinue() {
 
 // Waits to confirm that the snackbar is shown after idle timeout actions run.
 void VerifyActionsSnackbarShown(int actions_string_id) {
-  id<GREYMatcher> snackbarMatcher = grey_allOf(
+  id<GREYMatcher> snackbar_matcher = grey_allOf(
       chrome_test_util::SnackbarViewMatcher(),
       grey_descendant(grey_text(l10n_util::GetNSString(actions_string_id))),
       nil);
   // Wait for the snackbar to appear.
-  [ChromeEarlGrey testUIElementAppearanceWithMatcher:snackbarMatcher];
+  [ChromeEarlGrey testUIElementAppearanceWithMatcher:snackbar_matcher];
   // Wait for the snackbar to disappear to make sure it is not indefinitely in
   // the view.
   [ChromeEarlGrey
-      waitForUIElementToDisappearWithMatcher:snackbarMatcher
-                                     timeout:kSnackbarDisappearanceTimeout];
+      waitForUIElementToDisappearWithMatcher:snackbar_matcher
+                                     timeout:kIdleTimeoutSnackbarDuration];
 }
 
 // Verifies that the snackbar does not appear within 5 seconds. The condition is

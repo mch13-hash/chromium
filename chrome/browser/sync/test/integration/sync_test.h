@@ -39,7 +39,7 @@
 #if BUILDFLAG(IS_ANDROID)
 #include "components/gcm_driver/instance_id/scoped_use_fake_instance_id_android.h"
 #else
-#include "chrome/browser/extensions/install_verifier.h"
+#include "extensions/browser/install_verifier.h"
 #endif
 
 // The E2E tests are designed to run against real backend servers. To identify
@@ -83,28 +83,6 @@ class FakeOAuth2TokenResponse;
 namespace syncer {
 class SyncServiceImpl;
 }  // namespace syncer
-
-enum class SyncTestMode {
-  kSignInOnly,
-  kSyncTheFeature_WithSyncToSignin,
-  kSyncTheFeature_WithoutSyncToSignin,
-};
-
-// Enables user-readable output from gtest (instead of binary streams).
-std::ostream& operator<<(std::ostream& stream, SyncTestMode sync_test_mode);
-std::string SyncTestModeAsString(SyncTestMode sync_test_mode);
-
-inline auto GetSyncTestModes() {
-#if BUILDFLAG(IS_CHROMEOS)
-  return testing::Values(SyncTestMode::kSyncTheFeature_WithoutSyncToSignin);
-#elif BUILDFLAG(IS_ANDROID)
-  return testing::Values(SyncTestMode::kSignInOnly);
-#else
-  return testing::Values(SyncTestMode::kSignInOnly,
-                         SyncTestMode::kSyncTheFeature_WithSyncToSignin,
-                         SyncTestMode::kSyncTheFeature_WithoutSyncToSignin);
-#endif
-}
 
 // This is the base class for integration tests for all sync data types. Derived
 // classes must be defined for each sync data type. Individual tests are defined
@@ -158,9 +136,6 @@ class SyncTest : public PlatformBrowserTest,
     kSyncTransportOnly,
     kSyncTheFeature,
   };
-
-  // Maps SyncTestMode to SetupSyncMode.
-  static SyncTest::SetupSyncMode GetSetupSyncMode(SyncTestMode sync_test_mode);
 
   // A SyncTest must be associated with a particular test type.
   explicit SyncTest(TestType test_type);
@@ -228,6 +203,11 @@ class SyncTest : public PlatformBrowserTest,
   // the SyncServiceImpl at the given |index|.
   syncer::UserSelectableTypeSet GetRegisteredSelectableTypes(int index);
 
+  // Returns the SetupSyncMode to be used for setting up sync.
+  // Subclasses should override this method to specify the desired mode, often
+  // in conjunction with test parameterization.
+  virtual SetupSyncMode GetSetupSyncMode() const;
+
   // Returns a pointer to the sync profile that is used to verify changes to
   // individual sync profiles. Callee owns the object and manages its lifetime.
   Profile* verifier();
@@ -244,16 +224,20 @@ class SyncTest : public PlatformBrowserTest,
   [[nodiscard]] virtual bool SetupClients();
 
   // Initializes sync clients and waits for different stages to complete
-  // depending on |setup_mode|.
+  // depending on `wait_condition`.
   [[nodiscard]] bool SetupSync(
-      SyncWaitCondition wait_condition = WAIT_FOR_COMMITS_TO_COMPLETE,
-      SetupSyncMode setup_mode = kSyncTheFeature);
+      SyncWaitCondition wait_condition = WAIT_FOR_COMMITS_TO_COMPLETE);
   [[nodiscard]] bool SetupSync(
       SyncTestAccount account,
+      SyncWaitCondition wait_condition = WAIT_FOR_COMMITS_TO_COMPLETE);
+  // Should only be used if SetupSync() doesn't work, i.e. `setup_mode` needs to
+  // be changed during the test.
+  [[nodiscard]] bool SetupSyncWithMode(
+      SetupSyncMode setup_mode,
       SyncWaitCondition wait_condition = WAIT_FOR_COMMITS_TO_COMPLETE,
-      SetupSyncMode setup_mode = kSyncTheFeature);
+      SyncTestAccount account = SyncTestAccount::kDefaultAccount);
 
-  // This is similar to click the reset button on chrome.google.com/sync.
+  // This is similar to click the reset button on chrome.google.com/data.
   // Only takes effect when running with external servers.
   // Please call this before setting anything.
   [[nodiscard]] bool ResetSyncForPrimaryAccount();
@@ -361,9 +345,9 @@ class SyncTest : public PlatformBrowserTest,
   void InitializeProfile(int index, Profile* profile);
 
   // Internal routine for setting up sync.
-  [[nodiscard]] bool SetupSyncInternal(SyncWaitCondition wait_condition,
-                                       SyncTestAccount account,
-                                       SetupSyncMode setup_mode);
+  [[nodiscard]] bool SetupSyncInternal(SetupSyncMode setup_mode,
+                                       SyncWaitCondition wait_condition,
+                                       SyncTestAccount account);
 
   // Used to determine whether ARC_PACKAGE data type needs to be enabled. This
   // is applicable on ChromeOS-Ash platform only.
@@ -465,6 +449,22 @@ class SyncTest : public PlatformBrowserTest,
       profile_manager_observation_{this};
   base::WeakPtrFactory<SyncTest> weak_ptr_factory_{this};
 };
+
+inline auto GetSyncTestModes() {
+#if BUILDFLAG(IS_CHROMEOS)
+  return testing::Values(SyncTest::SetupSyncMode::kSyncTheFeature);
+#elif BUILDFLAG(IS_ANDROID)
+  return testing::Values(SyncTest::SetupSyncMode::kSyncTransportOnly);
+#else
+  return testing::Values(SyncTest::SetupSyncMode::kSyncTransportOnly,
+                         SyncTest::SetupSyncMode::kSyncTheFeature);
+#endif
+}
+
+// Enables user-readable output from gtest (instead of binary streams).
+std::ostream& operator<<(std::ostream& stream,
+                         SyncTest::SetupSyncMode sync_test_mode);
+std::string SetupSyncModeAsString(SyncTest::SetupSyncMode sync_test_mode);
 
 syncer::DataTypeSet AllowedTypesInStandaloneTransportMode();
 

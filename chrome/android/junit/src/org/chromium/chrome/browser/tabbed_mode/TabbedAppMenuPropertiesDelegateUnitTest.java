@@ -13,6 +13,7 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -67,7 +68,6 @@ import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.bookmarks.PowerBookmarkUtils;
 import org.chromium.chrome.browser.commerce.ShoppingServiceFactory;
 import org.chromium.chrome.browser.device.DeviceConditions;
-import org.chromium.chrome.browser.device.ShadowDeviceConditions;
 import org.chromium.chrome.browser.enterprise.util.ManagedBrowserUtils;
 import org.chromium.chrome.browser.enterprise.util.ManagedBrowserUtilsJni;
 import org.chromium.chrome.browser.feed.FeedFeatures;
@@ -111,6 +111,7 @@ import org.chromium.chrome.browser.translate.TranslateBridgeJni;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuDelegate;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuHandler;
 import org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties;
+import org.chromium.chrome.browser.ui.appmenu.AppMenuItemWithSubmenuProperties;
 import org.chromium.chrome.browser.ui.extensions.ExtensionsBuildflags;
 import org.chromium.chrome.browser.ui.extensions.FakeExtensionUiBackendRule;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
@@ -170,7 +171,8 @@ import java.util.List;
 })
 @EnableFeatures({
     ChromeFeatureList.TAB_GROUP_PARITY_BOTTOM_SHEET_ANDROID,
-    ChromeFeatureList.TAB_GROUP_ENTRY_POINTS_ANDROID
+    ChromeFeatureList.TAB_GROUP_ENTRY_POINTS_ANDROID,
+    ChromeFeatureList.SUBMENUS_IN_APP_MENU
 })
 public class TabbedAppMenuPropertiesDelegateUnitTest {
     // Constants defining flags that determines multi-window menu items visibility.
@@ -312,7 +314,6 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         FeedServiceBridgeJni.setInstanceForTesting(mFeedServiceBridgeJniMock);
         when(mSyncService.getAuthError())
                 .thenReturn(new GoogleServiceAuthError(GoogleServiceAuthErrorState.NONE));
-        when(mSyncService.hasUnrecoverableError()).thenReturn(false);
         when(mSyncService.isEngineInitialized()).thenReturn(true);
         when(mSyncService.isPassphraseRequiredForPreferredDataTypes()).thenReturn(false);
         when(mSyncService.isTrustedVaultKeyRequiredForPreferredDataTypes()).thenReturn(false);
@@ -404,6 +405,35 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
                 "Populated menu items were:" + getMenuTitles(modelList),
                 actualItems,
                 Matchers.containsInAnyOrder(expectedItems));
+    }
+
+    private void assertHasSubMenuItemIds(
+            MVCListAdapter.ListItem parentItem, Integer... expectedItems) {
+        assertNotNull("Parent item is null", parentItem);
+        assertTrue(
+                "Parent item is not a submenu",
+                parentItem.model.containsKey(AppMenuItemWithSubmenuProperties.SUBMENU_ITEMS));
+        List<MVCListAdapter.ListItem> subItems =
+                parentItem.model.get(AppMenuItemWithSubmenuProperties.SUBMENU_ITEMS);
+        assertNotNull("Submenu item list is null", subItems);
+
+        List<Integer> actualItems = new ArrayList<>();
+        for (MVCListAdapter.ListItem item : subItems) {
+            actualItems.add(item.model.get(AppMenuItemProperties.MENU_ITEM_ID));
+        }
+
+        // Create a new ModelList and add the sub-items to it just for the error message.
+        MVCListAdapter.ModelList subModelList = new MVCListAdapter.ModelList();
+        if (subItems != null) {
+            for (MVCListAdapter.ListItem item : subItems) {
+                subModelList.add(item);
+            }
+        }
+
+        assertThat(
+                "Populated submenu items were:" + getMenuTitles(subModelList),
+                actualItems,
+                Matchers.contains(expectedItems));
     }
 
     private void assertMenuTitlesAreEqual(
@@ -564,7 +594,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
                                 R.id.help_id));
 
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
         assertMenuItemsAreEqual(modelList, expectedItems.toArray(new Integer[0]));
     }
@@ -608,7 +638,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
                                 R.id.help_id));
 
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
         assertMenuItemsAreEqual(modelList, expectedItems.toArray(new Integer[0]));
     }
@@ -656,7 +686,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         expectedItems.add(R.id.recent_tabs_menu_id);
         expectedTitles.add(R.string.menu_recent_tabs);
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
             expectedTitles.add(R.string.menu_extensions);
         }
         expectedItems.add(R.id.divider_line_id);
@@ -712,7 +742,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         testPageMenuItems_RegularPage(/* shouldShowNewIncognitoTab= */ false);
     }
 
-    private void testPageMenuItems_IncognitoPage(boolean shouldShowNewTab) {
+    private void testPageMenuItems_IncognitoPage(boolean isIncognitoWindow) {
         setUpMocksForPageMenu();
         when(mTab.isIncognito()).thenReturn(true);
         when(mTabModelSelector.getCurrentModel()).thenReturn(mIncognitoTabModel);
@@ -727,7 +757,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         expectedItems.add(R.id.icon_row_menu_id);
         expectedTitles.add(0);
 
-        if (shouldShowNewTab) {
+        if (!isIncognitoWindow) {
             expectedItems.add(R.id.new_tab_menu_id);
             expectedTitles.add(R.string.menu_new_tab);
         }
@@ -740,14 +770,16 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         expectedTitles.add(R.string.menu_pin_tab);
         expectedItems.add(R.id.divider_line_id);
         expectedTitles.add(0);
-        expectedItems.add(R.id.open_history_menu_id);
-        expectedTitles.add(R.string.menu_history);
+        if (!isIncognitoWindow) {
+            expectedItems.add(R.id.open_history_menu_id);
+            expectedTitles.add(R.string.menu_history);
+        }
         expectedItems.add(R.id.downloads_menu_id);
         expectedTitles.add(R.string.menu_downloads);
         expectedItems.add(R.id.all_bookmarks_menu_id);
         expectedTitles.add(R.string.menu_bookmarks);
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
             expectedTitles.add(R.string.menu_extensions);
         }
         expectedItems.add(R.id.divider_line_id);
@@ -788,7 +820,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
     @DisableFeatures({ChromeFeatureList.ANDROID_OPEN_INCOGNITO_AS_WINDOW})
     @EnableFeatures(ChromeFeatureList.ANDROID_PINNED_TABS)
     public void testPageMenuItems_Phone_IncognitoPage() {
-        testPageMenuItems_IncognitoPage(/* shouldShowNewTab= */ true);
+        testPageMenuItems_IncognitoPage(/* isIncognitoWindow= */ false);
     }
 
     @Test
@@ -798,7 +830,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         ChromeFeatureList.ANDROID_OPEN_INCOGNITO_AS_WINDOW
     })
     public void testPageMenuItems_Phone_IncognitoPage_incognitoWindowEnabled() {
-        testPageMenuItems_IncognitoPage(/* shouldShowNewTab= */ false);
+        testPageMenuItems_IncognitoPage(/* isIncognitoWindow= */ true);
     }
 
     @Test
@@ -841,7 +873,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         expectedItems.add(R.id.recent_tabs_menu_id);
         expectedTitles.add(R.string.menu_recent_tabs);
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
             expectedTitles.add(R.string.menu_extensions);
         }
         expectedItems.add(R.id.divider_line_id);
@@ -919,7 +951,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
                                 R.id.preferences_id,
                                 R.id.help_id));
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
         assertMenuItemsAreEqual(modelList, expectedItems.toArray(new Integer[0]));
     }
@@ -975,7 +1007,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
                                 R.id.preferences_id,
                                 R.id.help_id));
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
         assertMenuItemsHaveIcons(modelList, expectedItems.toArray(new Integer[0]));
     }
@@ -1271,7 +1303,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
             expectedItems.add(R.id.request_desktop_site_id);
         }
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
 
         assertMenuItemsAreEqual(modelList, expectedItems.toArray(new Integer[0]));
@@ -1297,7 +1329,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
         // Setup no wifi condition, and "only on wifi" user option.
         DeviceConditions noWifi =
                 new DeviceConditions(false, 75, ConnectionType.CONNECTION_2G, false, false, true);
-        ShadowDeviceConditions.setCurrentConditions(noWifi);
+        DeviceConditions.setForTesting(noWifi);
         when(mPrefService.getBoolean(Pref.ACCESSIBILITY_IMAGE_LABELS_ONLY_ON_WIFI))
                 .thenReturn(true);
 
@@ -1350,7 +1382,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
             expectedItems.add(R.id.request_desktop_site_id);
         }
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
 
         assertMenuItemsAreEqual(modelList, expectedItems.toArray(new Integer[0]));
@@ -1402,7 +1434,7 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
             expectedItems.add(R.id.request_desktop_site_id);
         }
         if (ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
-            expectedItems.add(R.id.extensions_menu_id);
+            expectedItems.add(R.id.extensions_parent_menu_id);
         }
 
         assertMenuItemsAreEqual(modelList, expectedItems.toArray(new Integer[0]));
@@ -2338,6 +2370,88 @@ public class TabbedAppMenuPropertiesDelegateUnitTest {
             }
         }
         return false;
+    }
+
+    @Test
+    @Config(qualifiers = "sw320dp")
+    public void testPageMenuItems_ExtensionsSubmenu() {
+        if (!ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
+            return;
+        }
+
+        setUpMocksForPageMenu();
+        setMenuOptions(new MenuOptions());
+        doReturn(true).when(mTabbedAppMenuPropertiesDelegate).shouldShowIconBeforeItem();
+
+        assertEquals(MenuGroup.PAGE_MENU, mTabbedAppMenuPropertiesDelegate.getMenuGroup());
+        MVCListAdapter.ModelList modelList = mTabbedAppMenuPropertiesDelegate.getMenuItems();
+
+        MVCListAdapter.ListItem parentItem =
+                findItemById(modelList, R.id.extensions_parent_menu_id);
+        assertNotNull("Extensions parent menu item not found.", parentItem);
+
+        assertEquals(
+                ContextUtils.getApplicationContext().getString(R.string.menu_extensions),
+                parentItem.model.get(AppMenuItemProperties.TITLE));
+        assertNotNull(
+                "Parent extension item should have an icon.",
+                parentItem.model.get(AppMenuItemProperties.ICON));
+
+        assertHasSubMenuItemIds(
+                parentItem, R.id.extensions_menu_id, R.id.extensions_webstore_menu_id);
+
+        List<MVCListAdapter.ListItem> subItems =
+                parentItem.model.get(AppMenuItemWithSubmenuProperties.SUBMENU_ITEMS);
+
+        MVCListAdapter.ListItem manageItem = subItems.get(0);
+        assertEquals(
+                R.id.extensions_menu_id, manageItem.model.get(AppMenuItemProperties.MENU_ITEM_ID));
+        assertEquals(
+                ContextUtils.getApplicationContext().getString(R.string.menu_manage_extensions),
+                manageItem.model.get(AppMenuItemProperties.TITLE));
+        assertNotNull(
+                "Manage Extensions item should have an icon.",
+                manageItem.model.get(AppMenuItemProperties.ICON));
+
+        MVCListAdapter.ListItem webstoreItem = subItems.get(1);
+        assertEquals(
+                R.id.extensions_webstore_menu_id,
+                webstoreItem.model.get(AppMenuItemProperties.MENU_ITEM_ID));
+        assertEquals(
+                ContextUtils.getApplicationContext().getString(R.string.menu_chrome_webstore),
+                webstoreItem.model.get(AppMenuItemProperties.TITLE));
+        assertNotNull(
+                "Visit Chrome Web Store item should have an icon.",
+                webstoreItem.model.get(AppMenuItemProperties.ICON));
+    }
+
+    @Test
+    @Config(qualifiers = "sw320dp")
+    @DisableFeatures({ChromeFeatureList.SUBMENUS_IN_APP_MENU})
+    public void testPageMenuItems_ExtensionsItem_SubmenusDisabled() {
+        if (!ExtensionsBuildflags.ENABLE_DESKTOP_ANDROID_EXTENSIONS) {
+            return;
+        }
+
+        setUpMocksForPageMenu();
+        setMenuOptions(new MenuOptions());
+
+        assertEquals(MenuGroup.PAGE_MENU, mTabbedAppMenuPropertiesDelegate.getMenuGroup());
+        MVCListAdapter.ModelList modelList = mTabbedAppMenuPropertiesDelegate.getMenuItems();
+
+        MVCListAdapter.ListItem parentItem =
+                findItemById(modelList, R.id.extensions_parent_menu_id);
+        assertNull("Extensions parent menu item should NOT be present.", parentItem);
+
+        MVCListAdapter.ListItem originalItem = findItemById(modelList, R.id.extensions_menu_id);
+        assertNotNull("Original extensions menu item should be present.", originalItem);
+
+        assertFalse(
+                "Original extensions item should not have submenu properties.",
+                originalItem.model.containsKey(AppMenuItemWithSubmenuProperties.SUBMENU_ITEMS));
+        assertEquals(
+                ContextUtils.getApplicationContext().getString(R.string.menu_extensions),
+                originalItem.model.get(AppMenuItemProperties.TITLE));
     }
 
     @Test

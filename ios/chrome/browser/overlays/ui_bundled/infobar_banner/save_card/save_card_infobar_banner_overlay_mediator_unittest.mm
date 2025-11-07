@@ -20,6 +20,7 @@
 #import "ios/chrome/browser/infobars/ui_bundled/banners/infobar_banner_delegate.h"
 #import "ios/chrome/browser/infobars/ui_bundled/banners/test/fake_infobar_banner_consumer.h"
 #import "ios/chrome/browser/overlays/model/public/default/default_infobar_overlay_request_config.h"
+#import "ios/chrome/browser/overlays/ui_bundled/infobar_banner/save_card/save_card_infobar_banner_overlay_mediator+Testing.h"
 #import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/shared/public/snackbar/snackbar_message.h"
 #import "ios/chrome/browser/shared/public/snackbar/snackbar_message_action.h"
@@ -318,9 +319,11 @@ TEST_F(SaveCardInfobarBannerOverlayMediatorTest, ShowSnackbarForLocalSave) {
       l10n_util::GetStringUTF16(IDS_IOS_AUTOFILL_SAVE_CARD_GOT_IT));
 
   // Set up expectation for the snackbar message.
-  OCMExpect([mock_snackbar_commands_handler_
+  OCMExpect(([mock_snackbar_commands_handler_
       showSnackbarMessage:[OCMArg checkWithBlock:^BOOL(
                                       SnackbarMessage* message) {
+        NSString* expectedAccessibilityLabel = expectedTitleText;
+        EXPECT_NSEQ(expectedAccessibilityLabel, message.accessibilityLabel);
         EXPECT_NSEQ(expectedTitleText, message.title);
         EXPECT_NSEQ(expectedSubtitleText, message.subtitle);
         // Check that action is not nil, "Got it" button is present.
@@ -331,9 +334,33 @@ TEST_F(SaveCardInfobarBannerOverlayMediatorTest, ShowSnackbarForLocalSave) {
           EXPECT_EQ(message.action.handler, nil);
         }
         return YES;
-      }]]);
+      }]]));
 
   [mediator_ bannerInfobarButtonWasPressed:nil];
+}
+
+// Tests that an accessibility notification is posted when a card is saved
+// locally.
+TEST_F(SaveCardInfobarBannerOverlayMediatorTest,
+       PostAccessibilityNotificationForLocalSave) {
+  InitInfobar(/*for_upload=*/false);
+  EXPECT_CALL(*delegate_, UpdateAndAccept(_, _, _, _))
+      .WillOnce(testing::Return(true));
+
+  __block BOOL notificationWasPosted = NO;
+  __block UIAccessibilityNotifications postedNotification =
+      UIAccessibilityAnnouncementNotification;
+
+  mediator_.accessibilityNotificationPoster =
+      ^(UIAccessibilityNotifications notification, id argument) {
+        postedNotification = notification;
+        notificationWasPosted = YES;
+      };
+
+  [mediator_ bannerInfobarButtonWasPressed:nil];
+
+  EXPECT_TRUE(notificationWasPosted);
+  EXPECT_EQ(postedNotification, UIAccessibilityScreenChangedNotification);
 }
 
 // Tests that no snackbar is shown when the save is for upload.
@@ -381,6 +408,38 @@ class SaveCardInfobarBannerOverlayMediatorMetricsTest
                          ".Banner.NumStrikes.0.NoFixFlow", suffix});
   }
 };
+
+// Tests that the "Shown" metrics for the save card prompt offer are correctly
+// recorded when the infobar banner is shown.
+TEST_P(SaveCardInfobarBannerOverlayMediatorMetricsTest, LogsOfferBannerShown) {
+  base::HistogramTester histogram_tester;
+  const auto& test_case = GetParam();
+  InitInfobar(test_case.is_for_upload, test_case.card_save_type);
+
+  std::string_view destination = test_case.is_for_upload ? ".Server" : ".Local";
+  std::string_view suffix;
+  switch (test_case.card_save_type) {
+    case autofill::payments::PaymentsAutofillClient::CardSaveType::
+        kCardSaveWithCvc:
+      suffix = ".SavingWithCvc";
+      break;
+    case autofill::payments::PaymentsAutofillClient::CardSaveType::
+        kCardSaveOnly:
+      suffix = "";
+      break;
+    case autofill::payments::PaymentsAutofillClient::CardSaveType::kCvcSaveOnly:
+      FAIL() << "This test case shouldn't exist for the banner UI.";
+  }
+
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat({"Autofill.SaveCreditCardPromptOffer.IOS", destination,
+                    ".Banner", suffix}),
+      SaveCardPromptOffer::kShown, 1);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat({"Autofill.SaveCreditCardPromptOffer.IOS", destination,
+                    ".Banner.NumStrikes.0.NoFixFlow", suffix}),
+      SaveCardPromptOffer::kShown, 1);
+}
 
 TEST_P(SaveCardInfobarBannerOverlayMediatorMetricsTest, LogsBannerShown) {
   base::HistogramTester histogram_tester;

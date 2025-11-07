@@ -25,6 +25,7 @@
 #import "components/commerce/core/price_tracking_utils.h"
 #import "components/commerce/core/proto/price_tracking.pb.h"
 #import "components/commerce/core/shopping_service.h"
+#import "components/ntp_tiles/pref_names.h"
 #import "components/optimization_guide/core/hints/optimization_guide_decision.h"
 #import "components/optimization_guide/proto/common_types.pb.h"
 #import "components/optimization_guide/proto/hints.pb.h"
@@ -46,6 +47,8 @@
 #import "ios/chrome/browser/content_suggestions/ui_bundled/shop_card/shop_card_data.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_commands.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_constants.h"
+#import "ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_consumer.h"
+#import "ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_consumer_source.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_helper_delegate.h"
 #import "ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_item.h"
 #import "ios/chrome/browser/favicon/model/favicon_loader.h"
@@ -220,8 +223,9 @@ void ConfigureTabResumptionItemForShopCard(
       decisionWithMetadata.metadata
           .ParsedMetadata<commerce::PriceTrackingData>();
 
-  if (base::Contains(commerce::kShopCardVariation.Get(),
-                     commerce::kShopCardArm3) &&
+  if ((base::Contains(commerce::kShopCardVariation.Get(),
+                      commerce::kShopCardArm3) ||
+       commerce::kShopCardVariation.Get() == commerce::kShopCardArm6) &&
       HasPriceDropDataForTabResumption(price_tracking_data)) {
     item.shopCardData = [[ShopCardData alloc] init];
     item.shopCardData.shopCardItemType = ShopCardItemType::kPriceDropOnTab;
@@ -318,9 +322,17 @@ class TabResumptionMediatorProxy {
       optimization_guide::proto::RequestContext request_context,
       optimization_guide::OnDemandOptimizationGuideDecisionRepeatingCallback
           callback) {
-    optimizationGuideService->CanApplyOptimizationOnDemand(
-        {url}, {optimization_type}, request_context, std::move(callback),
-        std::nullopt);
+    // It is possible for this method to be called with a null pointer as
+    // the some blocks end up calling those methods after -disconnect has
+    // been called on the TabResumptionMediator (which clears all the C++
+    // pointers).
+    //
+    // See https://crbug.com/457339557 for a sample crash.
+    if (optimizationGuideService) {
+      optimizationGuideService->CanApplyOptimizationOnDemand(
+          {url}, {optimization_type}, request_context, std::move(callback),
+          std::nullopt);
+    }
   }
 };
 
@@ -330,7 +342,8 @@ class TabResumptionMediatorProxy {
                                      StartSurfaceRecentTabObserving,
                                      SyncedSessionsObserver,
                                      SyncObserverModelBridge,
-                                     TabResumptionCommands>
+                                     TabResumptionCommands,
+                                     TabResumptionConsumerSource>
 // readwrite override.
 @property(nonatomic, strong, readwrite) TabResumptionItem* itemConfig;
 
@@ -350,24 +363,34 @@ class TabResumptionMediatorProxy {
   // returned twice, or to ignore update on obsolete items.
   TabResumptionItem* _pendingItem;
 
+  // Weak pointer to the SceneState.
+  __weak SceneState* _sceneState;
+
+  // LINT.IfChange(Dependencies)
   // The owning Browser.
-  raw_ptr<Browser, DanglingUntriaged> _browser;
-  raw_ptr<PrefService, DanglingUntriaged> _profilePrefs;
-  SceneState* _sceneState;
+  raw_ptr<Browser> _browser;
+  raw_ptr<PrefService> _profilePrefs;
   // Loads favicons.
   raw_ptr<FaviconLoader> _faviconLoader;
   // Browser Agent that manages the most recent WebState.
   raw_ptr<StartSurfaceRecentTabBrowserAgent> _recentTabBrowserAgent;
   // KeyedService responsible session sync.
-  raw_ptr<sync_sessions::SessionSyncService, DanglingUntriaged>
-      _sessionSyncService;
+  raw_ptr<sync_sessions::SessionSyncService> _sessionSyncService;
   // KeyedService responsible for sync state.
-  raw_ptr<syncer::SyncService, DanglingUntriaged> _syncService;
-  raw_ptr<UrlLoadingBrowserAgent, DanglingUntriaged> _URLLoadingBrowserAgent;
-  raw_ptr<WebStateList, DanglingUntriaged> _webStateList;
+  raw_ptr<syncer::SyncService> _syncService;
+  raw_ptr<UrlLoadingBrowserAgent> _URLLoadingBrowserAgent;
+  raw_ptr<WebStateList> _webStateList;
   // KeyedService for Salient images.
-  raw_ptr<page_image_service::ImageService, DanglingUntriaged>
-      _pageImageService;
+  raw_ptr<page_image_service::ImageService> _pageImageService;
+  // Other KeyedServices.
+  raw_ptr<OptimizationGuideService> _optimizationGuideService;
+  raw_ptr<ImpressionLimitService> _impressionLimitService;
+  raw_ptr<commerce::ShoppingService> _shoppingService;
+  raw_ptr<bookmarks::BookmarkModel> _bookmarkModel;
+  raw_ptr<PushNotificationService> _pushNotificationService;
+  raw_ptr<AuthenticationService> _authenticationService;
+  // LINT.ThenChange(//ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_mediator.mm:ClearDependencies)
+
   // Observer bridge for mediator to listen to
   // StartSurfaceRecentTabObserverBridge.
   std::unique_ptr<StartSurfaceRecentTabObserverBridge> _startSurfaceObserver;
@@ -383,12 +406,7 @@ class TabResumptionMediatorProxy {
   // Whether the item is currently presented as Top Module by Magic Stack.
   BOOL _currentlyTopModule;
   PrefBackedBoolean* _tabResumptionDisabled;
-  raw_ptr<OptimizationGuideService> _optimizationGuideService;
-  raw_ptr<ImpressionLimitService> _impressionLimitService;
-  raw_ptr<commerce::ShoppingService> _shoppingService;
-  raw_ptr<bookmarks::BookmarkModel> _bookmarkModel;
-  raw_ptr<PushNotificationService> _pushNotificationService;
-  raw_ptr<AuthenticationService> _authenticationService;
+  id<TabResumptionConsumer> _consumer;
 }
 
 - (instancetype)
@@ -414,8 +432,7 @@ class TabResumptionMediatorProxy {
 
     _tabResumptionDisabled = [[PrefBackedBoolean alloc]
         initWithPrefService:_profilePrefs
-                   prefName:
-                       prefs::kHomeCustomizationMagicStackTabResumptionEnabled];
+                   prefName:ntp_tiles::prefs::kTabResumptionHomeModuleEnabled];
     [_tabResumptionDisabled setObserver:self];
 
     ProfileIOS* profile = _browser->GetProfile();
@@ -432,13 +449,15 @@ class TabResumptionMediatorProxy {
     _pageImageService = PageImageServiceFactory::GetForProfile(profile);
     _imageFetcher = std::make_unique<image_fetcher::ImageDataFetcher>(
         profile->GetSharedURLLoaderFactory());
-    _syncedSessionsObserverBridge.reset(
-        new synced_sessions::SyncedSessionsObserverBridge(self,
-                                                          _sessionSyncService));
+    _syncedSessionsObserverBridge =
+        std::make_unique<synced_sessions::SyncedSessionsObserverBridge>(
+            self, _sessionSyncService);
 
-    _syncObserverModelBridge.reset(new SyncObserverBridge(self, _syncService));
-    _identityManagerObserverBridge.reset(
-        new signin::IdentityManagerObserverBridge(identityManager, self));
+    _syncObserverModelBridge =
+        std::make_unique<SyncObserverBridge>(self, _syncService);
+    _identityManagerObserverBridge =
+        std::make_unique<signin::IdentityManagerObserverBridge>(identityManager,
+                                                                self);
     if (optimizationGuideService) {
       _optimizationGuideService = optimizationGuideService;
       _optimizationGuideService->RegisterOptimizationTypes(
@@ -459,16 +478,30 @@ class TabResumptionMediatorProxy {
     _recentTabBrowserAgent->RemoveObserver(_startSurfaceObserver.get());
     _startSurfaceObserver.reset();
   }
-  _recentTabBrowserAgent = nullptr;
   _syncObserverModelBridge.reset();
   _identityManagerObserverBridge.reset();
   [_tabResumptionDisabled stop];
   [_tabResumptionDisabled setObserver:nil];
   _tabResumptionDisabled = nil;
-  _shoppingService = nil;
-  _bookmarkModel = nil;
-  _pushNotificationService = nil;
-  _authenticationService = nil;
+
+  // LINT.IfChange(ClearDependencies)
+  // Clear all pointers to C++ services.
+  _browser = nullptr;
+  _profilePrefs = nullptr;
+  _faviconLoader = nullptr;
+  _recentTabBrowserAgent = nullptr;
+  _sessionSyncService = nullptr;
+  _syncService = nullptr;
+  _URLLoadingBrowserAgent = nullptr;
+  _webStateList = nullptr;
+  _pageImageService = nullptr;
+  _optimizationGuideService = nullptr;
+  _impressionLimitService = nullptr;
+  _shoppingService = nullptr;
+  _bookmarkModel = nullptr;
+  _pushNotificationService = nullptr;
+  _authenticationService = nullptr;
+  // LINT.ThenChange(//ios/chrome/browser/content_suggestions/ui_bundled/tab_resumption/tab_resumption_mediator.mm:Dependencies)
 }
 
 #pragma mark - Public methods
@@ -543,7 +576,7 @@ class TabResumptionMediatorProxy {
   id<SystemIdentity> identity =
       _authenticationService->GetPrimaryIdentity(signin::ConsentLevel::kSignin);
   _pushNotificationService->SetPreference(
-      identity.gaiaID, PushNotificationClientId::kCommerce, true);
+      identity.gaiaId, PushNotificationClientId::kCommerce, true);
 
   const bookmarks::BookmarkNode* bookmark =
       _bookmarkModel->GetMostRecentlyAddedUserNodeForURL(item.tabURL);
@@ -763,8 +796,12 @@ class TabResumptionMediatorProxy {
       titleWasUpdated:(NSString*)title {
 }
 
-#pragma mark - Private
+#pragma mark - TabResumptionConsumerSource
+- (void)addConsumer:(id<TabResumptionConsumer>)consumer {
+  _consumer = consumer;
+}
 
+#pragma mark - Private
 // Fetches the item to display from the model.
 - (void)fetchLastTabResumptionItem {
   if (tab_resumption_prefs::IsTabResumptionDisabled(_profilePrefs)) {
@@ -830,6 +867,8 @@ class TabResumptionMediatorProxy {
     }
   }
 
+  item.consumerSource = self;
+
   if (base::Contains(commerce::kShopCardVariation.Get(),
                      commerce::kShopCardArm3) ||
       commerce::kShopCardVariation.Get() == commerce::kShopCardArm4) {
@@ -841,9 +880,13 @@ class TabResumptionMediatorProxy {
           if (!strongSelf || !strongSelf.delegate) {
             return;
           }
-          [strongSelf onPriceTrackedBookmarksReceived:subscriptions
-                                                  url:url
-                                                 item:item];
+          if (subscriptions.empty()) {
+            [strongSelf fetchImageForItem:item];
+          } else {
+            [strongSelf onPriceTrackedBookmarksReceived:subscriptions
+                                                    url:url
+                                                   item:item];
+          }
         }));
   } else {
     // Fetch the favicon.
@@ -896,7 +939,8 @@ class TabResumptionMediatorProxy {
   if (item.shopCardData.productImageURL.has_value()) {
     [self
         salientImageURLReceived:GURL(item.shopCardData.productImageURL.value())
-                        forItem:item];
+                        forItem:item
+                    updateImage:NO];
   } else {
     if (item.itemType == kMostRecentTab) {
       [self fetchSnapshotForItem:item];
@@ -905,6 +949,47 @@ class TabResumptionMediatorProxy {
     }
   }
   [self fetchFaviconForItem:item];
+}
+
+// Arm 6 delays acquiring the price drop (if it exists) and the
+// product image and updates the card when this data is availalbe.
+// This reduces the overall latency of the card.
+- (void)fetchPriceDropIfApplicable:(TabResumptionItem*)item {
+  if (commerce::kShopCardVariation.Get() != commerce::kShopCardArm6) {
+    return;
+  }
+  __weak __typeof(self) weakSelf = self;
+  TabResumptionMediatorProxy::CanApplyOptimizationOnDemand(
+      _optimizationGuideService, item.tabURL,
+      optimization_guide::proto::PRICE_TRACKING,
+      optimization_guide::proto::RequestContext::CONTEXT_SHOP_CARD,
+      base::BindRepeating(^(
+          const GURL& url,
+          const base::flat_map<
+              optimization_guide::proto::OptimizationType,
+              optimization_guide::OptimizationGuideDecisionWithMetadata>&
+              decisions) {
+        TabResumptionMediator* strongSelf = weakSelf;
+        if (!strongSelf) {
+          return;
+        }
+
+        ConfigureTabResumptionItemForShopCard(decisions, item, url);
+        if (![strongSelf isPendingItem:item]) {
+          // The item was already fetched or is being fetched, ignore it.
+          return;
+        }
+
+        if (item.shopCardData.productImageURL.has_value()) {
+          [strongSelf salientImageURLReceived:GURL(item.shopCardData
+                                                       .productImageURL.value())
+                                      forItem:item
+                                  updateImage:YES];
+        } else {
+          [strongSelf.itemConfig reconfigureWithItem:item];
+          [strongSelf->_consumer shopCardDataCompleted:item];
+        }
+      }));
 }
 
 // Fetches the snapshot of the tab showing `item`.
@@ -955,14 +1040,15 @@ class TabResumptionMediatorProxy {
   _pageImageService->FetchImageFor(
       page_image_service::mojom::ClientId::NtpTabResumption, item.tabURL,
       options, base::BindOnce(^(const GURL& URL) {
-        [weakSelf salientImageURLReceived:URL forItem:item];
+        [weakSelf salientImageURLReceived:URL forItem:item updateImage:NO];
       }));
 }
 
 // The URL for the salient image has been received. Download the image if it
 // is valid or fallbacks to favicon.
 - (void)salientImageURLReceived:(const GURL&)URL
-                        forItem:(TabResumptionItem*)item {
+                        forItem:(TabResumptionItem*)item
+                    updateImage:(BOOL)updateImage {
   __weak TabResumptionMediator* weakSelf = self;
   if (!URL.is_valid() || !URL.SchemeIsCryptographic() ||
       !base::EndsWith(URL.GetHost(), kGStatic)) {
@@ -972,14 +1058,17 @@ class TabResumptionMediatorProxy {
       URL,
       base::BindOnce(^(const std::string& imageData,
                        const image_fetcher::RequestMetadata& metadata) {
-        [weakSelf salientImageReceived:imageData forItem:item];
+        [weakSelf salientImageReceived:imageData
+                               forItem:item
+                           updateImage:updateImage];
       }),
       NO_TRAFFIC_ANNOTATION_YET);
 }
 
 // Salient image has been received. Display it.
 - (void)salientImageReceived:(const std::string&)imageData
-                     forItem:(TabResumptionItem*)item {
+                     forItem:(TabResumptionItem*)item
+                 updateImage:(BOOL)updateImage {
   UIImage* image =
       [UIImage imageWithData:[NSData dataWithBytes:imageData.c_str()
                                             length:imageData.size()]];
@@ -987,7 +1076,12 @@ class TabResumptionMediatorProxy {
     return;
   }
   item.contentImage = image;
-  [self showItem:item];
+  if (updateImage) {
+    [self.itemConfig reconfigureWithItem:item];
+    [self->_consumer shopCardDataCompleted:item];
+  } else {
+    [self showItem:item];
+  }
 }
 
 // Fetches the favicon for `item`.
@@ -996,15 +1090,17 @@ class TabResumptionMediatorProxy {
 
   _faviconLoader->FaviconForPageUrl(
       item.tabURL, kDesiredSmallFaviconSizePt, kMinFaviconSizePt,
-      /*fallback_to_google_server=*/true, ^(FaviconAttributes* attributes) {
-        [weakSelf faviconReceived:attributes forItem:item];
+      /*fallback_to_google_server=*/true,
+      ^(FaviconAttributes* attributes, bool cached) {
+        [weakSelf faviconReceived:attributes cached:cached forItem:item];
       });
 }
 
 // The favicon has been received. Display it.
 - (void)faviconReceived:(FaviconAttributes*)attributes
+                 cached:(BOOL)cached
                 forItem:(TabResumptionItem*)item {
-  if (!attributes.usesDefaultImage) {
+  if (item.faviconImage || !cached) {
     if ([UIImagePNGRepresentation(item.faviconImage)
             isEqual:UIImagePNGRepresentation(attributes.faviconImage)]) {
       return;
@@ -1023,6 +1119,7 @@ class TabResumptionMediatorProxy {
   if (!self.itemConfig) {
     self.itemConfig = item;
     [self.delegate tabResumptionHelperDidReceiveItem];
+    [self fetchPriceDropIfApplicable:item];
     return;
   }
 
@@ -1030,6 +1127,7 @@ class TabResumptionMediatorProxy {
   // Instead the existing config must be updated.
   [self.itemConfig reconfigureWithItem:item];
   [self.delegate tabResumptionHelperDidReconfigureItem];
+  [self fetchPriceDropIfApplicable:item];
 }
 
 // Creates a TabResumptionItem corresponding to the last synced tab.

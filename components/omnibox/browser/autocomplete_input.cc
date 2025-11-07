@@ -865,8 +865,7 @@ std::u16string AutocompleteInput::CleanUserInputKeyword(
 
   // If keyword is not found, try removing a "http" or "https" scheme if any.
   url::Component scheme_component;
-  if (url::ExtractScheme(result.c_str(), static_cast<int>(result.length()),
-                         &scheme_component)) {
+  if (url::ExtractScheme(result, &scheme_component)) {
     const std::u16string_view scheme = std::u16string_view(result).substr(
         scheme_component.begin, scheme_component.len);
     if (scheme == url::kHttpScheme16 || scheme == url::kHttpsScheme16) {
@@ -962,6 +961,7 @@ void AutocompleteInput::Clear() {
   focus_type_ = metrics::OmniboxFocusType::INTERACTION_DEFAULT;
   terms_prefixed_by_http_or_https_.clear();
   lens_overlay_suggest_inputs_.reset();
+  aim_tool_mode_ = omnibox::ChromeAimToolsAndModels::TOOL_MODE_UNSPECIFIED;
   https_port_for_testing_ = 0;
   use_fake_https_for_https_upgrade_testing_ = false;
 }

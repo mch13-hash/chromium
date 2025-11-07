@@ -1,22 +1,28 @@
-#!/usr/bin/env python3
+#!/usr/bin/env vpython3
 # Copyright 2025 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 """A script to evaluate prompts using promptfoo."""
 
 import argparse
-import fnmatch
 import logging
 import os
 import pathlib
 import subprocess
 import sys
-import tempfile
 
 import checkout_helpers
 import constants
+import eval_config
+import gemini_cli_installation
 import promptfoo_installation
+import resultdb
+import results
+import skia_perf
 import workers
+
+sys.path.append(str(constants.CHROMIUM_SRC))
+from agents.common import gemini_helpers
 
 TESTCASE_EXTENSION = '.promptfoo.yaml'
 _SHARD_INDEX_ENV_VAR = 'GTEST_SHARD_INDEX'
@@ -46,26 +52,35 @@ def _check_uncommitted_changes(cwd):
             'commit or stash them before running the evaluation.')
 
 
-def _build_chromium(cwd):
-    logging.info('Running `gn gen out/Default`')
-    subprocess.check_call(['gn', 'gen', 'out/Default'], cwd=cwd)
-    logging.info('Running `autoninja -C out/Default`')
-    subprocess.check_call(['autoninja', '-C', 'out/Default'], cwd=cwd)
-    logging.info('Finished building')
+def _build_chromium(cwd: pathlib.Path, configs: list[eval_config.TestConfig]):
+    targets = set(t for c in configs for t in c.precompile_targets)
+    if targets:
+        logging.info('Precompiling: %s', ','.join(targets))
+        logging.info('Running `gn gen out/Default`')
+        subprocess.check_call(
+            ['gn', 'gen', 'out/Default', '--args=use_remoteexec=true'],
+            cwd=cwd)
+        cmd = ['autoninja', '-C', 'out/Default', *targets]
+        logging.info('Running `%s`', ' '.join(cmd))
+        subprocess.check_call(['autoninja', '-C', 'out/Default', *targets],
+                              cwd=cwd)
+        logging.info('Finished building')
+    else:
+        logging.debug('No targets to precompile')
 
 
-def _discover_testcase_files() -> list[pathlib.Path]:
+def _discover_testcase_files() -> list[eval_config.TestConfig]:
     """Discovers all testcase files that can be run by this test runner.
 
     Returns:
-        A list of Paths, each path pointing to a .yaml file containing a
+        A list of TestConfigs, each corresponding to a .yaml file containing a
         promptfoo test case. No specific ordering is guaranteed.
     """
     extensions_path = constants.CHROMIUM_SRC / 'agents' / 'extensions'
     all_tests = list(extensions_path.glob(f'*/tests/**/*{TESTCASE_EXTENSION}'))
     prompts_path = constants.CHROMIUM_SRC / 'agents' / 'prompts' / 'eval'
     all_tests.extend(list(prompts_path.glob(f'**/*{TESTCASE_EXTENSION}')))
-    return all_tests
+    return [eval_config.TestConfig.from_file(t) for t in all_tests]
 
 
 def _determine_shard_values(
@@ -136,7 +151,8 @@ def _get_tests_to_run(
     shard_index: int | None,
     total_shards: int | None,
     test_filter: str | None,
-) -> list[pathlib.Path]:
+    tag_filter: str | None = None,
+) -> list[eval_config.TestConfig]:
     """Retrieves which tests should be run for this invocation.
 
     Automatically discovers any valid tests on disk and filters them based on
@@ -147,33 +163,46 @@ def _get_tests_to_run(
         total_shards: The swarming shard total parsed from arguments.
         test_filter: The test filter parsed from arguments. Should be a string
             containing a ::-separated list of globs to use for filtering.
+        tag_filter: A comma-separated string of tags to filter tests by.
 
     Returns:
-        A potentially empty list of paths, each path pointing to a valid test
+        A potentially empty list of TestConfigs, each pointing to a valid test
         to be run.
     """
     shard_index, total_shards = _determine_shard_values(
         shard_index, total_shards)
     configs_to_run = _discover_testcase_files()
     if test_filter:
-        # Temporarily make the paths relative to the root so that filtering
-        # does not take into account any path components outside of the
-        # Chromium checkout.
-        all_string_configs = [
-            str(c.relative_to(constants.CHROMIUM_SRC)) for c in configs_to_run
-        ]
-        filtered_configs = set()
-        for f in test_filter.split('::'):
-            filtered_configs |= set(fnmatch.filter(all_string_configs, f))
+        filters = test_filter.split('::')
         configs_to_run = [
-            constants.CHROMIUM_SRC / pathlib.Path(c) for c in filtered_configs
+            c for c in configs_to_run if c.matches_filter(filters)
         ]
+    if tag_filter:
+        positive_filters = []
+        negative_filters = []
+        for f in tag_filter.split(','):
+            if f.startswith('-'):
+                negative_filters.append(f[1:])
+            else:
+                positive_filters.append(f)
+
+        if positive_filters:
+            configs_to_run = [
+                c for c in configs_to_run
+                if any(tag in c.tags for tag in positive_filters)
+            ]
+        if negative_filters:
+            configs_to_run = [
+                c for c in configs_to_run
+                if not any(tag in c.tags for tag in negative_filters)
+            ]
     configs_to_run.sort()
     configs_to_run = configs_to_run[shard_index::total_shards]
     return configs_to_run
 
 
-def _perform_chromium_setup(force: bool, build: bool) -> None:
+def _perform_chromium_setup(force: bool, build: bool,
+                            configs: list[eval_config.TestConfig]) -> None:
     """Performs setup steps related to the Chromium checkout.
 
     Args:
@@ -188,10 +217,10 @@ def _perform_chromium_setup(force: bool, build: bool) -> None:
     src_path = root_path / 'src'
     _check_uncommitted_changes(src_path)
     if build:
-        _build_chromium(src_path)
+        _build_chromium(src_path, configs)
 
 
-def _fetch_sandbox_image(gemini_cli_bin: pathlib.Path | None = None) -> bool:
+def _fetch_sandbox_image() -> bool:
     """Pre-fetches the sandbox image.
 
     Args:
@@ -201,29 +230,64 @@ def _fetch_sandbox_image(gemini_cli_bin: pathlib.Path | None = None) -> bool:
         True on success, False on failure.
     """
     logging.info('Pre-fetching sandbox image. This may take a minute...')
-    # Use a simple, non-destructive prompt to trigger the one-time
-    # sandbox image download.
-    with tempfile.TemporaryDirectory() as tmpdir:
-        try:
-            command = [gemini_cli_bin or 'gemini', '--sandbox', 'no-op']
-            subprocess.run(
-                command,
-                text=True,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                cwd=tmpdir,
-            )
-            return True
-        except subprocess.CalledProcessError as e:
-            output = ''
-            if e.stdout:
-                output += f'\noutput:\n{e.stdout}'
-            logging.error(
-                'Failed to pre-fetch sandbox image: %s. This may be '
-                'because you are in an environment that does not support '
-                'sandboxing. Try running with --no-sandbox.%s', e, output)
+    image = ''
+    try:
+        version = gemini_helpers.get_gemini_version()
+        if not version:
+            logging.error('Failed to get gemini version.')
             return False
+
+        image = f'{constants.GEMINI_SANDBOX_IMAGE_URL}:{version}'
+        subprocess.run(
+            ['docker', 'pull', image],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        output = ''
+        if hasattr(e, 'stdout') and e.stdout:
+            output += f'\noutput:\n{e.stdout}'
+        logging.error(
+            'Failed to pre-fetch sandbox image from %s: %s. This may be '
+            'because you are in an environment that does not support '
+            'sandboxing. Try running with --no-sandbox.%s', image, e, output)
+        return False
+
+
+def _run_tests_with_retries(worker_pool: workers.WorkerPool,
+                            configs_to_run: list[eval_config.TestConfig],
+                            retries: int) -> list[results.TestResult]:
+    """Runs tests, retrying failed tests up to a given number of times.
+
+    Args:
+        worker_pool: The worker pool to run tests on.
+        configs_to_run: A list of test configs to run.
+        retries: The number of times to retry failed tests.
+
+    Returns:
+        A list of PassKTestResult objects.
+    """
+    assert configs_to_run, 'configs_to_run should not be empty'
+
+    configs_for_current_iteration = configs_to_run
+    failed_test_results = []
+    for iteration in range(retries + 1):
+        if iteration != 0:
+            logging.info('Retrying %d failed tests (attempt %d of %d)',
+                         len(configs_for_current_iteration), iteration,
+                         retries)
+
+        worker_pool.queue_tests(configs_for_current_iteration)
+        configs_for_current_iteration = []
+        failed_test_results = worker_pool.wait_for_all_queued_tests()
+        if not failed_test_results:
+            break
+
+        configs_for_current_iteration = [r.config for r in failed_test_results]
+
+    return failed_test_results
 
 
 def _run_prompt_eval_tests(args: argparse.Namespace) -> int:
@@ -236,51 +300,73 @@ def _run_prompt_eval_tests(args: argparse.Namespace) -> int:
         0 on success, a non-zero value on failure.
     """
     configs_to_run = _get_tests_to_run(args.shard_index, args.total_shards,
-                                       args.filter)
+                                       args.filter, args.tag_filter)
     configs_to_run = configs_to_run * (args.isolated_script_test_repeat + 1)
     if len(configs_to_run) == 0:
         logging.info('No tests to run after filtering and sharding')
         return 1
 
-    _perform_chromium_setup(force=args.force, build=not args.no_build)
+    _perform_chromium_setup(force=args.force,
+                            build=not args.no_build,
+                            configs=configs_to_run)
 
     if args.promptfoo_bin:
         promptfoo = promptfoo_installation.PreinstalledPromptfooInstallation(
             args.promptfoo_bin)
     else:
-        promptfoo_dir = pathlib.Path(tempfile.gettempdir()) / 'promptfoo'
-        promptfoo = promptfoo_installation.setup_promptfoo(
-            promptfoo_dir, args.promptfoo_revision, args.promptfoo_version)
+        # This should be the default case. Specifying the bin or installing
+        # from npm/src should only be done for testing purposes. The cipd
+        # version is pinned which allows us to validate it before changing it.
+        promptfoo = promptfoo_installation.FromCipdPromptfooInstallation(
+            args.verbose)
 
-    if args.sandbox and not _fetch_sandbox_image(args.gemini_cli_bin):
+    if args.sandbox and not _fetch_sandbox_image():
         return 1
+
+    gemini_cli_bin = args.gemini_cli_bin
+    node_bin = args.node_bin
+    if args.use_pinned_binaries:
+        (gemini_cli_bin,
+         node_bin) = gemini_cli_installation.fetch_cipd_gemini_cli(
+             args.verbose)
 
     worker_options = workers.WorkerOptions(clean=not args.no_clean,
                                            verbose=args.verbose,
                                            force=args.force,
                                            sandbox=args.sandbox,
-                                           gemini_cli_bin=args.gemini_cli_bin)
+                                           gemini_cli_bin=gemini_cli_bin,
+                                           node_bin=node_bin)
 
-    worker_pool = workers.WorkerPool(args.parallel_workers, promptfoo,
-                                     worker_options,
-                                     args.print_output_on_success)
-    configs_for_current_iteration = configs_to_run
-    failed_test_results = []
-    for iteration in range(args.retries + 1):
-        if iteration != 0:
-            logging.info('Re-running %d failed tests',
-                         len(configs_for_current_iteration))
-        worker_pool.queue_tests(configs_for_current_iteration)
-        configs_for_current_iteration = []
-        failed_test_results = worker_pool.wait_for_all_queued_tests()
-        if not failed_test_results:
-            break
+    rdb_reporter = resultdb.ResultDBReporter()
+    perf_reporter = skia_perf.SkiaPerfMetricReporter(
+        git_revision=args.git_revision,
+        bucket=args.gcs_bucket,
+        build_id=args.build_id,
+        builder=args.builder,
+        builder_group=args.builder_group,
+        build_number=args.build_number)
+    result_options = results.ResultOptions(
+        print_output_on_success=args.print_output_on_success,
+        result_handlers=[
+            rdb_reporter.report_result,
+            perf_reporter.queue_result_for_upload,
+        ])
 
-        configs_for_current_iteration = [
-            tr.test_file for tr in failed_test_results
-        ]
+    worker_pool = workers.WorkerPool(
+        args.parallel_workers
+        if args.parallel_workers != -1 else len(configs_to_run),
+        promptfoo,
+        worker_options,
+        result_options,
+    )
+
+    failed_test_results = _run_tests_with_retries(worker_pool, configs_to_run,
+                                                  args.retries)
 
     worker_pool.shutdown_blocking()
+    if args.enable_perf_uploading:
+        perf_reporter.upload_queued_metrics()
+
     returncode = 0
     if failed_test_results:
         returncode = 1
@@ -291,7 +377,7 @@ def _run_prompt_eval_tests(args: argparse.Namespace) -> int:
             len(failed_test_results), args.retries)
         logging.warning('Failed tests:')
         for ftr in failed_test_results:
-            logging.warning('  %s', ftr.test_file)
+            logging.warning('  %s', ftr.config.test_file)
     else:
         logging.info('Successfully ran %d tests', len(configs_to_run))
 
@@ -306,6 +392,29 @@ def _validate_args(args: argparse.Namespace,
         args: The parsed arguments.
         parser: The parser that parsed |args|.
     """
+    # Perf Arguments group.
+    if args.enable_perf_uploading:
+        if not args.git_revision:
+            parser.error(
+                '--git-revision must be passed if --enable-perf-uploading is')
+        if not args.gcs_bucket:
+            parser.error(
+                '--gcs-bucket must be passed if --enable-perf-uploading is')
+        if not args.build_id:
+            parser.error(
+                '--build-id must be passed if --enable-perf-uploading is')
+        if not args.builder:
+            parser.error(
+                '--builder must be passed if --enable-perf-uploading is')
+        if not args.builder_group:
+            parser.error(
+                '--builder-group must be passed if --enable-perf-uploading is')
+        if args.build_number is None:
+            parser.error(
+                '--build-number must be passed if --enable-perf-uploading is')
+        if args.build_number <= 0:
+            parser.error('--build-number must be positive')
+
     # Test Selection Arguments group.
     if args.shard_index is not None and args.shard_index < 0:
         parser.error('--shard-index must be non-negative')
@@ -317,8 +426,8 @@ def _validate_args(args: argparse.Namespace,
             'all')
 
     # Test Runner Arguments group.
-    if args.parallel_workers < 1:
-        parser.error('--parallel-workers must be positive')
+    if args.parallel_workers < 1 and args.parallel_workers != -1:
+        parser.error('--parallel-workers must be positive or -1')
     if args.retries < 0:
         parser.error('--retries must be non-negative')
     if args.isolated_script_test_repeat < 0:
@@ -362,7 +471,48 @@ def _parse_args() -> argparse.Namespace:
         '--isolated-script-test-perf-output',
         help='Currently unused, parsed to handle all isolated script args.')
 
+    group = parser.add_argument_group('Perf Arguments')
+    group.add_argument(
+        '--enable-perf-uploading',
+        action='store_true',
+        help=('Upload test metrics to the perf dashboard. This is only '
+              'expected to work on the CI builders due to permissions.'))
+    group.add_argument('--git-revision',
+                       help=('The git revision being tested. Must be set if '
+                             '--enable-perf-uploading is set.'))
+    group.add_argument('--gcs-bucket',
+                       help=('The GCS bucket to upload perf results to. Must '
+                             'be set if --enable-perf-uploading is set.'))
+    group.add_argument('--build-id',
+                       help=('The Buildbucket build ID to associate with perf '
+                             'results. Must be set if --enable-perf-uploading '
+                             'is set.'))
+    group.add_argument('--builder',
+                       help=('The name of the builder running these tests. '
+                             'Must be set if --enable-perf-uploading is set.'))
+    group.add_argument(
+        '--builder-group',
+        # TODO(crbug.com/449818513): Remove default once the
+        # recipe is updated to pass this in.
+        default='chromium.prompt_eval',
+        help=('The name of the group the builder running these '
+              'tests belongs to. Must be set if '
+              '--enable-perf-uploading is set.'))
+    group.add_argument(
+        '--build-number',
+        # TODO(crbug.com/449818513): Remove default once the
+        # recipe is updated to pass this in.
+        default=1,
+        type=int,
+        help=('The build number of the build running these '
+              'tests. Must be set if --enable-perf-uploading '
+              'is set.'))
+
     group = parser.add_argument_group('Test Selection Arguments')
+    group.add_argument(
+        '--tag-filter',
+        help='A comma-separated list of tags to filter tests by. Only tests '
+        'with at least one of these tags will be run.')
     filter_group = group.add_mutually_exclusive_group()
     filter_group.add_argument(
         '--filter', help='A ::-separated list of globs of tests to run.')
@@ -388,22 +538,6 @@ def _parse_args() -> argparse.Namespace:
         '--promptfoo-bin',
         type=pathlib.Path,
         help='Path to a custom promptfoo binary to use.')
-    promptfoo_install_group.add_argument(
-        '--install-promptfoo-from-npm',
-        metavar='VERSION',
-        nargs='?',
-        dest='promptfoo_version',
-        const='latest',
-        help=('Install promptfoo through npm. If no release version is given, '
-              'latest will be used.'))
-    promptfoo_install_group.add_argument(
-        '--install-promptfoo-from-src',
-        metavar='REVISION',
-        nargs='?',
-        dest='promptfoo_revision',
-        const='main',
-        help=('Build promptfoo from the given source revision. If no revision '
-              'is specified, ToT will be used.'))
 
     group = parser.add_argument_group('gemini-cli Arguments')
     group.add_argument(
@@ -416,6 +550,15 @@ def _parse_args() -> argparse.Namespace:
     group.add_argument('--gemini-cli-bin',
                        type=pathlib.Path,
                        help='Path to a custom gemini-cli binary to use.')
+    group.add_argument('--node-bin',
+                       type=pathlib.Path,
+                       help='Path to a custom nodejs binary to use.')
+    group.add_argument(
+        '--use-pinned-binaries',
+        action='store_true',
+        help=('Use the pinned cipd version. This is to control what is under '
+              'test i.e. separating the changes in gemini-cli from the '
+              'changing prompt/codebase.'))
 
     group = parser.add_argument_group('Test Runner Arguments')
     group.add_argument(
@@ -424,11 +567,18 @@ def _parse_args() -> argparse.Namespace:
         default=1,
         help=('The number of parallel workers to run tests in. Changing this '
               'is not recommended if the Chromium checkout being used is not '
-              'on btrfs.'))
-    group.add_argument('--retries',
-                       type=int,
-                       default=0,
-                       help='Number of times to retry a failed test.')
+              'on btrfs. A value of -1 will use a separate worker for each '
+              'eval.'))
+    retry_group = group.add_mutually_exclusive_group()
+    retry_group.add_argument('--retries',
+                             type=int,
+                             default=0,
+                             help='Number of times to retry a failed test.')
+    retry_group.add_argument('--isolated-script-test-launcher-retry-limit',
+                             dest='retries',
+                             type=int,
+                             help=('Alias for --retries to conform to the '
+                                   'isolated script standard.'))
     group.add_argument('--isolated-script-test-repeat',
                        type=int,
                        default=0,

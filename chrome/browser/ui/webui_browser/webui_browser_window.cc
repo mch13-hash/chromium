@@ -823,11 +823,6 @@ WebUIBrowserWindow::ShowSendTabToSelfPromoBubble(content::WebContents* contents,
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
-views::Button* WebUIBrowserWindow::GetSharingHubIconButton() {
-  NOTIMPLEMENTED();
-  return nullptr;
-}
-
 void WebUIBrowserWindow::ToggleMultitaskMenu() {
   NOTIMPLEMENTED();
 }
@@ -847,7 +842,7 @@ ShowTranslateBubbleResult WebUIBrowserWindow::ShowTranslateBubble(
     translate::TranslateErrors error_type,
     bool is_user_gesture) {
   NOTIMPLEMENTED();
-  return ShowTranslateBubbleResult::BROWSER_WINDOW_NOT_VALID;
+  return ShowTranslateBubbleResult::kBrowserWindowNotValid;
 }
 
 void WebUIBrowserWindow::StartPartialTranslate(
@@ -861,20 +856,6 @@ void WebUIBrowserWindow::ShowOneClickSigninConfirmation(
     const std::u16string& email,
     base::OnceCallback<void(bool)> confirmed_callback) {
   NOTIMPLEMENTED();
-}
-
-views::View* WebUIBrowserWindow::GetTopContainer() {
-  // This view is technically the entire window, not just the top container.
-  // We return it because the BookmarkContextMenu constructor needs to be able
-  // get to a NativeWindow whenever the context menu is triggered from the
-  // bookmarks side panel, and uses
-  // browser_window->TopContainer()->GetWidget()->GetNativeWindow().
-  return web_view_;
-}
-
-views::View* WebUIBrowserWindow::GetLensOverlayView() {
-  NOTIMPLEMENTED();
-  return nullptr;
 }
 
 DownloadBubbleUIController*
@@ -1091,11 +1072,6 @@ ui::mojom::WindowShowState WebUIBrowserWindow::GetWindowShowState() const {
 
 void WebUIBrowserWindow::ShowChromeLabs() {
   NOTIMPLEMENTED();
-}
-
-views::WebView* WebUIBrowserWindow::GetContentsWebView() {
-  NOTIMPLEMENTED();
-  return nullptr;
 }
 
 BrowserView* WebUIBrowserWindow::AsBrowserView() {

@@ -8,6 +8,8 @@
 #include <ranges>
 #include <variant>
 
+#include "base/i18n/time_formatting.h"
+#include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,6 +27,7 @@
 #include "components/autofill/core/browser/geo/country_names.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "third_party/abseil-cpp/absl/functional/overload.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 
 namespace autofill {
 
@@ -98,6 +101,25 @@ std::u16string Format(
   return s;
 }
 
+// TODO(crbug.com/434122759): Move this functionality to
+// autofill::data_util::FormatDate.
+std::u16string FormatFlightDepartureDate(std::u16string_view raw_info,
+                                         std::string_view app_locale) {
+  if (raw_info.empty()) {
+    return u"";
+  }
+  base::Time departure_time;
+  if (!base::Time::FromUTCString(base::UTF16ToUTF8(raw_info).c_str(),
+                                 &departure_time)) {
+    return u"";
+  }
+
+  // TODO(crbug.com/434122759): This conversion should support non-English
+  // locales.
+  return base::UTF8ToUTF16(base::UnlocalizedTimeFormatWithPattern(
+      departure_time, "MMM d", icu::TimeZone::getGMT()));
+}
+
 }  // namespace
 
 AttributeInstance::AttributeInstance(AttributeType type)
@@ -133,6 +155,10 @@ std::u16string AttributeInstance::GetInfo(
                        return country.GetCountryName(app_locale);
                      },
                      [&](const DateInfo& date) {
+                       if (field_type == FLIGHT_RESERVATION_DEPARTURE_DATE) {
+                         return FormatFlightDepartureDate(
+                             GetRawInfo(field_type), app_locale);
+                       }
                        // TODO(crbug.com/396325496): Consider falling back
                        // to a locale-specific format by relying on
                        // `app_locale`.
@@ -271,16 +297,19 @@ EntityInstance::EntityInstance(
     size_t use_count,
     base::Time use_date,
     RecordType record_type,
-    AreAttributesReadOnly are_attributes_read_only)
+    AreAttributesReadOnly are_attributes_read_only,
+    std::string frecency_override)
     : type_(type),
       attributes_(std::move(attributes)),
       guid_(std::move(guid)),
       nickname_(std::move(nickname)),
-      date_modified_(date_modified),
-      use_count_(use_count),
-      use_date_(use_date),
+      entity_metadata_{.guid = guid_,
+                       .date_modified = date_modified,
+                       .use_count = use_count,
+                       .use_date = use_date},
       record_type_(record_type),
-      are_attributes_read_only_(are_attributes_read_only) {
+      are_attributes_read_only_(are_attributes_read_only),
+      frecency_override_(std::move(frecency_override)) {
   DCHECK(!attributes_.empty());
   DCHECK(std::ranges::all_of(attributes_, [this](const AttributeInstance& a) {
     return type_ == a.type().entity_type();
@@ -348,8 +377,8 @@ EntityInstance::EntityMergeability::operator=(
 EntityInstance::EntityMergeability::~EntityMergeability() = default;
 
 void EntityInstance::RecordEntityUsed(base::Time date) {
-  use_date_ = date;
-  ++use_count_;
+  entity_metadata_.use_date = date;
+  ++entity_metadata_.use_count;
 }
 
 EntityInstance::EntityMergeability EntityInstance::GetEntityMergeability(
@@ -472,6 +501,16 @@ EntityInstance::EntityMergeability EntityInstance::GetEntityMergeability(
   return {std::move(mergeable_attributes), is_subset};
 }
 
+bool EntityInstance::IsServerInstance() const {
+  switch (record_type_) {
+    case RecordType::kLocal:
+      return false;
+    case RecordType::kServerWallet:
+      return true;
+  }
+  NOTREACHED();
+}
+
 bool EntityInstance::IsSubsetOf(const EntityInstance& other) const {
   if (type_ != other.type_) {
     return false;
@@ -520,6 +559,11 @@ EntityInstance::FrecencyOrder::FrecencyOrder(base::Time now) : now_(now) {}
 bool EntityInstance::FrecencyOrder::operator()(
     const EntityInstance& lhs,
     const EntityInstance& rhs) const {
+  if (!lhs.frecency_override_.empty() || !rhs.frecency_override_.empty()) {
+    return std::pair(lhs.frecency_override_.empty(), lhs.frecency_override_) <
+           std::pair(rhs.frecency_override_.empty(), rhs.frecency_override_);
+  }
+
   // At days_since_last_use = 0, use_count = 0, the score is -1.
   // As days_since_last_use increases, the score becomes more negative.
   // As use_count increases, the score approaches 0.

@@ -32,6 +32,7 @@
 #import "ios/chrome/credential_provider_extension/font_provider.h"
 #import "ios/chrome/credential_provider_extension/metrics_util.h"
 #import "ios/chrome/credential_provider_extension/passkey_request_details.h"
+#import "ios/chrome/credential_provider_extension/passkey_util.h"
 #import "ios/chrome/credential_provider_extension/passkey_welcome_screen_util.h"
 #import "ios/chrome/credential_provider_extension/reauthentication_handler.h"
 #import "ios/chrome/credential_provider_extension/ui/consent_coordinator.h"
@@ -82,6 +83,7 @@ enum class PasskeyUserVerificationStatus {
 
 }  // namespace
 
+// TODO(crbug.com/454307667): Add unit tests for the whole file.
 @interface CredentialProviderViewController () <
     ConfirmationAlertActionHandler,
     CredentialResponseHandler,
@@ -309,13 +311,12 @@ enum class PasskeyUserVerificationStatus {
     // dismissing the bootstrapping UI if it was presented. If it wasn't
     // presented, it means that the user was already bootstrapped. In this case,
     // `completion` will present the ConsentViewController.
-    [self
-        fetchSecurityDomainSecretForGaia:[self gaia]
-                              credential:nil
-                                 purpose:PasskeyKeychainProvider::
-                                             ReauthenticatePurpose::kUnspecified
-                userVerificationRequired:NO
-                              completion:completion];
+    [self fetchSecurityDomainSecretForGaia:[self gaia]
+                                credential:nil
+                                   purpose:webauthn::ReauthenticatePurpose::
+                                               kUnspecified
+                  userVerificationRequired:NO
+                                completion:completion];
   } else {
     [self presentConsentViewController];
   }
@@ -406,13 +407,56 @@ enum class PasskeyUserVerificationStatus {
 
 - (void)reportUnknownPublicKeyCredentialForRelyingParty:(NSString*)relyingParty
                                            credentialID:(NSData*)credentialID {
-  // TODO(crbug.com/432260316): Implement.
+  if (!IsSignalAPIEnabled()) {
+    return;
+  }
+
+  NSArray<id<Credential>>* credentials = self.credentialStore.credentials;
+  NSUInteger credentialIndex =
+      [credentials indexOfObjectPassingTest:^BOOL(id<Credential> credential,
+                                                  NSUInteger idx, BOOL* stop) {
+        return [credential.rpId isEqualToString:relyingParty] &&
+               [credential.credentialId isEqualToData:credentialID];
+      }];
+  if (credentialIndex == NSNotFound) {
+    return;
+  }
+
+  id<Credential> credential = credentials[credentialIndex];
+  credential.hidden = YES;
+  credential.hiddenTime = base::Time::Now().InMillisecondsSinceUnixEpoch();
+  SavePasskeyCredential(credential);
 }
 
 - (void)reportPublicKeyCredentialUpdateForRelyingParty:(NSString*)relyingParty
                                             userHandle:(NSData*)userHandle
                                                newName:(NSString*)newName {
-  // TODO(crbug.com/432260316): Implement.
+  if (!IsSignalAPIEnabled()) {
+    return;
+  }
+
+  NSArray<id<Credential>>* credentials = self.credentialStore.credentials;
+  NSUInteger credentialIndex =
+      [credentials indexOfObjectPassingTest:^BOOL(id<Credential> credential,
+                                                  NSUInteger idx, BOOL* stop) {
+        return [credential.rpId isEqualToString:relyingParty] &&
+               [credential.userId isEqualToData:userHandle];
+      }];
+  if (credentialIndex == NSNotFound) {
+    return;
+  }
+
+  id<Credential> credential = credentials[credentialIndex];
+
+  // Respect the user's choice and skip the update if the data was explicitly
+  // changed by the user previously or if the username did not change.
+  if (credential.editedByUser ||
+      [credential.username isEqualToString:newName]) {
+    return;
+  }
+
+  credential.username = newName;
+  SavePasskeyCredential(credential);
 }
 
 - (void)reportAllAcceptedPublicKeyCredentialsForRelyingParty:
@@ -421,7 +465,33 @@ enum class PasskeyUserVerificationStatus {
                                        acceptedCredentialIDs:
                                            (NSArray<NSData*>*)
                                                acceptedCredentialIDs {
-  // TODO(crbug.com/432260316): Implement.
+  if (!IsSignalAPIEnabled()) {
+    return;
+  }
+
+  NSArray<id<Credential>>* credentials = self.credentialStore.credentials;
+  NSUInteger credentialIndex =
+      [credentials indexOfObjectPassingTest:^BOOL(id<Credential> credential,
+                                                  NSUInteger idx, BOOL* stop) {
+        return [credential.rpId isEqualToString:relyingParty] &&
+               [credential.userId isEqualToData:userHandle];
+      }];
+  if (credentialIndex == NSNotFound) {
+    return;
+  }
+
+  id<Credential> credential = credentials[credentialIndex];
+  BOOL credentialShouldBeHidden =
+      ![acceptedCredentialIDs containsObject:credential.credentialId];
+  if (credential.hidden == credentialShouldBeHidden) {
+    return;
+  }
+
+  credential.hidden = credentialShouldBeHidden;
+  credential.hiddenTime = credentialShouldBeHidden
+                              ? base::Time::Now().InMillisecondsSinceUnixEpoch()
+                              : 0;
+  SavePasskeyCredential(credential);
 }
 
 - (void)reportUnusedPasswordCredentialForDomain:(NSString*)domain
@@ -539,13 +609,13 @@ enum class PasskeyUserVerificationStatus {
                        securityDomainSecrets:securityDomainSecrets];
   };
 
-  [self fetchSecurityDomainSecretForGaia:credential.gaia
-                              credential:credential
-                                 purpose:PasskeyKeychainProvider::
-                                             ReauthenticatePurpose::kDecrypt
-                userVerificationRequired:passkeyRequestDetails
-                                             .userVerificationRequired
-                              completion:completion];
+  [self
+      fetchSecurityDomainSecretForGaia:credential.gaia
+                            credential:credential
+                               purpose:webauthn::ReauthenticatePurpose::kDecrypt
+              userVerificationRequired:passkeyRequestDetails
+                                           .userVerificationRequired
+                            completion:completion];
 }
 
 - (void)userCancelledRequestWithErrorCode:(ASExtensionErrorCode)errorCode {
@@ -1125,13 +1195,13 @@ enum class PasskeyUserVerificationStatus {
                  securityDomainSecrets:securityDomainSecrets];
   };
 
-  [self fetchSecurityDomainSecretForGaia:gaia
-                              credential:nil
-                                 purpose:PasskeyKeychainProvider::
-                                             ReauthenticatePurpose::kEncrypt
-                userVerificationRequired:passkeyRequestDetails
-                                             .userVerificationRequired
-                              completion:completion];
+  [self
+      fetchSecurityDomainSecretForGaia:gaia
+                            credential:nil
+                               purpose:webauthn::ReauthenticatePurpose::kEncrypt
+              userVerificationRequired:passkeyRequestDetails
+                                           .userVerificationRequired
+                            completion:completion];
 }
 
 // Attempts to perform passkey assertion and retry on failure if allowed.
@@ -1161,14 +1231,13 @@ enum class PasskeyUserVerificationStatus {
 // Triggers the process to fetch the security domain secret and calls the
 // completion block with the security domain secret as input.
 // "credential" will be used to validate the security domain secret.
-- (void)fetchSecurityDomainSecretForGaia:(NSString*)gaia
-                              credential:(id<Credential>)credential
-                                 purpose:(PasskeyKeychainProvider::
-                                              ReauthenticatePurpose)purpose
-                userVerificationRequired:(BOOL)userVerificationRequired
-                              completion:
-                                  (FetchSecurityDomainSecretCompletionBlock)
-                                      completion {
+- (void)
+    fetchSecurityDomainSecretForGaia:(NSString*)gaia
+                          credential:(id<Credential>)credential
+                             purpose:(webauthn::ReauthenticatePurpose)purpose
+            userVerificationRequired:(BOOL)userVerificationRequired
+                          completion:(FetchSecurityDomainSecretCompletionBlock)
+                                         completion {
   // Store `userVerificationRequired` here as it will be needed at a later stage
   // in the process of fetching the security domain secret.
   if (userVerificationRequired) {

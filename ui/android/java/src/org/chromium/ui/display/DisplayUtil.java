@@ -46,9 +46,11 @@ public abstract class DisplayUtil {
             "android.software.car.display_compatibility";
     private static @Nullable Boolean sCarmaPhase1Version2ComplianceForTesting;
     private static @Nullable Boolean sIsDisplayCompatAppForTesting;
-    private static @Nullable Float sUiScalingFactorForAutomotiveOverride;
+    private static @Nullable Integer sSmallestScreenWidthForTesting;
+    private static @Nullable Boolean sIsOnDefaultDisplayForTesting;
+    private static @Nullable Float sUiScalingFactorForAutomotiveForTesting;
     // For XR environment.
-    private static @Nullable Float sUiScalingFactorForXrOverride;
+    private static @Nullable Float sUiScalingFactorForXrForTesting;
 
     /** Returns true if the device requires UI scaling. */
     public static boolean isUiScaled() {
@@ -57,12 +59,22 @@ public abstract class DisplayUtil {
 
     /** Change the UI scaling factor on automotive devices for testing. */
     public static void setUiScalingFactorForAutomotiveForTesting(float scalingFactor) {
-        sUiScalingFactorForAutomotiveOverride = scalingFactor;
+        sUiScalingFactorForAutomotiveForTesting = scalingFactor;
+    }
+
+    public static void setCurrentSmallestScreenWidthForTesting(int smallestScreenWidth) {
+        sSmallestScreenWidthForTesting = smallestScreenWidth;
+        ResettersForTesting.register(() -> sSmallestScreenWidthForTesting = null);
+    }
+
+    public static void setIsOnDefaultDisplayForTesting(boolean value) {
+        sIsOnDefaultDisplayForTesting = value;
+        ResettersForTesting.register(() -> sIsOnDefaultDisplayForTesting = null);
     }
 
     /** Reset the UI scaling factor on automotive devices to the default value. */
     public static void resetUiScalingFactorForAutomotiveForTesting() {
-        sUiScalingFactorForAutomotiveOverride = null;
+        sUiScalingFactorForAutomotiveForTesting = null;
     }
 
     /**
@@ -105,8 +117,8 @@ public abstract class DisplayUtil {
             return baseDensity;
         }
         float uiScalingFactor =
-                sUiScalingFactorForAutomotiveOverride != null
-                        ? sUiScalingFactorForAutomotiveOverride
+                sUiScalingFactorForAutomotiveForTesting != null
+                        ? sUiScalingFactorForAutomotiveForTesting
                         : getTargetScalingFactorForAutomotive(context);
         int rawScaledDensity = (int) (baseDensity * uiScalingFactor);
         // Round up to the nearest 20 to align with DisplayMetrics defined densities.
@@ -140,6 +152,25 @@ public abstract class DisplayUtil {
         double xInches = display.getDisplayWidth() / display.getXdpi();
         double yInches = display.getDisplayHeight() / display.getYdpi();
         return Math.sqrt(Math.pow(xInches, 2) + Math.pow(yInches, 2));
+    }
+
+    /**
+     * Forces a {@link DisplayMetrics} object to a new density, scaling related DPI values.
+     *
+     * <p>This function modifies the passed-in {@link DisplayMetrics} object in-place.
+     *
+     * <p>This function updates {@link DisplayMetrics#density}, {@link DisplayMetrics#xdpi} and
+     * {@link DisplayMetrics#ydpi}, but it doesn't update {@link DisplayMetrics#densityDpi} to
+     * match. Use this only if you specifically require this partial update.
+     *
+     * @param density The new target density to set.
+     * @param displayMetrics The DisplayMetrics object to modify in-place.
+     */
+    public static void forcedScaleUpDisplayMetrics(float density, DisplayMetrics displayMetrics) {
+        float scaling = density / displayMetrics.density;
+        displayMetrics.density *= scaling;
+        displayMetrics.xdpi *= scaling;
+        displayMetrics.ydpi *= scaling;
     }
 
     /**
@@ -245,6 +276,9 @@ public abstract class DisplayUtil {
      * @return Smallest screen width in dp.
      */
     public static int getCurrentSmallestScreenWidth(Context context) {
+        if (sSmallestScreenWidthForTesting != null) {
+            return sSmallestScreenWidthForTesting;
+        }
         DisplayAndroid display = DisplayAndroid.getNonMultiDisplay(context);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             // Android T does not receive updated width upon foldable unfold from window context.
@@ -304,12 +338,12 @@ public abstract class DisplayUtil {
 
     /** Change the UI scaling factor on XR devices for testing. */
     static void setUiScalingFactorForXrForTesting(float scalingFactor) {
-        sUiScalingFactorForXrOverride = scalingFactor;
+        sUiScalingFactorForXrForTesting = scalingFactor;
     }
 
     /** Reset the UI scaling factor on XR devices to the default value. */
     static void resetUiScalingFactorForXrForTesting() {
-        sUiScalingFactorForXrOverride = null;
+        sUiScalingFactorForXrForTesting = null;
     }
 
     private static float getUiScalingFactorForXrFromResource(Context context) {
@@ -323,20 +357,20 @@ public abstract class DisplayUtil {
     public static float getCurrentUiScalingFactor(Context context) {
         if (!isUiScaled()) return 1;
         if (DeviceInfo.isAutomotive()) {
-            return sUiScalingFactorForAutomotiveOverride != null
-                    ? sUiScalingFactorForAutomotiveOverride
+            return sUiScalingFactorForAutomotiveForTesting != null
+                    ? sUiScalingFactorForAutomotiveForTesting
                     : getTargetScalingFactorForAutomotive(context);
         }
-        return sUiScalingFactorForXrOverride != null
-                ? sUiScalingFactorForXrOverride
+        return sUiScalingFactorForXrForTesting != null
+                ? sUiScalingFactorForXrForTesting
                 : getUiScalingFactorForXrFromResource(context);
     }
 
     /** Get the density base on the UI scaling factor on XR devices. */
     public static int getUiDensityForXr(Context context, int baseDensity) {
         float uiScalingFactor =
-                sUiScalingFactorForXrOverride != null
-                        ? sUiScalingFactorForXrOverride
+                sUiScalingFactorForXrForTesting != null
+                        ? sUiScalingFactorForXrForTesting
                         : getUiScalingFactorForXrFromResource(context);
         int rawScaledDensity = (int) (baseDensity * uiScalingFactor);
         // Round up to the nearest 10 to align with DisplayMetrics defined densities.
@@ -478,6 +512,9 @@ public abstract class DisplayUtil {
      *     otherwise.
      */
     public static boolean isContextInDefaultDisplay(Context context) {
+        if (sIsOnDefaultDisplayForTesting != null) {
+            return sIsOnDefaultDisplayForTesting;
+        }
         Display display = DisplayAndroidManager.getDefaultDisplayForContext(context);
         return display.getDisplayId() == Display.DEFAULT_DISPLAY;
     }
@@ -519,20 +556,45 @@ public abstract class DisplayUtil {
     }
 
     /**
-     * If the provided Rect fits fully inside given display's bounds, this method returns a copy of
-     * the provided Rect.
+     * Adjusts {@code inputRect} to fit inside {@code limitingRect}.
      *
-     * <p>Otherwise, the Rect returned will be a copy of the provided Rect modified so that it is
-     * fully inside given display's bounds and is the closest match to the provided Rect,
+     * <p>If {@code inputRect} fits fully inside {@code limitingRect}, this method returns a copy of
+     * {@code inputRect}.
+     *
+     * <p>Otherwise, the returned {@link Rect} will be a copy of {@code inputRect} modified so that
+     * it is fully inside {@code limitingRect} and is the closest match to {@code inputRect},
      * prioritising preserving original width and height first, then minimizing the Manhattan
-     * distance between the original Rect and the adjusted one.
+     * distance between {@code inputRect} and the adjusted one.
      *
-     * <p>If the provided Rect is longer than given display's bounds in precisely one axis, the
-     * displacement alongside the other axis will be minimised between the provided Rect and the
+     * <p>If {@code inputRect} is longer than {@code limitingRect} in precisely one axis, the
+     * displacement alongside the other axis will be minimised between {@code inputRect} and the
      * adjusted one.
      *
-     * <p>If the provided Rect is longer than given display's bounds in both axes, the display's
-     * bounds will be returned.
+     * <p>If {@code inputRect} is longer than {@code limitingRect} in both axes, {@code
+     * limitingRect} will be returned.
+     *
+     * @param inputRect The {@link Rect} to adjust.
+     * @param limitingRect The {@link Rect} that defines the bounds.
+     * @return A new {@link Rect}, guaranteed to be fully within {@code limitingRect}.
+     */
+    @SuppressWarnings("CheckResult")
+    public static Rect clampRect(Rect inputRect, Rect limitingRect) {
+        Rect output = new Rect(inputRect);
+
+        output.offset(Math.max(limitingRect.left - output.left, 0), 0);
+        output.offset(Math.min(limitingRect.right - output.right, 0), 0);
+        output.offset(0, Math.max(limitingRect.top - output.top, 0));
+        output.offset(0, Math.min(limitingRect.bottom - output.bottom, 0));
+
+        output.intersect(limitingRect);
+
+        return output;
+    }
+
+    /**
+     * Adjusts the given bounds to fit the given display.
+     *
+     * <p>Please see {@link #clampRect(Rect, Rect)} for how the bounds are adjusted.
      *
      * @param boundsPx The rectangle to adjust, in pixels. Its coordinates should be relative to the
      *     display, with (0, 0) at the top-left corner and positive axes going rightward and
@@ -541,19 +603,8 @@ public abstract class DisplayUtil {
      * @return A new Rect, guaranteed to be fully within the display bounds. Uses the same
      *     coordinate system as the initial Rect.
      */
-    @SuppressWarnings("CheckResult")
     public static Rect clampWindowToDisplay(Rect boundsPx, DisplayAndroid display) {
-        final Rect output = new Rect(boundsPx);
-        final Rect limitingBounds = display.getLocalBounds();
-
-        output.offset(Math.max(limitingBounds.left - output.left, 0), 0);
-        output.offset(Math.min(limitingBounds.right - output.right, 0), 0);
-        output.offset(0, Math.max(limitingBounds.top - output.top, 0));
-        output.offset(0, Math.min(limitingBounds.bottom - output.bottom, 0));
-
-        output.intersect(limitingBounds);
-
-        return output;
+        return clampRect(boundsPx, display.getLocalBounds());
     }
 
     public static void setCarmaPhase1Version2ComplianceForTesting(

@@ -9,6 +9,7 @@
       "gfx_unittests",
       "google_apis_unittests",
       "ios_chrome_unittests",
+      "ios_credential_provider_extension_unittests",
       "ios_net_unittests",
       "ios_web_inttests",
       "ios_web_unittests",
@@ -26,7 +27,7 @@
           "--out-dir",
           "${ISOLATED_OUTDIR}",
           "--xcode-build-version",
-          "17a324",
+          "17a400",
           "--xctest"
         ],
         "merge": {
@@ -48,14 +49,14 @@
             }
           ],
           "dimensions": {
-            "cpu": "x86-64",
+            "cpu": "x86|arm64",
             "device": "iPhone16,1",
-            "os": "Mac-15"
+            "os": "iOS-18"
           },
           "expiration": 21600,
           "named_caches": [
             {
-              "name": "xcode_ios_17a324",
+              "name": "xcode_ios_17a400",
               "path": "Xcode.app"
             }
           ],
@@ -71,7 +72,7 @@
           "--out-dir",
           "${ISOLATED_OUTDIR}",
           "--xcode-build-version",
-          "17a324",
+          "17a400",
           "--xctest"
         ],
         "merge": {
@@ -93,14 +94,14 @@
             }
           ],
           "dimensions": {
-            "cpu": "x86-64",
+            "cpu": "x86|arm64",
             "device": "iPhone16,1",
-            "os": "Mac-15"
+            "os": "iOS-18"
           },
           "expiration": 21600,
           "named_caches": [
             {
-              "name": "xcode_ios_17a324",
+              "name": "xcode_ios_17a400",
               "path": "Xcode.app"
             }
           ],

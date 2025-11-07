@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/core/css/css_selector_list.h"
 #include "third_party/blink/renderer/core/css/part_names.h"
 #include "third_party/blink/renderer/core/css/post_style_update_scope.h"
+#include "third_party/blink/renderer/core/css/route_query.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/style_rule.h"
 #include "third_party/blink/renderer/core/css/style_scope_data.h"
@@ -72,6 +73,7 @@
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
 #include "third_party/blink/renderer/core/html/html_menu_item_element.h"
+#include "third_party/blink/renderer/core/html/html_menu_list_element.h"
 #include "third_party/blink/renderer/core/html/html_permission_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/media/html_audio_element.h"
@@ -87,6 +89,7 @@
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation_controller.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/core/route_matching/route.h"
 #include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
@@ -96,8 +99,6 @@
 #include "third_party/blink/renderer/core/view_transition/view_transition_pseudo_element_base.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 
 namespace blink {
 
@@ -160,95 +161,6 @@ static bool MatchesUniversalTagName(const Element& element,
   const AtomicString& namespace_uri = tag_q_name.NamespaceURI();
   return namespace_uri == g_star_atom ||
          namespace_uri == element.namespaceURI();
-}
-
-// Matches the element's content language against one or more language ranges,
-// both represented in BCP 47 syntax, by following the extended filtering
-// algorithm defined in [RFC4647] Matching of Language Tags (section 3.3.2).
-// A language range matches a particular language tag if each respective list
-// of subtags matches. Comparisons are case-insensitive within the ASCII range.
-// See: https://www.rfc-editor.org/rfc/rfc4647#section-3.3.2
-static bool MatchesLangPseudoClass(
-    const AtomicString& language,
-    const Vector<AtomicString>& language_ranges) {
-  // Iterator class to traverse subtags within a language tag or range.
-  class LanguageTagIterator {
-    STACK_ALLOCATED();
-
-   public:
-    explicit LanguageTagIterator(const AtomicString& language_range)
-        : language_range_(language_range),
-          language_range_length_(language_range.length()),
-          subtag_end_(
-              std::min(language_range.find('-', 0), language_range.length())) {}
-    void operator++() {
-      if (subtag_end_ >= language_range_length_) {
-        subtag_start_ = language_range_length_;
-        subtag_end_ = language_range_length_;
-        return;
-      }
-      subtag_start_ = subtag_end_ + 1;
-      subtag_end_ = std::min(language_range_.find('-', subtag_start_),
-                             language_range_length_);
-    }
-    bool AtEnd() const {
-      return subtag_start_ >= subtag_end_ ||
-             subtag_start_ >= language_range_length_;
-    }
-    StringView CurrentSubtag() const {
-      return {language_range_, subtag_start_, subtag_end_ - subtag_start_};
-    }
-    bool Matches(const LanguageTagIterator& other) const {
-      return EqualIgnoringASCIICase(CurrentSubtag(), other.CurrentSubtag());
-    }
-    bool MatchesWildcard() const {
-      StringView subtag = CurrentSubtag();
-      return subtag.length() == 1 && subtag[0] == '*';
-    }
-    bool IsSingleton() const {
-      return (subtag_end_ - subtag_start_) == 1 && subtag_start_ > 0;
-    }
-
-   private:
-    const AtomicString& language_range_;
-    wtf_size_t language_range_length_;
-    wtf_size_t subtag_start_ = 0;
-    wtf_size_t subtag_end_;
-  };
-
-  for (const AtomicString& range : language_ranges) {
-    LanguageTagIterator range_subtag(range);
-    LanguageTagIterator language_subtag(language);
-    if (!range_subtag.Matches(language_subtag) &&
-        !range_subtag.MatchesWildcard()) {
-      continue;
-    }
-
-    // Compare the subtags of language and range, taking wildcards into account.
-    // The match succeeds when all the language range subtags can be matched to
-    // the language subtags, and fails otherwise.
-    ++range_subtag;
-    ++language_subtag;
-    while (!range_subtag.AtEnd() && !language_subtag.AtEnd()) {
-      if (range_subtag.MatchesWildcard()) {
-        // A wildcard must match at least one subtag, so consume it
-        ++language_subtag;
-        ++range_subtag;
-      } else if (range_subtag.Matches(language_subtag)) {
-        ++range_subtag;
-        ++language_subtag;
-      } else if (language_subtag.IsSingleton()) {
-        return false;
-      } else {
-        ++language_subtag;
-      }
-    }
-
-    if (range_subtag.AtEnd()) {
-      return true;
-    }
-  }
-  return false;
 }
 
 // The associated host, if we are matching in the context of a shadow tree.
@@ -675,6 +587,7 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoResizer:
     case CSSSelector::kPseudoRightPage:
     case CSSSelector::kPseudoRoot:
+    case CSSSelector::kPseudoRouteMatch:
     case CSSSelector::kPseudoScrollbar:
     case CSSSelector::kPseudoScrollbarButton:
     case CSSSelector::kPseudoScrollbarCorner:
@@ -722,6 +635,8 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoHostHasNonAutoAppearance:
     case CSSSelector::kPseudoIsHtml:
     case CSSSelector::kPseudoListBox:
+    case CSSSelector::kPseudoMenulistPopoverWithMenubarAnchor:
+    case CSSSelector::kPseudoMenulistPopoverWithMenulistAnchor:
     case CSSSelector::kPseudoMultiSelectFocus:
     case CSSSelector::kPseudoOpen:
     case CSSSelector::kPseudoPastCue:
@@ -747,6 +662,8 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoScrollMarker:
     case CSSSelector::kPseudoScrollMarkerGroup:
     case CSSSelector::kPseudoScrollButton:
+    case CSSSelector::kPseudoOverscrollAreaParent:
+    case CSSSelector::kPseudoOverscrollClientArea:
       // These pseudos are not allowed to match featureless elements. When
       // adding new pseudos here, they would typically be allowed if they are
       // logical pseudos which take selector arguments.
@@ -949,9 +866,8 @@ SelectorChecker::MatchStatus SelectorChecker::MatchForRelation(
 
   // Disable :visited matching when we see the first link or try to match
   // anything else than an ancestor.
-  if ((!context.is_sub_selector || context.in_nested_complex_selector) &&
-      (context.element->IsLink() || (relation != CSSSelector::kDescendant &&
-                                     relation != CSSSelector::kChild))) {
+  if (context.element->IsLink() || (relation != CSSSelector::kDescendant &&
+                                    relation != CSSSelector::kChild)) {
     DisallowMatchVisited(next_context);
   }
 
@@ -1869,8 +1785,13 @@ EarlyBreakOnHasArgumentChecking CheckEarlyBreakForHasArgument(
 }
 
 bool MatchesExternalSVGUseTarget(Element& element) {
-  const auto* svg_element = DynamicTo<SVGElement>(element);
-  return svg_element && svg_element->IsResourceTarget();
+  if (const auto* svg_element = DynamicTo<SVGElement>(element)) {
+    if (const SVGElement* corresponding = svg_element->CorrespondingElement()) {
+      svg_element = corresponding;
+    }
+    return svg_element->IsResourceTarget();
+  }
+  return false;
 }
 
 }  // namespace
@@ -2136,6 +2057,21 @@ bool SelectorChecker::CheckPseudoHas(const SelectorCheckingContext& context,
   return false;
 }
 
+bool SelectorChecker::CheckPseudoRouteMatch(
+    const SelectorCheckingContext& context,
+    MatchResult& result) const {
+  DCHECK(context.selector);
+  DCHECK(context.selector->GetRouteLocation());
+  Element& element = GetCandidateElement(context, result);
+  const auto* anchor = DynamicTo<HTMLAnchorElement>(&element);
+  if (!anchor) {
+    return false;
+  }
+  const Route* route = context.selector->GetRouteLocation()->FindOrCreateRoute(
+      element.GetDocument());
+  return route && route->MatchesUrl(anchor->Href());
+}
+
 bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
                                        MatchResult& result) const {
   Element& element = GetCandidateElement(context, result);
@@ -2233,9 +2169,10 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         DCHECK((transition->Scope() == &element && context.pseudo_id) ||
                element.IsPseudoElement());
         DCHECK(context.pseudo_argument || element.IsPseudoElement());
-        const AtomicString& pseudo_argument = element.IsPseudoElement()
-                                                  ? element.GetPseudoArgument()
-                                                  : *context.pseudo_argument;
+        const AtomicString& pseudo_argument =
+            element.IsPseudoElement()
+                ? To<PseudoElement>(element).GetPseudoArgument()
+                : *context.pseudo_argument;
         return transition->MatchForOnlyChild(pseudo_id_to_check,
                                              pseudo_argument);
       }
@@ -2715,14 +2652,23 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
     }
     case CSSSelector::kPseudoRoot:
       return element == element.GetDocument().documentElement();
+    case CSSSelector::kPseudoRouteMatch:
+      DCHECK(RuntimeEnabledFeatures::RouteMatchingEnabled());
+      return CheckPseudoRouteMatch(context, result);
     case CSSSelector::kPseudoLang: {
       auto* vtt_element = DynamicTo<VTTElement>(element);
       AtomicString value = vtt_element ? vtt_element->Language()
                                        : element.ComputeInheritedLanguage();
-      if (value.empty()) {
-        return false;
+      const AtomicString& argument = selector.Argument();
+      if (value.empty() ||
+          !value.StartsWith(argument, kTextCaseASCIIInsensitive)) {
+        break;
       }
-      return MatchesLangPseudoClass(value, *selector.ArgumentList());
+      if (value.length() != argument.length() &&
+          value[argument.length()] != '-') {
+        break;
+      }
+      return true;
     }
     case CSSSelector::kPseudoDir: {
       const AtomicString& argument = selector.Argument();
@@ -2774,6 +2720,22 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
         return select->PopupIsVisible();
       } else if (auto* input = DynamicTo<HTMLInputElement>(element)) {
         return input->IsPickerVisible();
+      }
+      return false;
+    case CSSSelector::kPseudoMenulistPopoverWithMenubarAnchor:
+      if (auto* menulist = DynamicTo<HTMLMenuListElement>(element)) {
+        if (auto* menuitem_anchor = DynamicTo<HTMLMenuItemElement>(
+                menulist->GetPopoverData()->invoker())) {
+          return menuitem_anchor->OwnerMenuBarElement();
+        }
+      }
+      return false;
+    case CSSSelector::kPseudoMenulistPopoverWithMenulistAnchor:
+      if (auto* menulist = DynamicTo<HTMLMenuListElement>(element)) {
+        if (auto* menuitem_anchor = DynamicTo<HTMLMenuItemElement>(
+                menulist->GetPopoverData()->invoker())) {
+          return menuitem_anchor->OwnerMenuListElement();
+        }
       }
       return false;
     case CSSSelector::kPseudoFullscreen:
@@ -3147,9 +3109,10 @@ bool SelectorChecker::CheckPseudoElement(const SelectorCheckingContext& context,
       CHECK(!selector.IdentList().empty());
       const AtomicString& name_or_wildcard = selector.IdentList()[0];
 
-      const String& pseudo_argument = element.IsPseudoElement()
-                                          ? element.GetPseudoArgument()
-                                          : pseudo_argument_;
+      const String& pseudo_argument =
+          element.IsPseudoElement()
+              ? To<PseudoElement>(element).GetPseudoArgument()
+              : pseudo_argument_;
       // note that the pseudo_ident_list is the class list, and
       // pseudo_argument is the name, while in the selector the IdentList() is
       // both the name and the classes.

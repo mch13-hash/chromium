@@ -17,7 +17,9 @@
 #include "components/autofill/core/browser/data_model/payments/iban.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
 #include "components/autofill/core/browser/payments/payments_autofill_client.h"
+#include "components/autofill/core/browser/ui/payments/payments_ui_closed_reasons.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "ui/actions/action_id.h"
 
 namespace autofill {
 
@@ -102,6 +104,8 @@ class IbanBubbleControllerImpl
   GetConfirmationUiParams() const override;
 
   // BubbleControllerBase:
+  void OnBubbleDiscarded() override;
+  bool CanBeReshown() const override;
   BubbleType GetBubbleType() const override;
   base::WeakPtr<BubbleControllerBase> GetBubbleControllerBaseWeakPtr() override;
 
@@ -114,9 +118,13 @@ class IbanBubbleControllerImpl
   explicit IbanBubbleControllerImpl(content::WebContents* web_contents);
 
   // AutofillBubbleControllerBase:
-  std::optional<PageActionIconType> GetPageActionIconType() override;
   void DoShowBubble() override;
   using AutofillBubbleControllerBase::HideBubble;
+  std::optional<PageActionIconType> GetPageActionIconType() override;
+#if !BUILDFLAG(IS_ANDROID)
+  std::optional<actions::ActionId> GetActionIdForPageAction() override;
+  std::optional<std::u16string> GetPageActionTooltipText() override;
+#endif  // !BUILDFLAG(IS_ANDROID)
 
  private:
   friend class content::WebContentsUserData<IbanBubbleControllerImpl>;
@@ -139,8 +147,12 @@ class IbanBubbleControllerImpl
 
   // Returns true iff the bubble for upload save is showing or has been shown.
   bool IsUploadSave() const override;
+
   // Returns empty vector if no legal message should be shown.
   const LegalMessageLines& GetLegalMessageLines() const override;
+
+  // Logs metrics when the bubble is closed.
+  void LogBubbleCloseMetrics(PaymentsUiClosedReason reason);
 
   // Observer for when a bubble is created. Initialized only during tests.
   raw_ptr<ObserverForTest> observer_for_testing_ = nullptr;

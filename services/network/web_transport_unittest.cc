@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/files/file_util.h"
@@ -181,6 +182,8 @@ class TestHandshakeClient final : public mojom::WebTransportHandshakeClient {
     has_seen_handshake_failure_ = true;
     std::move(callback_).Run();
   }
+
+  void CloseReceiver() { receiver_.reset(); }
 
   mojo::PendingRemote<mojom::WebTransport> PassTransport() {
     return std::move(transport_);
@@ -577,7 +580,7 @@ TEST_F(WebTransportTest, ConnectLNAPermissionDenied) {
 
   ASSERT_TRUE(test_handshake_client.handshake_error().has_value());
   EXPECT_EQ(test_handshake_client.handshake_error()->net_error,
-            net::ERR_BLOCKED_BY_PRIVATE_NETWORK_ACCESS_CHECKS);
+            net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS);
 }
 
 TEST_F(WebTransportTest, ConnectLNAPermissionGranted) {
@@ -795,9 +798,10 @@ TEST_F(WebTransportTest, DeleteClientWithStreamsOpen) {
     const MojoCreateDataPipeOptions options = {
         sizeof(options), MOJO_CREATE_DATA_PIPE_FLAG_NONE, 1, 4 * 1024};
     mojo::ScopedDataPipeConsumerHandle readable_for_outgoing;
-    ASSERT_EQ(MOJO_RESULT_OK,
-              mojo::CreateDataPipe(&options, writable_for_outgoing[i],
-                                   readable_for_outgoing));
+    ASSERT_EQ(
+        MOJO_RESULT_OK,
+        mojo::CreateDataPipe(&options, UNSAFE_TODO(writable_for_outgoing[i]),
+                             readable_for_outgoing));
     base::RunLoop run_loop_for_stream_creation;
     bool stream_created;
     transport_remote->CreateStream(
@@ -900,6 +904,105 @@ TEST_F(WebTransportTest, Stats) {
   ASSERT_FALSE(stats.is_null());
   EXPECT_GT(stats->min_rtt, base::Microseconds(0));
   EXPECT_LT(stats->min_rtt, base::Seconds(5));
+}
+
+// Test that Dispose() handles properly when transport exists but session is
+// null. This validates the transport_->session() check in Dispose().
+TEST_F(WebTransportTest, DisposeWithNullSession) {
+  base::RunLoop run_loop_for_handshake;
+  mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client;
+  TestHandshakeClient test_handshake_client(
+      handshake_client.InitWithNewPipeAndPassReceiver(),
+      run_loop_for_handshake.QuitClosure());
+
+  CreateWebTransport(GetURL("/echo"), origin(), std::move(handshake_client));
+
+  RunPendingTasks();
+
+  // Close the handshake receiver immediately before session establishment.
+  // This simulates scenarios like:
+  // - Network context shutdown during early connection phase.
+  // - Tab close before QUIC session is fully established.
+  // - Process termination during handshake.
+  test_handshake_client.CloseReceiver();
+
+  // Should see no connection establishment due to early receiver closure.
+  EXPECT_FALSE(test_handshake_client.has_seen_connection_establishment());
+
+  // This is where Dispose() gets called with transport_ != null.
+  RunPendingTasks();
+
+  // Verify connection closed properly with clean shutdown.
+  EXPECT_EQ(0u, network_context().NumOpenWebTransports());
+}
+
+// Test that tab close scenario handles cleanup properly and shuts down
+// cleanly.
+TEST_F(WebTransportTest, TabCloseCleanShutdown) {
+  base::RunLoop run_loop_for_handshake;
+  mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client;
+  TestHandshakeClient test_handshake_client(
+      handshake_client.InitWithNewPipeAndPassReceiver(),
+      run_loop_for_handshake.QuitClosure());
+
+  CreateWebTransport(GetURL("/echo"), origin(), std::move(handshake_client));
+  run_loop_for_handshake.Run();
+
+  EXPECT_TRUE(test_handshake_client.has_seen_connection_establishment());
+  EXPECT_EQ(1u, network_context().NumOpenWebTransports());
+
+  mojo::Remote<mojom::WebTransport> transport_remote(
+      test_handshake_client.PassTransport());
+  TestClient client(test_handshake_client.PassClientReceiver());
+
+  // Simulate tab close by resetting the transport remote (disconnects the
+  // pipe). This triggers the disconnect handler which calls Dispose() directly.
+  transport_remote.reset();
+
+  // Wait for mojo connection error which should happen due to pipe disconnect.
+  client.WaitUntilMojoConnectionError();
+  EXPECT_TRUE(client.has_seen_mojo_connection_error());
+
+  RunPendingTasks();
+
+  // Verify connection closed properly with clean shutdown.
+  EXPECT_EQ(0u, network_context().NumOpenWebTransports());
+}
+
+// This test verifies that calling WebTransport::Close() explicitly (e.g.,
+// user-initiated disconnect) and then performing internal cleanup through
+// Dispose() does not result in multiple close frames being sent or undefined
+// behavior.
+TEST_F(WebTransportTest, ExplicitConnectionClose) {
+  base::RunLoop run_loop_for_handshake;
+  mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client;
+  TestHandshakeClient test_handshake_client(
+      handshake_client.InitWithNewPipeAndPassReceiver(),
+      run_loop_for_handshake.QuitClosure());
+
+  CreateWebTransport(GetURL("/echo"), origin(), std::move(handshake_client));
+  run_loop_for_handshake.Run();
+
+  EXPECT_TRUE(test_handshake_client.has_seen_connection_establishment());
+  EXPECT_EQ(1u, network_context().NumOpenWebTransports());
+
+  mojo::Remote<mojom::WebTransport> transport_remote(
+      test_handshake_client.PassTransport());
+  TestClient client(test_handshake_client.PassClientReceiver());
+
+  // Simulate explicit connection close.
+  auto close_info = mojom::WebTransportCloseInfo::New();
+  close_info->code = 1000;
+  close_info->reason = "User exit";
+  transport_remote->Close(std::move(close_info));
+
+  base::RunLoop run_loop_for_close;
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE, run_loop_for_close.QuitClosure(), base::Milliseconds(100));
+  run_loop_for_close.Run();
+
+  // The torn_down_ flag should prevent double Close() when Dispose() is called.
+  EXPECT_EQ(0u, network_context().NumOpenWebTransports());
 }
 
 class WebTransportWithCustomCertificateTest : public WebTransportTest {

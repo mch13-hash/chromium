@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/html/anchor_element_utils.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/html/html_area_element.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -125,7 +126,8 @@ std::optional<Referrer> GetReferrer(const SpeculationRule* rule,
   network::mojom::ReferrerPolicy referrer_policy;
   if (rule->referrer_policy()) {
     referrer_policy = rule->referrer_policy().value();
-  } else if (link && link->HasRel(kRelationNoReferrer)) {
+  } else if (link && AnchorElementUtils::HasRel(link->GetLinkRelations(),
+                                                kRelationNoReferrer)) {
     referrer_policy = network::mojom::ReferrerPolicy::kNever;
     UseCounter::Count(document,
                       WebFeature::kSpeculationRulesUsedLinkReferrerPolicy);
@@ -723,7 +725,8 @@ void DocumentSpeculationRules::UpdateSpeculationCandidates() {
     push_candidates(mojom::blink::SpeculationAction::kPrerender, rule_set,
                     rule_set->prerender_rules());
 
-    if (RuntimeEnabledFeatures::PrerenderUntilScriptEnabled()) {
+    if (RuntimeEnabledFeatures::PrerenderUntilScriptEnabled(
+            document.domWindow())) {
       push_candidates(mojom::blink::SpeculationAction::kPrerenderUntilScript,
                       rule_set, rule_set->prerender_until_script_rules());
     }
@@ -771,7 +774,10 @@ void DocumentSpeculationRules::UpdateSpeculationCandidates() {
     mojom_candidates.push_back(std::move(mojom_candidate));
   }
 
-  host->UpdateSpeculationCandidates(std::move(mojom_candidates));
+  host->UpdateSpeculationCandidates(
+      std::move(mojom_candidates),
+      RuntimeEnabledFeatures::Prerender2CrossOriginIframesEnabled(
+          execution_context));
 
   if (eagerness_set.Has(SpeculationEagerness::kConservative)) {
     UseCounter::Count(document,
@@ -900,7 +906,8 @@ void DocumentSpeculationRules::AddLinkBasedSpeculationCandidates(
       push_link_candidates(mojom::blink::SpeculationAction::kPrerender,
                            rule_set, rule_set->prerender_rules());
 
-      if (RuntimeEnabledFeatures::PrerenderUntilScriptEnabled()) {
+      if (RuntimeEnabledFeatures::PrerenderUntilScriptEnabled(
+              document.domWindow())) {
         push_link_candidates(
             mojom::blink::SpeculationAction::kPrerenderUntilScript, rule_set,
             rule_set->prerender_until_script_rules());

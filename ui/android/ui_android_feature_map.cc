@@ -24,10 +24,11 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &ui::kCheckIntentCallerPermission,
     &ui::kDeprecatedExternalPickerFunction,
     &ui::kDisablePhotoPickerForVideoCapture,
-    &ui::kFormFactorUseMaxWindowMetrics,
-    &ui::kMirrorBackForwardGesturesInRTL,
+    &ui::kRefactorMinWidthContextOverride,
+    &ui::kReportBottomOverscrolls,
     &ui::kRequireLeadingInTextViewWithLeading,
     &ui::kSelectFileOpenDocument,
+    &ui::kAndroidTouchpadOverscrollHistoryNavigation,
 };
 
 // static

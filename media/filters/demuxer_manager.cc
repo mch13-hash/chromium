@@ -316,7 +316,7 @@ PipelineStatus DemuxerManager::CreateDemuxer(
 #if BUILDFLAG(ENABLE_FFMPEG)
     SetDemuxer(CreateFFmpegDemuxer());
 #else
-    return DEMUXER_ERROR_COULD_NOT_OPEN;
+    return DEMUXER_ERROR_PROGRESSIVE_DISABLED;
 #endif
   } else {
     DCHECK(!HasDataSource());
@@ -424,21 +424,6 @@ bool DemuxerManager::IsStreaming() const {
          (demuxer_ && !demuxer_->IsSeekable());
 }
 
-bool DemuxerManager::PassedDataSourceTimingAllowOriginCheck() const {
-  // If there is no MultiBuffer, then there are no HTTP responses, and so this
-  // can safely return true. Specifically for the MSE case, the app itself
-  // sources the ArrayBuffer[Views], possibly not even from HTTP responses. Any
-  // TAO checks which are present to prevent deduction of the resource content
-  // can be assumed to have passed, as the content is already readable by the
-  // app. TAO checks which would be used to determine other network timing
-  // info, such as DNS lookup time, are not relevant as the media data is far
-  // removed from the network itself at this point, and so that info cannot be
-  // revealed via the MediaSource or WebMediaPlayer that's using MSE.
-  // TODO(crbug.com/40057824): Ensure that this returns the correct value for
-  // HLS media, based on the TAO checks performed on those resources.
-  return !data_source_ || data_source_->PassedTimingAllowOriginCheck();
-}
-
 bool DemuxerManager::IsLiveContent() const {
   // Manifest demuxer reports true live content accurately, while all other
   // demuxers do not. TODO(crbug.com/40057824): Consider making IsSeekable
@@ -484,9 +469,9 @@ DemuxerManager::CreateHlsDemuxer() {
   auto engine = std::make_unique<HlsManifestDemuxerEngine>(
       client_->GetHlsDataSourceProvider(), media_task_runner_,
       BindPostTaskToCurrentDefault(base::BindRepeating(
-          &DemuxerManager::AddMediaTrack, weak_factory_.GetWeakPtr())),
+          &DemuxerManager::AddTrack, weak_factory_.GetWeakPtr())),
       BindPostTaskToCurrentDefault(base::BindRepeating(
-          &DemuxerManager::RemoveMediaTrack, weak_factory_.GetWeakPtr())),
+          &DemuxerManager::RemoveTrack, weak_factory_.GetWeakPtr())),
       would_taint_origin, loaded_url_, media_log_.get());
 
   raw_ptr<DataSourceInfo> datasource_info = engine.get();
@@ -554,7 +539,7 @@ void DemuxerManager::OnFFmpegMediaTracksUpdated(
     switch (track->type()) {
       case MediaTrack::Type::kAudio:
       case MediaTrack::Type::kVideo:
-        client_->AddMediaTrack(*track);
+        client_->AddTrack(*track);
         break;
       default:
         // Text tracks are not supported through this code path.
@@ -565,11 +550,11 @@ void DemuxerManager::OnFFmpegMediaTracksUpdated(
 #endif  // BUILDFLAG(ENABLE_FFMPEG)
 
 #if BUILDFLAG(ENABLE_FFMPEG) || BUILDFLAG(ENABLE_HLS_DEMUXER)
-void DemuxerManager::AddMediaTrack(const media::MediaTrack& track) {
-  client_->AddMediaTrack(track);
+void DemuxerManager::AddTrack(const MediaTrack& track) {
+  client_->AddTrack(track);
 }
-void DemuxerManager::RemoveMediaTrack(const media::MediaTrack& track) {
-  client_->RemoveMediaTrack(track);
+void DemuxerManager::RemoveTrack(const MediaTrack& track) {
+  client_->RemoveTrack(track);
 }
 #endif  // BUILDFLAG(ENABLE_FFMPEG) || BUILDFLAG(ENABLE_HLS_DEMUXER)
 

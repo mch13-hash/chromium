@@ -49,6 +49,7 @@ namespace {
 using testing::Field;
 using testing::IsEmpty;
 using testing::Matcher;
+using testing::Optional;
 using testing::Property;
 
 constexpr char kAddressesSuppressedHistogramName[] =
@@ -134,8 +135,8 @@ class AddressSuggestionGeneratorTest : public testing::Test {
 
     std::vector<Suggestion> suggestions;
     AddressSuggestionGenerator address_suggestion_generator(
-        autofill_client_, /*plus_address_email_override=*/std::nullopt,
-        /*form_filler=*/nullptr, /*log_manager=*/nullptr);
+        /*plus_address_email_override=*/std::nullopt,
+        /*log_manager=*/nullptr);
 
     auto on_suggestions_generated =
         [&suggestions](
@@ -151,7 +152,8 @@ class AddressSuggestionGeneratorTest : public testing::Test {
                 suggestion_data) {
           address_suggestion_generator.GenerateSuggestions(
               form_data, field_data, form_structure_.get(), &field(),
-              {std::move(suggestion_data)}, on_suggestions_generated);
+              *autofill_client(), {std::move(suggestion_data)},
+              on_suggestions_generated);
         };
 
     // Since the `on_suggestions_generated` callback is called synchronously,
@@ -162,7 +164,19 @@ class AddressSuggestionGeneratorTest : public testing::Test {
     return suggestions;
   }
 
+  std::vector<Suggestion> GetSuggestionsOnTypingWithPrefix(
+      const std::u16string& prefix) {
+    FormFieldData field;
+    field.set_value(prefix);
+    FormData form;
+    test_api(form).Append(field);
+
+    return GetSuggestionsOnTypingForProfile(autofill_client_, form, field);
+  }
+
  private:
+  base::test::ScopedFeatureList scoped_feature_list_{
+      features::kAutofillAddressSuggestionsOnTyping};
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::SYSTEM_TIME};
   test::AutofillUnitTestEnvironment autofill_test_environment_;
@@ -181,7 +195,7 @@ TEST_F(AddressSuggestionGeneratorTest,
 
   profile_1.SetRawInfo(NAME_FULL, u"Jef dean");
   profile_2.SetRawInfo(NAME_FULL, u"Larry page");
-  profile_2.SetRawInfo(ADDRESS_HOME_ZIP, u"4398125");
+  profile_2.SetRawInfo(ADDRESS_HOME_ZIP, u"4398125123");
   profile_3.SetRawInfo(NAME_FULL, u"Sundar pichai");
 
   address_data().AddProfile(profile_1);
@@ -193,18 +207,18 @@ TEST_F(AddressSuggestionGeneratorTest,
   // Expects that no suggestion is returned if the field content matches
   // `NAME_FULL` prefix from the top profile but the field content
   // has only 1 character.
-  EXPECT_EQ(GetSuggestionsOnTypingForProfile(address_data(), u"W").size(), 0u);
+  EXPECT_EQ(GetSuggestionsOnTypingWithPrefix(u"W").size(), 0u);
   // Expects that no suggestion is returned if the field content matches
   // `NAME_FULL` prefix from the top profile but the field content
   // has only 2 characters.
-  EXPECT_EQ(GetSuggestionsOnTypingForProfile(address_data(), u"Su").size(), 0u);
+  EXPECT_EQ(GetSuggestionsOnTypingWithPrefix(u"Su").size(), 0u);
   // Expects that suggestions are returned if the field content matches
   // prefix data from the top profile, even when the field content
   // has more than 3 characters. Note that a suggestion for `FIRST_NAME` is not
   // returned because the string value it would fill in the field and the typed
   // data is not large enough.
   EXPECT_THAT(
-      GetSuggestionsOnTypingForProfile(address_data(), u"Sund"),
+      GetSuggestionsOnTypingWithPrefix(u"Sund"),
       ElementsAre(EqualsSuggestion(SuggestionType::kAddressEntryOnTyping,
                                    u"Sundar pichai"),
                   EqualsSuggestion(SuggestionType::kSeparator),
@@ -213,7 +227,7 @@ TEST_F(AddressSuggestionGeneratorTest,
   // prefix data from the second profile when the field content
   // has more than 3 characters.
   EXPECT_THAT(
-      GetSuggestionsOnTypingForProfile(address_data(), u"Larr"),
+      GetSuggestionsOnTypingWithPrefix(u"Larr"),
       ElementsAre(EqualsSuggestion(SuggestionType::kAddressEntryOnTyping,
                                    u"Larry page"),
                   EqualsSuggestion(SuggestionType::kSeparator),
@@ -221,20 +235,77 @@ TEST_F(AddressSuggestionGeneratorTest,
   // Expects NO suggestions are returned if the field content matches
   // prefix data from the third profile, even when the field content
   // has more than 3 characters.
-  EXPECT_EQ(GetSuggestionsOnTypingForProfile(address_data(), u"Jef").size(),
-            0u);
-  // Expects that for data that require less prefix matching characters (like
-  // `ADDRESS_HOME_ZIP`) only two matching characters are enough to create
-  // suggestions.
+  EXPECT_EQ(GetSuggestionsOnTypingWithPrefix(u"Jef").size(), 0u);
+  // Test that suggestions are created for different field types as well.
   EXPECT_THAT(
-      GetSuggestionsOnTypingForProfile(address_data(), u"43"),
-      ElementsAre(
-          EqualsSuggestion(SuggestionType::kAddressEntryOnTyping, u"4398125"),
-          EqualsSuggestion(SuggestionType::kSeparator),
-          EqualsSuggestion(SuggestionType::kManageAddress)));
-  // However 1 matching digit is not enough to return a suggestion.
-  EXPECT_THAT(GetSuggestionsOnTypingForProfile(address_data(), u"4").size(),
-              0u);
+      GetSuggestionsOnTypingWithPrefix(u"439"),
+      ElementsAre(EqualsSuggestion(SuggestionType::kAddressEntryOnTyping,
+                                   u"4398125123"),
+                  EqualsSuggestion(SuggestionType::kSeparator),
+                  EqualsSuggestion(SuggestionType::kManageAddress)));
+}
+
+// Tests Autofill on typing feature flag feature params (not all but the more
+// sensitive ones).
+TEST_F(
+    AddressSuggestionGeneratorTest,
+    GetSuggestionsOnTypingForProfile_OverrideParams_ReturnMatchingSuggestions) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeaturesAndParameters(
+      /*enabled_features=*/{{features::kAutofillAddressSuggestionsOnTyping,
+                             {{"min_number_characters_to_match", "4"},
+                              {"field_types", "7-10"}}}},
+      /*disabled_features=*/{});
+  AutofillProfile profile_1(i18n_model_definition::kLegacyHierarchyCountryCode);
+
+  profile_1.SetRawInfo(NAME_FULL, u"Sundar pichai");
+  profile_1.SetRawInfo(ADDRESS_HOME_ZIP, u"4398125123");
+
+  address_data().AddProfile(profile_1);
+
+  ASSERT_EQ(address_data().GetProfilesToSuggest().size(), 1u);
+
+  // Expects that no suggestion is returned if the field content matches
+  // `NAME_FULL` prefix but the field content has less than 4 characters.
+  EXPECT_EQ(GetSuggestionsOnTypingWithPrefix(u"S").size(), 0u);
+  EXPECT_EQ(GetSuggestionsOnTypingWithPrefix(u"Su").size(), 0u);
+  EXPECT_EQ(GetSuggestionsOnTypingWithPrefix(u"Sun").size(), 0u);
+
+  // Expects that a suggestion is returned if the field content has 4 characters
+  // and matches the `NAME_FULL` prefix.
+  EXPECT_THAT(
+      GetSuggestionsOnTypingWithPrefix(u"Sund"),
+      ElementsAre(EqualsSuggestion(SuggestionType::kAddressEntryOnTyping,
+                                   u"Sundar pichai"),
+                  EqualsSuggestion(SuggestionType::kSeparator),
+                  EqualsSuggestion(SuggestionType::kManageAddress)));
+  // The available field types to build Autofill on type suggestions (from the
+  // feature param) was overridden and does not contain ZIP_CODE.
+  EXPECT_TRUE(GetSuggestionsOnTypingWithPrefix(u"4398").empty());
+}
+
+// Tests that overring the possible Autofill on typing types via feature params
+// with a string that cannot be parsed, leads to no suggestion being shown (and
+// no crash).
+TEST_F(
+    AddressSuggestionGeneratorTest,
+    GetSuggestionsOnTypingForProfile_OverrideParams_UnparseableFieldTypesParam_DoNotReturnSuggestions) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitWithFeaturesAndParameters(
+      /*enabled_features=*/{{features::kAutofillAddressSuggestionsOnTyping,
+                             {{"field_types", "7/"}}}},
+      /*disabled_features=*/{});
+  AutofillProfile profile_1(i18n_model_definition::kLegacyHierarchyCountryCode);
+
+  profile_1.SetRawInfo(NAME_FULL, u"Sundar pichai");
+
+  address_data().AddProfile(profile_1);
+
+  ASSERT_EQ(address_data().GetProfilesToSuggest().size(), 1u);
+
+  // Expects that a suggestion is returned if the field content has 4 characters
+  // and matches the `NAME_FULL` prefix.
+  EXPECT_TRUE(GetSuggestionsOnTypingWithPrefix(u"Sun").empty());
 }
 
 // Tests that special characters will be used while prefix matching the user's
@@ -896,8 +967,8 @@ TEST_F(
                   EqualsSuggestion(SuggestionType::kManageAddress)));
 }
 
-// Tests that Home/Work icons are correctly assigned.
-TEST_F(AddressSuggestionGeneratorTest, TestAddressSuggestion_HomeAndWorkIcons) {
+// Tests that Home/Work suggestions are correctly generated.
+TEST_F(AddressSuggestionGeneratorTest, TestAddressSuggestion_HomeAndWork) {
   base::test::ScopedFeatureList features(
       features::kAutofillEnableSupportForHomeAndWork);
 
@@ -922,9 +993,12 @@ TEST_F(AddressSuggestionGeneratorTest, TestAddressSuggestion_HomeAndWorkIcons) {
   EXPECT_THAT(
       suggestions,
       ElementsAre(
-          AllOf(HasIcon(Suggestion::Icon::kAccount), HasNoIphFeature()),
-          AllOf(HasIcon(Suggestion::Icon::kHome), HasIphFeature(kIphFeature)),
-          AllOf(HasIcon(Suggestion::Icon::kWork), HasIphFeature(kIphFeature))));
+          AllOf(HasIcon(Suggestion::Icon::kAccount), HasNoIphFeature(),
+                Field(&Suggestion::voice_over, std::nullopt)),
+          AllOf(HasIcon(Suggestion::Icon::kHome), HasIphFeature(kIphFeature),
+                Field(&Suggestion::voice_over, Optional(Not(IsEmpty())))),
+          AllOf(HasIcon(Suggestion::Icon::kWork), HasIphFeature(kIphFeature),
+                Field(&Suggestion::voice_over, Optional(Not(IsEmpty()))))));
 
   FormFieldData triggering_field_email;
   triggering_field_email.set_label(u"Email");
@@ -1279,8 +1353,8 @@ TEST_F(AddressSuggestionGeneratorTest, GeneratesSuggestions) {
   test_api(*form_structure).SetFieldTypes({NAME_FULL});
 
   AddressSuggestionGenerator generator(
-      *autofill_client(), /*plus_address_email_override=*/std::nullopt,
-      /*form_filler=*/nullptr, /*log_manager=*/nullptr);
+      /*plus_address_email_override=*/std::nullopt,
+      /*log_manager=*/nullptr);
   std::pair<SuggestionGenerator::SuggestionDataSource,
             std::vector<SuggestionGenerator::SuggestionData>>
       savedCallbackArgument;
@@ -1302,9 +1376,10 @@ TEST_F(AddressSuggestionGeneratorTest, GeneratesSuggestions) {
               EqualsSuggestion(SuggestionType::kAddressEntry, u"John H. Doe"),
               EqualsSuggestion(SuggestionType::kSeparator),
               EqualsSuggestion(SuggestionType::kManageAddress)))));
-  generator.GenerateSuggestions(
-      form_data, field, form_structure.get(), form_structure->field(0),
-      {savedCallbackArgument}, suggestions_generated_callback.Get());
+  generator.GenerateSuggestions(form_data, field, form_structure.get(),
+                                form_structure->field(0), *autofill_client(),
+                                {savedCallbackArgument},
+                                suggestions_generated_callback.Get());
 }
 
 }  // namespace

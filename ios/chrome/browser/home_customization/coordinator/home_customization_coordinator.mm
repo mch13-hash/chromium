@@ -7,6 +7,7 @@
 #import "base/feature_list.h"
 #import "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #import "components/prefs/pref_service.h"
+#import "ios/chrome/browser/commerce/model/shopping_service_factory.h"
 #import "ios/chrome/browser/discover_feed/model/discover_feed_visibility_browser_agent.h"
 #import "ios/chrome/browser/google/model/google_logo_service_factory.h"
 #import "ios/chrome/browser/home_customization/coordinator/home_customization_background_configuration_mediator.h"
@@ -31,6 +32,8 @@
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
+#import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_browser_agent.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_params.h"
@@ -113,7 +116,9 @@ CGFloat const kSheetCornerRadius = 30;
   _mediator = [[HomeCustomizationMediator alloc]
                      initWithPrefService:self.profile->GetPrefs()
       discoverFeedVisibilityBrowserAgent:DiscoverFeedVisibilityBrowserAgent::
-                                             FromBrowser(self.browser)];
+                                             FromBrowser(self.browser)
+                         shoppingService:commerce::ShoppingServiceFactory::
+                                             GetForProfile(self.profile)];
   _mediator.navigationDelegate = self;
 
   if (IsNTPBackgroundCustomizationEnabled() &&
@@ -147,6 +152,9 @@ CGFloat const kSheetCornerRadius = 30;
   [self.baseViewController dismissViewControllerAnimated:YES completion:nil];
 
   [self dismissBackgroundPickerActionSheet];
+
+  [HandlerForProtocol(self.browser->GetCommandDispatcher(), SnackbarCommands)
+      dismissAllSnackbars];
 
   _mediator = nil;
   _mainViewController = nil;
@@ -206,6 +214,12 @@ CGFloat const kSheetCornerRadius = 30;
 
 #pragma mark - UISheetPresentationControllerDelegate
 
+- (void)presentationControllerWillDismiss:
+    (UIPresentationController*)presentationController {
+  [HandlerForProtocol(self.browser->GetCommandDispatcher(), SnackbarCommands)
+      dismissAllSnackbars];
+}
+
 - (void)presentationControllerDidDismiss:
     (UIPresentationController*)presentationController {
   [self dismissCurrentPageBySwipe:YES
@@ -217,6 +231,18 @@ CGFloat const kSheetCornerRadius = 30;
 
 // Creates a view controller for a page in the menu.
 - (UIViewController*)createMenuPage:(CustomizationMenuPage)page {
+  auto detentResolver = ^CGFloat(
+      id<UISheetPresentationControllerDetentResolutionContext> context) {
+    return kInitialDetentHeight;
+  };
+  UISheetPresentationControllerDetent* initialDetent =
+      [UISheetPresentationControllerDetent
+          customDetentWithIdentifier:kBottomSheetDetentIdentifier
+                            resolver:detentResolver];
+  NSMutableArray<UISheetPresentationControllerDetent*>* detents = [@[
+    initialDetent,
+  ] mutableCopy];
+
   UIViewController* menuPage;
 
   // Create view controller for the `page` and configure it with the mediator.
@@ -224,6 +250,8 @@ CGFloat const kSheetCornerRadius = 30;
     case CustomizationMenuPage::kMain: {
       self.mainViewController =
           [[HomeCustomizationMainViewController alloc] init];
+      self.mainViewController.snackbarCommandHandler = HandlerForProtocol(
+          self.browser->GetCommandDispatcher(), SnackbarCommands);
       self.mainViewController.backgroundPickerPresentationDelegate = self;
       self.mainViewController.mutator = _mediator;
       self.mainViewController.customizationMutator =
@@ -232,15 +260,24 @@ CGFloat const kSheetCornerRadius = 30;
       self.mainViewController.customizationDisabledByPolicy =
           _backgroundService->IsCustomizationDisabledOrColorManagedByPolicy();
       self.mediator.mainPageConsumer = self.mainViewController;
-      _backgroundConfigurationMediator.configurationConsumer =
-          self.mainViewController;
-      // Do not set self.mainViewController as
-      // _backgroundConfigurationMediator.consumer because this view should not
-      // have cancel/done buttons when the selected background changes.
+      _backgroundConfigurationMediator.consumer = self.mainViewController;
       [self.mediator configureMainPageData];
       [_backgroundConfigurationMediator
           loadRecentlyUsedBackgroundConfigurations];
       menuPage = self.mainViewController;
+
+      __weak __typeof(self) weakSelf = self;
+      auto expandedDetentResolver = ^CGFloat(
+          id<UISheetPresentationControllerDetentResolutionContext> context) {
+        return [weakSelf detentHeightForMainViewControllerExpanded];
+      };
+
+      UISheetPresentationControllerDetent* expandedDetent =
+          [UISheetPresentationControllerDetent
+              customDetentWithIdentifier:kBottomSheetExpandedDetentIdentifier
+                                resolver:expandedDetentResolver];
+      [detents addObject:expandedDetent];
+
       break;
     }
     case CustomizationMenuPage::kMagicStack: {
@@ -284,21 +321,12 @@ CGFloat const kSheetCornerRadius = 30;
   presentationController.preferredCornerRadius = kSheetCornerRadius;
   presentationController.delegate = self;
 
-  auto detentResolver = ^CGFloat(
-      id<UISheetPresentationControllerDetentResolutionContext> context) {
-    return kInitialDetentHeight;
-  };
-  UISheetPresentationControllerDetent* initialDetent =
-      [UISheetPresentationControllerDetent
-          customDetentWithIdentifier:kBottomSheetDetentIdentifier
-                            resolver:detentResolver];
-  presentationController.detents = @[
-    initialDetent,
-  ];
+  presentationController.detents = detents;
+  presentationController.prefersScrollingExpandsWhenScrolledToEdge = NO;
   presentationController.selectedDetentIdentifier =
       kBottomSheetDetentIdentifier;
   presentationController.largestUndimmedDetentIdentifier =
-      kBottomSheetDetentIdentifier;
+      presentationController.detents.lastObject.identifier;
 
   return navigationController;
 }
@@ -337,6 +365,13 @@ CGFloat const kSheetCornerRadius = 30;
   }
 }
 
+- (CGFloat)detentHeightForMainViewControllerExpanded {
+  CGFloat height = self.mainViewController.viewContentHeight;
+  return (height < kInitialDetentHeight)
+             ? UISheetPresentationControllerDetentInactive
+             : height;
+}
+
 #pragma mark - HomeCustomizationBackgroundPickerPresentationDelegate
 
 - (void)showBackgroundPickerOptionsFromSourceView:(UIView*)sourceView {
@@ -353,6 +388,7 @@ CGFloat const kSheetCornerRadius = 30;
   // open so the user can't choose a new background from the main menu while in
   // the process of dismissing the picker views.
   self.mainViewController.backgroundCustomizationUserInteractionEnabled = NO;
+  self.currentPageViewController.view.accessibilityElementsHidden = YES;
 }
 
 - (void)dismissBackgroundPicker {
@@ -363,6 +399,8 @@ CGFloat const kSheetCornerRadius = 30;
   // Reenable interaction when the picker is canceled, as the main menu is now
   // active again.
   self.mainViewController.backgroundCustomizationUserInteractionEnabled = YES;
+  self.currentPageViewController.view.accessibilityElementsHidden = NO;
+
   [self dismissBackgroundPickerActionSheet];
 }
 

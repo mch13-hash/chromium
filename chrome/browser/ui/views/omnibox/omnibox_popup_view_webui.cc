@@ -17,8 +17,11 @@
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_content.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_row_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
@@ -45,14 +48,15 @@ OmniboxPopupViewWebUI::OmniboxPopupViewWebUI(OmniboxViewViews* omnibox_view,
     : OmniboxPopupView(controller),
       construction_time_(base::TimeTicks::Now()),
       omnibox_view_(omnibox_view),
-      location_bar_view_(location_bar_view),
-      presenter_(std::make_unique<OmniboxPopupPresenter>(location_bar_view,
-                                                         controller)) {
-  model()->set_popup_view(this);
+      location_bar_view_(location_bar_view) {
+  presenter_ =
+      std::make_unique<OmniboxPopupPresenter>(location_bar_view, controller);
+  controller->edit_model()->set_popup_view(this);
+  edit_model_observation_.Observe(controller->edit_model());
 }
 
 OmniboxPopupViewWebUI::~OmniboxPopupViewWebUI() {
-  model()->set_popup_view(nullptr);
+  controller()->edit_model()->set_popup_view(nullptr);
 }
 
 bool OmniboxPopupViewWebUI::IsOpen() const {
@@ -62,14 +66,8 @@ bool OmniboxPopupViewWebUI::IsOpen() const {
 void OmniboxPopupViewWebUI::InvalidateLine(size_t line) {}
 
 void OmniboxPopupViewWebUI::UpdatePopupAppearance() {
-  // Measure time since construction just once.
-  if (!construction_time_.is_null()) {
-    const base::TimeDelta delta = base::TimeTicks::Now() - construction_time_;
-    construction_time_ = base::TimeTicks();
-    base::UmaHistogramTimes("Omnibox.WebUI.FirstUpdate", delta);
-  }
-
-  if (controller()->autocomplete_controller()->result().empty() ||
+  if (controller()->edit_model()->PopupInAiMode() ||
+      controller()->autocomplete_controller()->result().empty() ||
       omnibox_view_->IsImeShowingPopup()) {
     presenter_->Hide();
   } else {
@@ -77,15 +75,22 @@ void OmniboxPopupViewWebUI::UpdatePopupAppearance() {
     presenter_->Show();
     if (!was_visible) {
       NotifyOpenListeners();
+      if (!construction_time_.is_null()) {
+        const base::TimeDelta delta =
+            base::TimeTicks::Now() - construction_time_;
+        construction_time_ = base::TimeTicks();
+        base::UmaHistogramTimes(
+            "Omnibox.Popup.WebUI.ConstructionToFirstShownDuration", delta);
+      }
     }
   }
 }
 
-void OmniboxPopupViewWebUI::ProvideButtonFocusHint(size_t line) {
-  // TODO(crbug.com/40062053): Not implemented for WebUI omnibox popup yet.
+void OmniboxPopupViewWebUI::OnContentsChanged() {
+  UpdatePopupAppearance();
 }
 
-void OmniboxPopupViewWebUI::OnMatchIconUpdated(size_t match_index) {
+void OmniboxPopupViewWebUI::ProvideButtonFocusHint(size_t line) {
   // TODO(crbug.com/40062053): Not implemented for WebUI omnibox popup yet.
 }
 

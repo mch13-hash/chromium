@@ -336,6 +336,10 @@ void ViewAndroid::SetCopyOutputCallback(CopyViewCallback callback) {
   copy_view_callback_ = std::move(callback);
 }
 
+void ViewAndroid::SetHitTestCallback(HitTestCallback callback) {
+  hit_test_callback_ = std::move(callback);
+}
+
 // If view does not support copy request, return back the request.
 std::unique_ptr<viz::CopyOutputRequest> ViewAndroid::MaybeRequestCopyOfView(
     std::unique_ptr<viz::CopyOutputRequest> request) {
@@ -723,6 +727,10 @@ template <typename E>
 bool ViewAndroid::HitTest(EventHandlerCallback<E> handler_callback,
                           const E& event,
                           const gfx::PointF& point) {
+  if (!IsCheckHitEligible()) {
+    return false;
+  }
+
   if (event_handler_) {
     if (bounds_dips_.origin().IsOrigin()) {  // (x, y) == (0, 0)
       if (handler_callback.Run(event_handler_.get(), event))
@@ -744,8 +752,7 @@ bool ViewAndroid::HitTest(EventHandlerCallback<E> handler_callback,
       bool matched = child->match_parent();
       if (!matched)
         matched = child->bounds_dips_.Contains(int_point);
-      if (matched && child->HitTest(handler_callback, event, offset_point) &&
-          child->IsCheckHitEligible()) {
+      if (matched && child->HitTest(handler_callback, event, offset_point)) {
         return true;
       }
     }
@@ -776,7 +783,7 @@ void ViewAndroid::OnPointerLockRelease() {
 
 bool ViewAndroid::IsCheckHitEligible() const {
   return !base::FeatureList::IsEnabled(kCheckHitEligibility) ||
-         is_hit_test_eligible_;
+         hit_test_callback_.is_null() || hit_test_callback_.Run();
 }
 
 }  // namespace ui

@@ -14,6 +14,7 @@
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
+#include "base/sequence_checker.h"
 #include "components/autofill/core/browser/integrators/password_form_classification.h"
 #include "components/autofill/core/browser/integrators/plus_addresses/autofill_plus_address_delegate.h"
 #include "components/plus_addresses/core/browser/affiliations/plus_address_affiliation_match_helper.h"
@@ -35,10 +36,6 @@ class PrefService;
 namespace affiliations {
 class AffiliationService;
 }
-
-namespace autofill {
-class FormData;
-}  // namespace autofill
 
 namespace signin {
 class IdentityManager;
@@ -81,13 +78,8 @@ class PlusAddressServiceImpl : public PlusAddressService,
   std::vector<autofill::Suggestion> GetSuggestionsFromPlusAddresses(
       const std::vector<std::string>& plus_addresses,
       const url::Origin& origin,
-      bool is_off_the_record,
-      const autofill::FormData& focused_form,
       const autofill::FormFieldData& focused_field,
-      const base::flat_map<autofill::FieldGlobalId,
-                           autofill::FieldTypeGroupSet>& form_field_type_groups,
-      const autofill::PasswordFormClassification& focused_form_classification,
-      autofill::AutofillSuggestionTriggerSource trigger_source) override;
+      bool is_plus_address_manually_triggered) override;
   autofill::Suggestion GetManagePlusAddressSuggestion() const override;
   void RecordAutofillSuggestionEvent(SuggestionEvent suggestion_event) override;
   void OnPlusAddressSuggestionShown(

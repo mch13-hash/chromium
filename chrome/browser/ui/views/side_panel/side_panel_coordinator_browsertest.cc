@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/functional/callback_helpers.h"
 #include "base/i18n/rtl.h"
@@ -19,6 +20,7 @@
 #include "base/test/icu_test_util.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/extensions/api/side_panel/side_panel_api.h"
 #include "chrome/browser/extensions/api/side_panel/side_panel_service.h"
@@ -39,12 +41,14 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/extensions/extensions_toolbar_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/layout/browser_view_layout.h"
 #include "chrome/browser/ui/views/frame/multi_contents_view.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_content_proxy.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_coordinator.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry_observer.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_header.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_registry.h"
@@ -69,6 +73,7 @@
 #include "ui/actions/actions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/menus/simple_menu_model.h"
+#include "ui/views/controls/separator.h"
 #include "ui/views/layout/animating_layout_manager_test_util.h"
 #include "ui/views/test/button_test_api.h"
 #include "ui/views/test/views_test_utils.h"
@@ -181,11 +186,15 @@ class SidePanelCoordinatorTest : public InProcessBrowserTest {
     EXPECT_EQ(entry.value(), id);
   }
 
+  SidePanelHeader* GetHeader() {
+    return browser()
+        ->GetBrowserView()
+        .contents_height_side_panel()
+        ->GetHeaderView<SidePanelHeader>();
+  }
+
   std::u16string_view GetTitleText() {
-    return coordinator()
-        ->GetSidePanelHeaderForTesting()
-        ->panel_title()
-        ->GetText();
+    return GetHeader()->panel_title()->GetText();
   }
 
   void AddTabToBrowser(const GURL& tab_url) {
@@ -220,6 +229,15 @@ class SidePanelCoordinatorTest : public InProcessBrowserTest {
         ->GetActiveTabInterface()
         ->GetTabFeatures()
         ->side_panel_registry();
+  }
+
+  // TODO(https://crbug.com/454583671): Eliminate this in favor of something
+  // that actually returns the specific width needed by the test, or else find
+  // some other way to calculate this in the test itself.
+  int GetMinWebContentsWidth() const {
+    return static_cast<BrowserViewLayout*>(
+               browser()->GetBrowserView().GetLayoutManager())
+        ->GetMinWebContentsWidthForTesting();
   }
 
   // Calls chrome.sidePanel.setOptions() for the given `extension`, `path` and
@@ -282,6 +300,17 @@ class SidePanelCoordinatorTest : public InProcessBrowserTest {
     return coordinator()->GetWindowRegistry();
   }
 
+  int MaybeAdjustWidthForNewLayout(int expected_width) {
+    if (!base::FeatureList::IsEnabled(features::kTabbedBrowserUseNewLayout)) {
+      return expected_width;
+    }
+    // In the new layout, the contents pane cannot shrink beyond a certain size.
+    return std::min(expected_width,
+                    browser()->GetBrowserView().width() -
+                        (BrowserViewLayout::kMainBrowserContentsMinimumWidth +
+                         views::Separator::kThickness));
+  }
+
   std::vector<raw_ptr<SidePanelRegistry, DanglingUntriaged>>
       contextual_registries_;
 };
@@ -313,20 +342,56 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ToggleSidePanel) {
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, OpenWhileClosing) {
   Init();
+
+  class SidePanelEntryObserverFuture : public SidePanelEntryObserver {
+   public:
+    explicit SidePanelEntryObserverFuture(SidePanelEntry* entry)
+        : entry_(entry) {
+      entry_->AddObserver(this);
+    }
+
+    ~SidePanelEntryObserverFuture() override { entry_->RemoveObserver(this); }
+
+    void OnEntryShown(SidePanelEntry* entry) override {
+      shown_future_.SetValue();
+    }
+    void OnEntryHideCancelled(SidePanelEntry* entry) override {
+      hide_cancelled_future_.SetValue();
+    }
+
+    bool WaitForShown() { return shown_future_.WaitAndClear(); }
+    bool WaitForHideCancelled() {
+      return hide_cancelled_future_.WaitAndClear();
+    }
+
+   private:
+    raw_ptr<SidePanelEntry> entry_;
+    base::test::TestFuture<void> shown_future_;
+    base::test::TestFuture<void> hide_cancelled_future_;
+  };
+
+  auto* entry = global_registry()->GetEntryForKey(
+      SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks));
+  ASSERT_TRUE(entry);
+
+  SidePanelEntryObserverFuture observer(entry);
+
   // Wait for the side panel to be visible and fully shown.
   coordinator()->Show(SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks));
+  EXPECT_TRUE(observer.WaitForShown());
   ASSERT_TRUE(base::test::RunUntil([&]() {
     return browser()->GetBrowserView().contents_height_side_panel()->state() ==
            SidePanel::State::kOpen;
   }));
 
   // Closing the side panel is asynchronous.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->state(),
             SidePanel::State::kClosing);
 
   // Opening the same entry should cancel the close.
   coordinator()->Show(SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks));
+  EXPECT_TRUE(observer.WaitForHideCancelled());
   auto state =
       browser()->GetBrowserView().contents_height_side_panel()->state();
   EXPECT_TRUE(state == SidePanel::State::kOpen ||
@@ -342,7 +407,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, OpenAndCloseWithoutAnimation) {
   EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->state(),
             SidePanel::State::kOpen);
 
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->state(),
             SidePanel::State::kClosed);
 }
@@ -407,13 +472,18 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ChangeSidePanelWidth) {
   browser()->GetBrowserView().contents_height_side_panel()->OnResize(increment,
                                                                      true);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
+
   // Verify the side panel width is capped at two thirds of the browser width.
   EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            two_thirds_browser_width);
+            MaybeAdjustWidthForNewLayout(two_thirds_browser_width));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
                        ReadAnythingSidePanelWidthNotCappedAtTwoThirds) {
+  if (base::FeatureList::IsEnabled(features::kTabbedBrowserUseNewLayout)) {
+    GTEST_SKIP();
+  }
+
   Init();
   // Set side panel to left-aligned so positive resize increments mean an
   // increase in side panel width.
@@ -548,37 +618,30 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ChangeSidePanelWidthMaxMin) {
   coordinator()->Toggle(SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks),
                         SidePanelOpenTrigger::kPinnedEntryToolbarButton);
   const int starting_width = 500;
-  browser()->GetBrowserView().contents_height_side_panel()->SetPanelWidth(
-      starting_width);
+  auto* const side_panel =
+      browser()->GetBrowserView().contents_height_side_panel();
+  side_panel->SetPanelWidth(starting_width);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            starting_width);
+  EXPECT_EQ(side_panel->width(), starting_width);
 
   // Use an increment large enough to hit side panel and browser contents
   // minimum width constraints.
   const int large_increment = 1000000000;
-  browser()->GetBrowserView().contents_height_side_panel()->OnResize(
-      large_increment, true);
+  side_panel->OnResize(large_increment, true);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
 
   const int browser_width =
       browser()->GetBrowserView().GetLocalBounds().width();
   const int two_thirds_browser_width = browser_width * 2 / 3;
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            std::max(browser()
-                         ->GetBrowserView()
-                         .contents_height_side_panel()
-                         ->GetMinimumSize()
-                         .width(),
-                     two_thirds_browser_width));
+  const int expected_width =
+      std::max(MaybeAdjustWidthForNewLayout(two_thirds_browser_width),
+               side_panel->GetMinimumSize().width());
+  EXPECT_EQ(expected_width, side_panel->width());
 
-  BrowserViewLayout* layout_manager = static_cast<BrowserViewLayout*>(
-      browser()->GetBrowserView().GetLayoutManager());
   // the web contents width will either be it's min width or 1/3 the browser
   // width minus the side panel separator width.
-  const int web_contents_width =
-      std::max(layout_manager->GetMinWebContentsWidthForTesting(),
-               (browser_width - two_thirds_browser_width - 1));
+  const int web_contents_width = std::max(
+      GetMinWebContentsWidth(), (browser_width - two_thirds_browser_width - 1));
   EXPECT_EQ(browser()->GetBrowserView().contents_web_view()->width(),
             web_contents_width);
 }
@@ -615,13 +678,17 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorWithSideBySideTest,
       large_increment, true);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
 
-  BrowserViewLayout* layout_manager = static_cast<BrowserViewLayout*>(
-      browser()->GetBrowserView().GetLayoutManager());
-  EXPECT_EQ(browser()->GetBrowserView().multi_contents_view()->width(),
-            layout_manager->GetMinWebContentsWidthForTesting());
-  EXPECT_EQ(
-      browser()->GetBrowserView().multi_contents_view()->width(),
-      browser()->GetBrowserView().multi_contents_view()->GetMinViewWidth() * 2);
+  if (base::FeatureList::IsEnabled(features::kTabbedBrowserUseNewLayout)) {
+    EXPECT_EQ(browser()->GetBrowserView().multi_contents_view()->width(),
+              GetMinWebContentsWidth() + views::Separator::kThickness);
+  } else {
+    EXPECT_EQ(browser()->GetBrowserView().multi_contents_view()->width(),
+              GetMinWebContentsWidth());
+    EXPECT_EQ(
+        browser()->GetBrowserView().multi_contents_view()->width(),
+        browser()->GetBrowserView().multi_contents_view()->GetMinViewWidth() *
+            2);
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ChangeSidePanelWidthRTL) {
@@ -633,33 +700,28 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ChangeSidePanelWidthRTL) {
   base::i18n::SetRTLForTesting(false);
   coordinator()->Toggle(SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks),
                         SidePanelOpenTrigger::kPinnedEntryToolbarButton);
+  auto* const side_panel =
+      browser()->GetBrowserView().contents_height_side_panel();
   const int starting_width = 500;
-  browser()->GetBrowserView().contents_height_side_panel()->SetPanelWidth(
-      starting_width);
+  side_panel->SetPanelWidth(starting_width);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            starting_width);
+  EXPECT_EQ(side_panel->width(), starting_width);
 
   const int increment = 50;
-  browser()->GetBrowserView().contents_height_side_panel()->OnResize(increment,
-                                                                     true);
+  side_panel->OnResize(increment, true);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            starting_width - increment);
+  EXPECT_EQ(side_panel->width(), starting_width - increment);
 
   // Set UI direction to RTL
   base::i18n::SetRTLForTesting(true);
-  browser()->GetBrowserView().contents_height_side_panel()->SetPanelWidth(
-      starting_width);
+  side_panel->SetPanelWidth(starting_width);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            starting_width);
+  EXPECT_EQ(side_panel->width(), starting_width);
 
-  browser()->GetBrowserView().contents_height_side_panel()->OnResize(increment,
-                                                                     true);
+  side_panel->OnResize(increment, true);
   views::test::RunScheduledLayout(&browser()->GetBrowserView());
-  EXPECT_EQ(browser()->GetBrowserView().contents_height_side_panel()->width(),
-            starting_width + increment);
+  EXPECT_EQ(side_panel->width(),
+            MaybeAdjustWidthForNewLayout(starting_width + increment));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
@@ -693,10 +755,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   browser()->GetBrowserView().Restore();
 #endif
   browser()->GetBrowserView().SetBounds(new_bounds);
-  BrowserViewLayout* layout_manager = static_cast<BrowserViewLayout*>(
-      browser()->GetBrowserView().GetLayoutManager());
-  const int min_web_contents_width =
-      layout_manager->GetMinWebContentsWidthForTesting();
+  const int min_web_contents_width = GetMinWebContentsWidth();
 
   ASSERT_TRUE(base::test::RunUntil([&]() {
     // Within a couple of pixels.
@@ -814,7 +873,9 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ShowOpensSidePanel) {
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
                        ChangesTitleWhenActionItemChanges) {
   Init();
-  EXPECT_FALSE(coordinator()->IsSidePanelShowing());
+  SidePanelEntry* entry = global_registry()->GetEntryForKey(
+      SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks));
+  EXPECT_FALSE(coordinator()->IsSidePanelShowing(entry->type()));
 
   coordinator()->Show(SidePanelEntry::Id::kBookmarks);
   // Bookmarks is showing and selected.
@@ -823,8 +884,6 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_EQ(GetTitleText(),
             l10n_util::GetStringUTF16(IDS_BOOKMARK_MANAGER_TITLE));
 
-  SidePanelEntry* entry = global_registry()->GetEntryForKey(
-      SidePanelEntry::Key(SidePanelEntry::Id::kBookmarks));
   actions::ActionItem* action_item = actions::ActionManager::Get().FindAction(
       kActionSidePanelShowBookmarks,
       browser()->GetActions()->root_action_item());
@@ -872,8 +931,9 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   // Verify switching tabs does not change entry seen if it is in the global
   // registry.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(1);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kReadingList);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kReadingList);
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, ContextualEntryDeregistered) {
@@ -995,27 +1055,24 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   // Open shopping insights for the first tab.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(0);
   coordinator()->Show(SidePanelEntry::Id::kReadingList);
-  auto* reading_list_entry =
-      coordinator()->GetCurrentSidePanelEntryForTesting();
   coordinator()->Show(SidePanelEntry::Id::kShoppingInsights);
-  auto* shopping_entry1 = coordinator()->GetCurrentSidePanelEntryForTesting();
 
   // Switch to the second tab and open shopping insights.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(1);
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_EQ(reading_list_entry,
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
+      SidePanelEntryKey(SidePanelEntryId::kReadingList)));
   coordinator()->Show(SidePanelEntry::Id::kShoppingInsights);
-  EXPECT_NE(shopping_entry1,
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
+      SidePanelEntryKey(SidePanelEntryId::kShoppingInsights)));
 
   // Switch back to the first tab.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(0);
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_EQ(shopping_entry1,
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
+      SidePanelEntryKey(SidePanelEntryId::kShoppingInsights)));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
@@ -1046,7 +1103,6 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  auto* bookmarks_entry = coordinator()->GetCurrentSidePanelEntryForTesting();
 
   // Switch to a contextual entry and verify the active entry is updated.
   coordinator()->Show(SidePanelEntry::Id::kShoppingInsights);
@@ -1059,7 +1115,6 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  auto* shopping_entry = coordinator()->GetCurrentSidePanelEntryForTesting();
 
   // Switch to a tab where this contextual entry is not available and verify we
   // fall back to the last seen global entry.
@@ -1073,8 +1128,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(bookmarks_entry,
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
+      SidePanelEntryKey(SidePanelEntryId::kReadingList)));
 
   // Switch back to the tab where the contextual entry was visible and verify it
   // is shown.
@@ -1088,8 +1143,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(shopping_entry,
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
+      SidePanelEntryKey(SidePanelEntryId::kShoppingInsights)));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
@@ -1110,7 +1165,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(), SidePanelEntry::Id::kBookmarks);
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
+      SidePanelEntryKey(SidePanelEntry::Id::kBookmarks)));
 
   // Switch to a different global entry and verify the active entry is updated.
   coordinator()->Show(SidePanelEntry::Id::kReadingList);
@@ -1123,8 +1179,9 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kReadingList);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kReadingList);
 
   // Switch to a contextual entry and verify the active entry is updated.
   coordinator()->Show(SidePanelEntry::Id::kShoppingInsights);
@@ -1137,11 +1194,12 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kShoppingInsights);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kShoppingInsights);
 
   // Close the side panel.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1185,8 +1243,9 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kShoppingInsights);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kShoppingInsights);
 
   // Switch to a global entry and verify the active entry is updated.
   coordinator()->Show(SidePanelEntry::Id::kReadingList);
@@ -1199,11 +1258,12 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kReadingList);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kReadingList);
 
   // Close the side panel and verify the active entries are reset.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1228,8 +1288,9 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   VerifyEntryExistenceAndValue(contextual_registries_[1]->GetActiveEntryFor(
                                    SidePanelEntry::PanelType::kContent),
                                SidePanelEntry::Id::kShoppingInsights);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kShoppingInsights);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kShoppingInsights);
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
@@ -1262,11 +1323,12 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   EXPECT_FALSE(contextual_registries_[1]
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            SidePanelEntry::Id::kShoppingInsights);
+  EXPECT_EQ(
+      coordinator()->GetCurrentEntryId(SidePanelEntry::PanelType::kContent),
+      SidePanelEntry::Id::kShoppingInsights);
 
   // Close the side panel and verify the active entries are reset.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1295,7 +1357,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
                    .has_value());
 
   // Close the side panel and verify the active entries.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1355,7 +1417,7 @@ IN_PROC_BROWSER_TEST_F(
                                SidePanelEntry::Id::kShoppingInsights);
 
   // Close the side panel and verify active entries.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1395,7 +1457,7 @@ IN_PROC_BROWSER_TEST_F(
                    .has_value());
 
   // Close the side panel and verify the active entries.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(global_registry()
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
@@ -1472,7 +1534,7 @@ IN_PROC_BROWSER_TEST_F(
                    ->GetActiveEntryFor(SidePanelEntry::PanelType::kContent)
                    .has_value());
 
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1635,7 +1697,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
                    .has_value());
 
   // Verify the panel closes but the first tab still has an active entry.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   EXPECT_FALSE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
   EXPECT_FALSE(global_registry()
@@ -1792,7 +1854,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   // Verify the side panel uses the users preferred width even if the custom
   // width is set.
   EXPECT_TRUE(side_panel->GetVisible());
-  EXPECT_EQ(side_panel->width(), kUserPreferredWidth);
+  EXPECT_EQ(side_panel->width(),
+            MaybeAdjustWidthForNewLayout(kUserPreferredWidth));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
@@ -1896,7 +1959,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   coordinator()->Show(SidePanelEntry::Id::kAboutThisSite);
 
   // Close the side panel.
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
 
   // Verify that the previous entry has deregistered and is hidden.
   EXPECT_THAT(observer->last_entry_will_hide_entry_id_,
@@ -1958,7 +2021,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
 
   // Allow content delays to more closely mimic real behavior.
   coordinator()->SetNoDelaysForTesting(false);
-  coordinator()->Close();
+  coordinator()->Close(SidePanelEntry::PanelType::kContent);
   browser()->GetBrowserView().Close();
 }
 
@@ -1979,15 +2042,15 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   contextual_registries_[0]->Register(CreateEntry(extension_key));
 
   coordinator()->Show(extension_key);
-  EXPECT_EQ(contextual_registries_[0]->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
 
   // Switch to a tab that does not have an extension entry registered for its
   // contextual registry.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(1);
   coordinator()->Show(extension_key);
-  EXPECT_EQ(global_registry()->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/false));
 }
 
 // Test that a new contextual extension entry is not shown if it's registered
@@ -2008,7 +2071,10 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, RegisterExtensionEntries) {
   SidePanelEntry::Key extension_key(SidePanelEntry::Id::kExtension,
                                     extension->id());
   coordinator()->Show(extension_key);
-  EXPECT_FALSE(coordinator()->current_key()->tab_handle.has_value());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/false));
+  EXPECT_FALSE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
 
   // Give extension access to tab side panel.
   // Tab entry is not shown.
@@ -2019,7 +2085,10 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, RegisterExtensionEntries) {
                     .id(),
                 /*path=*/"panel.html",
                 /*enabled=*/true);
-  EXPECT_FALSE(coordinator()->current_key()->tab_handle.has_value());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/false));
+  EXPECT_FALSE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
 }
 
 // Test that if global or contextual entries are deregistered, and if it exists,
@@ -2044,8 +2113,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, DeregisterExtensionEntries) {
 
   // The contextual entry should be shown.
   coordinator()->Show(extension_key);
-  EXPECT_EQ(GetActiveTabRegistry()->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
 
   // If the contextual entry is deregistered while there exists a global entry,
   // the global entry is not shown.
@@ -2073,13 +2142,13 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   contextual_registries_[0]->Register(CreateEntry(extension_key));
   coordinator()->Show(extension_key);
 
-  EXPECT_EQ(contextual_registries_[0]->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
 
   // Switch to the second tab. Since there is no active contextual/global entry
   // and no global entry with `extension_key`, the side panel should close.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(1);
-  EXPECT_FALSE(coordinator()->IsSidePanelShowing());
+  EXPECT_FALSE(coordinator()->IsSidePanelEntryShowing(extension_key));
 }
 
 // Test that an extension with both contextual and global entries should behave
@@ -2102,12 +2171,12 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   // (global in this case).
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(0);
   coordinator()->Show(extension_key);
-  EXPECT_EQ(contextual_registries_[0]->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
 
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(1);
-  EXPECT_EQ(global_registry()->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/false));
   VerifyEntryExistenceAndValue(
       global_registry()->GetActiveEntryFor(SidePanelEntry::PanelType::kContent),
       extension_key);
@@ -2119,8 +2188,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   // Switching from a tab with the global extension entry to a tab with a
   // contextual extension entry should show the contextual entry.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(0);
-  EXPECT_EQ(contextual_registries_[0]->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/true));
   VerifyEntryExistenceAndValue(contextual_registries_[0]->GetActiveEntryFor(
                                    SidePanelEntry::PanelType::kContent),
                                extension_key);
@@ -2139,8 +2208,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   // Switch to the second tab. The extension's global entry should show and be
   // the active entry in the global registry.
   browser()->GetBrowserView().browser()->tab_strip_model()->ActivateTabAt(1);
-  EXPECT_EQ(global_registry()->GetEntryForKey(extension_key),
-            coordinator()->GetCurrentSidePanelEntryForTesting());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(extension_key, /*for_tab=*/false));
   VerifyEntryExistenceAndValue(
       global_registry()->GetActiveEntryFor(SidePanelEntry::PanelType::kContent),
       extension_key);
@@ -2211,11 +2280,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest, HeaderlessSidePanel) {
   // Verify the side panel is showing with no header.
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_FALSE(browser()
-                   ->GetBrowserView()
-                   .contents_height_side_panel()
-                   ->get_header_for_testing()
-                   ->GetVisible());
+  EXPECT_EQ(GetHeader(), nullptr);
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
@@ -2247,11 +2312,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
                    .has_value());
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_FALSE(browser()
-                   ->GetBrowserView()
-                   .contents_height_side_panel()
-                   ->get_header_for_testing()
-                   ->GetVisible());
+  EXPECT_EQ(GetHeader(), nullptr);
 
   // Switch tabs and open a different side panel and verify the header is
   // showing.
@@ -2261,22 +2322,15 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   coordinator()->Show(SidePanelEntry::Id::kBookmarks);
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_TRUE(browser()
-                  ->GetBrowserView()
-                  .contents_height_side_panel()
-                  ->get_header_for_testing()
-                  ->GetVisible());
+  ASSERT_NE(GetHeader(), nullptr);
+  EXPECT_TRUE(GetHeader()->GetVisible());
 
   // Verify the header is not showing if we switch back to the tab with the
   // headerless side panel open.
   browser()->tab_strip_model()->ActivateTabAt(0);
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_FALSE(browser()
-                   ->GetBrowserView()
-                   .contents_height_side_panel()
-                   ->get_header_for_testing()
-                   ->GetVisible());
+  EXPECT_EQ(GetHeader(), nullptr);
 }
 
 #if !BUILDFLAG(IS_CHROMEOS)
@@ -2286,10 +2340,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
   coordinator()->SetNoDelaysForTesting(true);
   coordinator()->DisableAnimationsForTesting();
   coordinator()->Show(SidePanelEntry::Id::kBookmarks);
-  EXPECT_TRUE(coordinator()
-                  ->GetSidePanelHeaderForTesting()
-                  ->header_pin_button()
-                  ->GetVisible());
+  EXPECT_TRUE(GetHeader()->header_pin_button()->GetVisible());
 
   // Make a guest window. This process can be either synchronous or
   // asynchronous, so use RunUntil.
@@ -2303,10 +2354,13 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
 
   // Check that pin button does not show in guest window.
   auto* coordinator = guest_browser->GetFeatures().side_panel_coordinator();
+
   coordinator->SetNoDelaysForTesting(true);
   coordinator->DisableAnimationsForTesting();
   coordinator->Show(SidePanelEntry::Id::kBookmarks);
-  EXPECT_FALSE(coordinator->GetSidePanelHeaderForTesting()
+  EXPECT_FALSE(guest_browser->GetBrowserView()
+                   .contents_height_side_panel()
+                   ->GetHeaderView<SidePanelHeader>()
                    ->header_pin_button()
                    ->GetVisible());
 }
@@ -2318,17 +2372,16 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorTest,
                        ExtensionSidePanelHasPinButton) {
   Init();
   SetUpPinningTest();
-  EXPECT_FALSE(coordinator()->IsSidePanelShowing());
 
   scoped_refptr<const extensions::Extension> extension =
       AddExtensionWithSidePanel("extension", std::nullopt);
+  SidePanelEntryKey extension_key = GetKeyForExtension(extension->id());
 
-  coordinator()->Show(GetKeyForExtension(extension->id()));
-  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(
-      GetKeyForExtension(extension->id())));
+  EXPECT_FALSE(coordinator()->IsSidePanelEntryShowing(extension_key));
+  coordinator()->Show(extension_key);
+  EXPECT_TRUE(coordinator()->IsSidePanelEntryShowing(extension_key));
 
-  views::ToggleImageButton* pin_button =
-      coordinator()->GetSidePanelHeaderForTesting()->header_pin_button();
+  views::ToggleImageButton* pin_button = GetHeader()->header_pin_button();
   EXPECT_TRUE(pin_button->GetVisible());
   EXPECT_FALSE(pin_button->GetToggled());
 
@@ -2363,8 +2416,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLensOverlayTest,
   VerifyEntryExistenceAndValue(contextual_registries_[1]->GetActiveEntryFor(
                                    SidePanelEntry::PanelType::kContent),
                                SidePanelEntry::Id::kLensOverlayResults);
-  views::ImageButton* more_info_button =
-      coordinator()->GetSidePanelHeaderForTesting()->header_more_info_button();
+  views::ImageButton* more_info_button = GetHeader()->header_more_info_button();
   EXPECT_TRUE(more_info_button->GetVisible());
 }
 
@@ -2376,8 +2428,7 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLensOverlayTest,
   VerifyEntryExistenceAndValue(contextual_registries_[1]->GetActiveEntryFor(
                                    SidePanelEntry::PanelType::kContent),
                                SidePanelEntry::Id::kLens);
-  views::ImageButton* more_info_button =
-      coordinator()->GetSidePanelHeaderForTesting()->header_more_info_button();
+  views::ImageButton* more_info_button = GetHeader()->header_more_info_button();
   EXPECT_FALSE(more_info_button->GetVisible());
 }
 
@@ -2463,12 +2514,12 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
   loading_content_proxy =
       SidePanelUtil::GetSidePanelContentProxy(loading_content);
   EXPECT_FALSE(loading_content_proxy->IsAvailable());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry1_->key().id());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry1_->key()));
   // Set as available and make sure the title has updated.
   loading_content_proxy->SetAvailable(true);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry2_->key().id());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry2_->key()));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
@@ -2479,8 +2530,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
   coordinator()->Show(loaded_content_entry1_->key().id());
   EXPECT_TRUE(
       browser()->GetBrowserView().contents_height_side_panel()->GetVisible());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loaded_content_entry1_->key().id());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loaded_content_entry1_->key()));
 
   // Switch to loading_content_entry1_ that has loading content.
   coordinator()->Show(loading_content_entry1_->key().id());
@@ -2489,11 +2540,12 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
   SidePanelContentProxy* loading_content_proxy1 =
       SidePanelUtil::GetSidePanelContentProxy(loading_content1);
   EXPECT_FALSE(loading_content_proxy1->IsAvailable());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loaded_content_entry1_->key().id());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loaded_content_entry1_->key()));
   // Verify the loading_content_entry1_ is the loading entry.
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(),
-            loading_content_entry1_);
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry1_->type()),
+      loading_content_entry1_);
 
   // While that entry is loading, switch to a different entry with content that
   // needs to load.
@@ -2504,25 +2556,29 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
       SidePanelUtil::GetSidePanelContentProxy(loading_content2);
   EXPECT_FALSE(loading_content_proxy2->IsAvailable());
   // Verify the loading_content_entry2_ is no longer the loading entry.
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(),
-            loading_content_entry2_);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loaded_content_entry1_->key().id());
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry2_->type()),
+      loading_content_entry2_);
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loaded_content_entry1_->key()));
 
   // Set loading_content_entry1_ as available and verify it is not made the
   // active entry.
   loading_content_proxy1->SetAvailable(true);
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(),
-            loading_content_entry2_);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loaded_content_entry1_->key().id());
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry2_->type()),
+      loading_content_entry2_);
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loaded_content_entry1_->key()));
 
   // Set loading_content_entry2_ as available and verify it is made the active
   // entry.
   loading_content_proxy2->SetAvailable(true);
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(), nullptr);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry2_->key().id());
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry2_->type()),
+      nullptr);
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry2_->key()));
 }
 
 IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
@@ -2538,8 +2594,9 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
   SidePanelContentProxy* loading_content_proxy1 =
       SidePanelUtil::GetSidePanelContentProxy(loading_content);
   EXPECT_FALSE(loading_content_proxy1->IsAvailable());
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(),
-            loading_content_entry1_);
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry1_->type()),
+      loading_content_entry1_);
   // Set the content proxy to available.
   loading_content_proxy1->SetAvailable(true);
   EXPECT_TRUE(
@@ -2552,29 +2609,34 @@ IN_PROC_BROWSER_TEST_F(SidePanelCoordinatorLoadingContentTest,
   SidePanelContentProxy* loading_content_proxy2 =
       SidePanelUtil::GetSidePanelContentProxy(loading_content);
   EXPECT_FALSE(loading_content_proxy2->IsAvailable());
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry1_->key().id());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry1_->key()));
   // Verify the loading_content_entry2_ is the loading entry.
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(),
-            loading_content_entry2_);
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry2_->type()),
+      loading_content_entry2_);
 
   // While that entry is loading, switch back to the currently showing entry.
   coordinator()->Show(loading_content_entry1_->key().id());
   // Verify the loading_content_entry2_ is no longer the loading entry.
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(), nullptr);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry1_->key().id());
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry1_->type()),
+      nullptr);
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry1_->key()));
 
   // Set loading_content_entry2_ as available and verify it is not made the
   // active entry.
   loading_content_proxy2->SetAvailable(true);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry1_->key().id());
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry1_->key()));
 
   // Show loading_content_entry2_ and verify it shows without availability
   // needing to be set again.
   coordinator()->Show(loading_content_entry2_->key().id());
-  EXPECT_EQ(coordinator()->GetLoadingEntryForTesting(), nullptr);
-  EXPECT_EQ(coordinator()->GetCurrentEntryId(),
-            loading_content_entry2_->key().id());
+  EXPECT_EQ(
+      coordinator()->GetLoadingEntryForTesting(loading_content_entry2_->type()),
+      nullptr);
+  EXPECT_TRUE(
+      coordinator()->IsSidePanelEntryShowing(loading_content_entry2_->key()));
 }

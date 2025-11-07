@@ -11,17 +11,21 @@ import androidx.annotation.VisibleForTesting;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTaskImpl.State;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
 /**
- * Class that holds business logic to track and manage actions requested on a {@code State.PENDING}
- * {@link ChromeAndroidTask}.
+ * Class that holds business logic to track and manage actions requested on a {@code
+ * State.PENDING_CREATE} or a {@code State.PENDING_UPDATE} {@link ChromeAndroidTask}.
  */
 @NullMarked
 final class PendingActionManager {
-    /** Enumerates actions that can be requested on a {@code State.PENDING} browser window. */
+    /**
+     * Enumerates actions that can be requested on a {@code State.PENDING_CREATE or a {@code
+     * State.PENDING_UPDATE} browser window.
+     */
     @IntDef({
         PendingAction.NONE,
         PendingAction.SET_BOUNDS,
@@ -77,11 +81,48 @@ final class PendingActionManager {
      * requested) or after a primary action.
      */
     @GuardedBy("mPendingActionsLock")
-    private final @PendingAction int[] mPendingActions = {PendingAction.NONE, PendingAction.NONE};
+    private @PendingAction int[] mPendingActions = {PendingAction.NONE, PendingAction.NONE};
 
-    /** Tracks the size a window should have when it's fully initialized. */
+    /**
+     * Tracks the size a window should have when it is fully initialized based on a SET_BOUNDS
+     * request.
+     */
     @GuardedBy("mPendingActionsLock")
     private @Nullable Rect mPendingBoundsInDp;
+
+    /**
+     * Tracks the size a window should have when it is fully initialized based on a RESTORE request.
+     */
+    @GuardedBy("mPendingActionsLock")
+    private @Nullable Rect mPendingRestoredBoundsInDp;
+
+    /**
+     * Tracking the future active state of the window. Null if there is no in-progress action which
+     * can affect the isActive value.
+     */
+    @GuardedBy("mPendingActionsLock")
+    private @Nullable Boolean mIsActiveFuture;
+
+    /**
+     * Tracking the future visible state of the window. Null if there is no in-progress action which
+     * can affect the isVisible value.
+     */
+    @GuardedBy("mPendingActionsLock")
+    private @Nullable Boolean mIsVisibleFuture;
+
+    /**
+     * Tracking the future maximize state of the window. Null if there is no in-progress action
+     * which can affect the isMaximized value.
+     */
+    @GuardedBy("mPendingActionsLock")
+    private @Nullable Boolean mIsMaximizedFuture;
+
+    /**
+     * Tracks the size a window should have when SET_BOUNDS is done. Null if there is no in-progress
+     * action which can affect the getBounds value.
+     */
+    @GuardedBy("mPendingActionsLock")
+    private @Nullable Rect mFutureBoundsInDp;
 
     /**
      * Requests an action to be performed on the pending task. Use this for actions that do not
@@ -127,6 +168,28 @@ final class PendingActionManager {
         requestGlobalOverrideAction(PendingAction.SET_BOUNDS);
         synchronized (mPendingActionsLock) {
             mPendingBoundsInDp = boundsInDp;
+            // Cache last requested bounds for potential subsequent restoration. Pending restored
+            // bounds will be cleared after all pending actions are dispatched.
+            mPendingRestoredBoundsInDp = mPendingBoundsInDp;
+            mFutureBoundsInDp = boundsInDp;
+        }
+    }
+
+    @Nullable Rect getFutureBoundsInDp() {
+        synchronized (mPendingActionsLock) {
+            return mFutureBoundsInDp;
+        }
+    }
+
+    @Nullable Rect getPendingBoundsInDp() {
+        synchronized (mPendingActionsLock) {
+            return mPendingBoundsInDp;
+        }
+    }
+
+    @Nullable Rect getPendingRestoredBoundsInDp() {
+        synchronized (mPendingActionsLock) {
+            return mPendingRestoredBoundsInDp;
         }
     }
 
@@ -145,6 +208,58 @@ final class PendingActionManager {
         }
     }
 
+    @Nullable Boolean isActiveFuture(@Nullable State state) {
+        synchronized (mPendingActionsLock) {
+            if (state == State.PENDING_CREATE) {
+                return Boolean.TRUE.equals(mIsActiveFuture);
+            } else if (state == State.PENDING_UPDATE) {
+                return mIsActiveFuture;
+            }
+            return null;
+        }
+    }
+
+    @Nullable Boolean isMaximizedFuture() {
+        synchronized (mPendingActionsLock) {
+            return mIsMaximizedFuture;
+        }
+    }
+
+    @Nullable Boolean isVisibleFuture() {
+        synchronized (mPendingActionsLock) {
+            return mIsVisibleFuture;
+        }
+    }
+
+    @PendingAction
+    int[] getAndClearPendingActions() {
+        synchronized (mPendingActionsLock) {
+            var actions = mPendingActions;
+            mPendingActions = new int[] {PendingAction.NONE, PendingAction.NONE};
+            mPendingBoundsInDp = null;
+            mPendingRestoredBoundsInDp = null;
+            mIsVisibleFuture = null;
+            mIsActiveFuture = null;
+            return actions;
+        }
+    }
+
+    @PendingAction
+    int[] getAndClearTargetPendingActions(int... targets) {
+        synchronized (mPendingActionsLock) {
+            var actions = mPendingActions;
+            for (int target : targets) {
+                for (int j = 0; j < mPendingActions.length; j++) {
+                    if (target == mPendingActions[j]) {
+                        mPendingActions[j] = PendingAction.NONE;
+                    }
+                }
+            }
+            updateFutureStatesLocked();
+            return actions;
+        }
+    }
+
     private void requestShow() {
         synchronized (mPendingActionsLock) {
             // Clear lower precedence secondary action.
@@ -160,6 +275,7 @@ final class PendingActionManager {
 
             // Override lower precedence primary action.
             mPendingActions[0] = PendingAction.SHOW;
+            updateFutureStatesLocked();
         }
     }
 
@@ -181,6 +297,7 @@ final class PendingActionManager {
 
             // Run SHOW_INACTIVE along with one of the other higher precedence primary actions.
             mPendingActions[1] = PendingAction.SHOW_INACTIVE;
+            updateFutureStatesLocked();
         }
     }
 
@@ -200,6 +317,7 @@ final class PendingActionManager {
 
             // Override lower precedence primary action.
             mPendingActions[0] = PendingAction.ACTIVATE;
+            updateFutureStatesLocked();
         }
     }
 
@@ -221,6 +339,7 @@ final class PendingActionManager {
 
             // Run DEACTIVATE along with one of the other higher precedence primary actions.
             mPendingActions[1] = PendingAction.DEACTIVATE;
+            updateFutureStatesLocked();
         }
     }
 
@@ -237,6 +356,68 @@ final class PendingActionManager {
 
             // Clear pending bounds.
             mPendingBoundsInDp = null;
+            updateFutureStatesLocked();
+        }
+    }
+
+    @GuardedBy("mPendingActionsLock")
+    private void updateFutureStatesLocked() {
+        mIsActiveFuture = null;
+        mIsVisibleFuture = null;
+        mIsMaximizedFuture = null;
+        mFutureBoundsInDp = null;
+        for (int action : mPendingActions) {
+            switch (action) {
+                case PendingAction.SHOW:
+                case PendingAction.ACTIVATE:
+                case PendingAction.MAXIMIZE:
+                case PendingAction.RESTORE:
+                    mIsActiveFuture = true;
+                    break;
+                case PendingAction.SHOW_INACTIVE:
+                case PendingAction.MINIMIZE:
+                case PendingAction.DEACTIVATE:
+                case PendingAction.CLOSE:
+                    mIsActiveFuture = false;
+                    break;
+                default:
+                    break;
+            }
+
+            switch (action) {
+                case PendingAction.SHOW:
+                case PendingAction.ACTIVATE:
+                case PendingAction.MAXIMIZE:
+                case PendingAction.SHOW_INACTIVE:
+                case PendingAction.RESTORE:
+                    mIsVisibleFuture = true;
+                    break;
+                case PendingAction.MINIMIZE:
+                case PendingAction.DEACTIVATE:
+                case PendingAction.CLOSE:
+                    mIsVisibleFuture = false;
+                    break;
+                default:
+                    break;
+            }
+
+            switch (action) {
+                case PendingAction.MAXIMIZE:
+                    mIsMaximizedFuture = true;
+                    break;
+                case PendingAction.MINIMIZE:
+                case PendingAction.CLOSE:
+                case PendingAction.HIDE:
+                case PendingAction.RESTORE:
+                    mIsMaximizedFuture = false;
+                    break;
+                default:
+                    break;
+            }
+
+            if (action == PendingAction.SET_BOUNDS) {
+                mFutureBoundsInDp = mPendingBoundsInDp;
+            }
         }
     }
 
@@ -249,12 +430,6 @@ final class PendingActionManager {
     int[] getPendingActionsForTesting() {
         synchronized (mPendingActionsLock) {
             return mPendingActions;
-        }
-    }
-
-    @Nullable Rect getPendingBoundsInDp() {
-        synchronized (mPendingActionsLock) {
-            return mPendingBoundsInDp;
         }
     }
 

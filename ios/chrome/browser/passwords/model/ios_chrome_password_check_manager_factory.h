@@ -5,7 +5,6 @@
 #ifndef IOS_CHROME_BROWSER_PASSWORDS_MODEL_IOS_CHROME_PASSWORD_CHECK_MANAGER_FACTORY_H_
 #define IOS_CHROME_BROWSER_PASSWORDS_MODEL_IOS_CHROME_PASSWORD_CHECK_MANAGER_FACTORY_H_
 
-#import "base/memory/weak_ptr.h"
 #import "base/no_destructor.h"
 #import "ios/chrome/browser/shared/model/profile/refcounted_profile_keyed_service_factory_ios.h"
 
@@ -18,6 +17,7 @@ class IOSChromePasswordCheckManagerFactory
   static scoped_refptr<IOSChromePasswordCheckManager> GetForProfile(
       ProfileIOS* profile);
   static IOSChromePasswordCheckManagerFactory* GetInstance();
+  static TestingFactory GetDefaultFactory();
 
  private:
   friend class base::NoDestructor<IOSChromePasswordCheckManagerFactory>;

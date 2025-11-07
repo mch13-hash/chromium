@@ -179,7 +179,9 @@ chromium-metrics-reviews@google.com.
   <variant name="IPH_DefaultBrowserPromoSettingCard"
       summary="Default browser promo in Chrome settings"/>
   <variant name="IPH_DefaultSiteView" summary="default site view info on iOS"/>
-  <variant name="IPH_DesktopCustomizeChrome"
+  <variant name="IPH_DesktopCustomizeChromeAutoOpen"
+      summary="Customize Chrome Auto Open"/>
+  <variant name="IPH_DesktopCustomizeChromeExperiment"
       summary="customizing new tab page"/>
   <variant name="IPH_DesktopCustomizeChromeRefresh"
       summary="customizing new tab page for refresh"/>
@@ -250,9 +252,12 @@ chromium-metrics-reviews@google.com.
   <variant name="IPH_FeedSwipeRefresh" summary="swipe refreshing feeds on NTP"/>
   <variant name="IPH_FollowWhileBrowsing"
       summary="IPH for following the current site"/>
+  <variant name="IPH_GeminiContextualCueChip"
+      summary="Gemini contextual cue chip on the omnibox"/>
   <variant name="IPH_GenericAlwaysTriggerHelpUiFeature"
       summary="generic feature to always show help Ui whenever asked"/>
   <variant name="IPH_GlicPromo" summary="Glic promotion"/>
+  <variant name="IPH_GlicTryIt" summary="Glic promo with a call to action."/>
   <variant name="IPH_GlobalMediaControls" summary="the Global Media Controls"/>
   <variant name="IPH_GMCCastStartStop"
       summary="Cast start stop in the Zenith dialog"/>
@@ -460,6 +465,8 @@ chromium-metrics-reviews@google.com.
       summary="the Autofill password suggestions on iOS"/>
   <variant name="IPH_PasswordsWebAppProfileSwitch"
       summary="profile switch in Password Manager web app"/>
+  <variant name="IPH_PdfInkSignatures"
+      summary="educating users about PDF Ink Signatures feature"/>
   <variant name="IPH_PdfPageDownload"
       summary="educating users about the pdf download option in the app menu"/>
   <variant name="IPH_PdfSearchifyFeature"
@@ -648,9 +655,6 @@ chromium-metrics-reviews@google.com.
   <variant name="IPH_SignInBenefits"
       summary="IPH informing signed-in users of benefits after the
                sync-to-signin migration."/>
-  <variant name="IPH_SignoutWebIntercept"
-      summary="A message shown after the user signs out of a Google service
-               on the web explaining that it does not sign them out of Chrome"/>
   <variant name="IPH_SupervisedUserProfileSignin"
       summary="informing supervised users about parental controls"/>
   <variant name="IPH_TabAudioMuting" summary="muting tab audio"/>
@@ -729,7 +733,7 @@ chromium-metrics-reviews@google.com.
 </variants>
 
 <histogram name="InProductHelp.Config.ParsingEvent" enum="ConfigParsingEvent"
-    expires_after="2026-02-01">
+    expires_after="2026-04-05">
   <owner>nyquist@chromium.org</owner>
   <summary>
     Records if in-product help configuration is parsed correctly, and the
@@ -776,7 +780,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InProductHelp.DismissalReason.iOS"
-    enum="InProductHelpDismissalReason" expires_after="2026-02-01">
+    enum="InProductHelpDismissalReason" expires_after="2026-04-05">
   <owner>lpromero@google.com</owner>
   <owner>gambard@chromium.org</owner>
   <summary>
@@ -785,7 +789,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InProductHelp.EventStorageMigration.Status"
-    enum="InProductHelpEventStorageMigrationStatus" expires_after="2026-02-01">
+    enum="InProductHelpEventStorageMigrationStatus" expires_after="2026-04-05">
   <owner>cheickcisse@google.com</owner>
   <owner>shaktisahu@chromium.org</owner>
   <summary>
@@ -797,7 +801,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InProductHelp.Gestural.DismissalReason.iOS"
-    enum="InProductHelpDismissalReason" expires_after="2026-02-22">
+    enum="InProductHelpDismissalReason" expires_after="2026-04-26">
   <owner>ginnyhuang@chromium.org</owner>
   <owner>adamta@google.com</owner>
   <summary>
@@ -829,7 +833,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InProductHelp.ShownTime.{IPHFeature}" units="ms"
-    expires_after="2026-02-22">
+    expires_after="2026-04-26">
   <owner>lpromero@google.com</owner>
   <owner>gambard@chromium.org</owner>
   <summary>
@@ -842,7 +846,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InProductHelp.ShownTime2.{IPHFeature}" units="ms"
-    expires_after="2026-03-01">
+    expires_after="2026-05-03">
   <owner>gayane@google.com</owner>
   <owner>lpromero@google.com</owner>
   <owner>gambard@chromium.org</owner>
@@ -907,7 +911,7 @@ In the future, Desktop IPH may be completely moved to the user_education folder.
 </histogram>
 
 <histogram name="UserEducation.MessageNotShown.TimeInQueue.{IPHFeature}"
-    units="ms" expires_after="2026-02-09">
+    units="ms" expires_after="2026-04-12">
   <owner>dfried@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>

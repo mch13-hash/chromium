@@ -15,7 +15,6 @@ import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.Acces
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_EXPAND;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_FOCUS;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_IME_ENTER;
-import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_NEXT_AT_MOVEMENT_GRANULARITY;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_NEXT_HTML_ELEMENT;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_PAGE_DOWN;
@@ -105,8 +104,6 @@ public class AccessibilityNodeInfoBuilder {
     public static final String EXTRAS_KEY_HAS_IMAGE = "AccessibilityNodeInfo.hasImage";
     public static final String EXTRAS_KEY_HINT = "AccessibilityNodeInfo.hint";
     public static final String EXTRAS_KEY_OFFSCREEN = "AccessibilityNodeInfo.offscreen";
-    public static final String EXTRAS_KEY_ROLE_DESCRIPTION =
-            "AccessibilityNodeInfo.roleDescription";
     public static final String EXTRAS_KEY_SUPPORTED_ELEMENTS =
             "ACTION_ARGUMENT_HTML_ELEMENT_STRING_VALUES";
     public static final String EXTRAS_KEY_TARGET_URL = "AccessibilityNodeInfo.targetUrl";
@@ -267,13 +264,6 @@ public class AccessibilityNodeInfoBuilder {
         node.addAction(ACTION_SHOW_ON_SCREEN);
         node.addAction(ACTION_CONTEXT_CLICK);
 
-        // We choose to not add ACTION_LONG_CLICK to nodes to prevent verbose utterances, unless
-        // the relevant experiment is enabled.
-        if (ContentFeatureMap.isEnabled(
-                ContentFeatureList.ACCESSIBILITY_INCLUDE_LONG_CLICK_ACTION)) {
-            node.addAction(ACTION_LONG_CLICK);
-        }
-
         if (hasNonEmptyInnerText) {
             node.addAction(ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
             node.addAction(ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
@@ -387,7 +377,11 @@ public class AccessibilityNodeInfoBuilder {
             bundle.putCharSequence(EXTRAS_KEY_BRAILLE_ROLE_DESCRIPTION, brailleRoleDescription);
         }
         bundle.putCharSequence(EXTRAS_KEY_CHROME_ROLE, role);
-        bundle.putCharSequence(EXTRAS_KEY_ROLE_DESCRIPTION, roleDescription);
+
+        if (!roleDescription.isEmpty()) {
+            node.setRoleDescription(roleDescription);
+        }
+
         // We added the hint Bundle extra pre Android-O, and keep it to not risk breaking changes.
         bundle.putCharSequence(EXTRAS_KEY_HINT, hint);
         if (!display.isEmpty()) {

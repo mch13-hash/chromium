@@ -2816,7 +2816,7 @@ Called by update_extension_histograms.py.-->
   <int value="1925" label="AUTOFILLPRIVATE_ADDORUPDATEENTITYINSTANCE"/>
   <int value="1926" label="AUTOFILLPRIVATE_REMOVEENTITYINSTANCE"/>
   <int value="1927" label="ACCESSIBILITY_PRIVATE_ENABLELIVECAPTION"/>
-  <int value="1928" label="AUTOFILLPRIVATE_GETALLENTITYTYPES"/>
+  <int value="1928" label="AUTOFILLPRIVATE_GETWRITABLEENTITYTYPES"/>
   <int value="1929"
       label="AUTOFILLPRIVATE_GETALLATTRIBUTETYPESFORENTITYTYPENAME"/>
   <int value="1930" label="AUTOFILLPRIVATE_GETENTITYINSTANCEBYGUID"/>
@@ -3325,6 +3325,12 @@ Called by update_extension_permission.py.-->
   <int value="1" label="Malware"/>
   <int value="2" label="Potentially UWS"/>
   <int value="3" label="Policy Violation"/>
+</enum>
+
+<enum name="ExtensionUsageAction">
+  <int value="0" label="Extension Pinned"/>
+  <int value="1" label="Extension Unpinned"/>
+  <int value="2" label="Extension Context Menu Init"/>
 </enum>
 
 <enum name="ExternalItemState">

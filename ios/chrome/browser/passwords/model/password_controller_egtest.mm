@@ -33,7 +33,7 @@
 #import "ios/chrome/browser/infobars/ui_bundled/banners/infobar_banner_constants.h"
 #import "ios/chrome/browser/metrics/model/metrics_app_interface.h"
 #import "ios/chrome/browser/passwords/model/password_manager_app_interface.h"
-#import "ios/chrome/browser/passwords/ui_bundled/bottom_sheet/password_suggestion_bottom_sheet_app_interface.h"
+#import "ios/chrome/browser/passwords/ui_bundled/bottom_sheet/credential_suggestion_bottom_sheet_app_interface.h"
 #import "ios/chrome/browser/passwords/ui_bundled/password_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/manage_sync_settings_constants.h"
 #import "ios/chrome/browser/signin/model/fake_system_identity.h"
@@ -131,15 +131,15 @@ void TypeText(NSString* nsText) {
 void WaitForBottomSheetAndOpenKeyboard(NSString* username) {
   id<GREYMatcher> buttonMatcher =
       chrome_test_util::ButtonWithAccessibilityLabelId(
-          IDS_IOS_PASSWORD_BOTTOM_SHEET_USE_KEYBOARD);
+          IDS_IOS_CREDENTIAL_BOTTOM_SHEET_USE_KEYBOARD);
   [ChromeEarlGrey
       waitForUIElementToAppearWithMatcher:grey_accessibilityID(username)];
   [[EarlGrey selectElementWithMatcher:buttonMatcher] performAction:grey_tap()];
   [ChromeEarlGrey waitForKeyboardToAppear];
 }
 
-// Types `text` on an input field with `fieldID`. Dismisses the password bottom
-// sheet if `dismissBottomSheet` is true.
+// Types `text` on an input field with `fieldID`. Dismisses the credential
+// bottom sheet if `dismissBottomSheet` is true.
 void TypeTextOnField(NSString* text,
                      const std::string& fieldID,
                      bool dismissBottomSheet = false) {
@@ -156,7 +156,7 @@ void TypeUsernameAndPasswordOnUFF(NSString* username,
                                   NSString* password,
                                   bool dismissBottomSheetOnUsername = false) {
   // Type username and dismiss the bottom sheet because it is the first login
-  // field to be focused on, which triggers the password bottom sheet. Once
+  // field to be focused on, which triggers the credential bottom sheet. Once
   // dismissed the bottom sheet isn't shown again when focusing on other login
   // fields, as long as the page isn't reloaded.
   TypeTextOnField(username, "single_un", dismissBottomSheetOnUsername);
@@ -205,7 +205,7 @@ void LoginOnUff() {
 
   // Also reset the dismiss count pref to 0 to make sure the bottom sheet is
   // enabled by default.
-  [PasswordSuggestionBottomSheetAppInterface setDismissCount:0];
+  [CredentialSuggestionBottomSheetAppInterface setDismissCount:0];
 
   // Clear credentials and autofill profile before starting the test in case
   // there are some left over from a previous test case.
@@ -224,7 +224,7 @@ void LoginOnUff() {
   GREYAssertTrue([PasswordManagerAppInterface clearCredentials],
                  @"Clearing credentials wasn't done.");
   [AutofillAppInterface clearProfilesStore];
-  [PasswordSuggestionBottomSheetAppInterface setDismissCount:0];
+  [CredentialSuggestionBottomSheetAppInterface setDismissCount:0];
   [super tearDownHelper];
 }
 
@@ -256,18 +256,13 @@ void LoginOnUff() {
         password_manager::features::kMarkAllCredentialsAsLeaked);
   }
 
-  if ([self isRunningTest:@selector(FLAKY_testSaveWithoutBadges)] ||
-      [self isRunningTest:@selector(FLAKY_testUpdateWithoutBadges)]) {
-    config.features_enabled.push_back(kAutofillBadgeRemoval);
-  }
-
   if ([self isRunningTest:@selector(testSavePromptAppearsOnFormSubmission)] ||
       [self isRunningTest:@selector(testUpdatePromptAppearsOnFormSubmission)]) {
     // These tests need a badge.
     config.features_disabled.push_back(kAutofillBadgeRemoval);
   }
 
-  // The proactive password suggestion bottom sheet isn't tested here, it
+  // The proactive password generation bottom sheet isn't tested here, it
   // is tested in its own suite in password_suggestion_egtest.mm.
   config.features_disabled.push_back(
       password_manager::features::kIOSProactivePasswordGenerationBottomSheet);
@@ -657,6 +652,11 @@ void LoginOnUff() {
   DISABLED_testPasswordGenerationWhileSignedInWithError
 #endif
 - (void)MAYBE_testPasswordGenerationWhileSignedInWithError {
+  // TODO(crbug.com/454547779): Re-enable the test.
+  if (@available(iOS 26.1, *)) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.1.");
+  }
+
   // Encrypt synced data with a passphrase to enable passphrase encryption for
   // the signed in account.
   [ChromeEarlGrey addSyncPassphrase:kPassphrase];
@@ -701,6 +701,11 @@ void LoginOnUff() {
 
 // Tests that the typed credentials are correctly saved in the sign-in UFF flow.
 - (void)testSaveTypedCredentialInUff {
+  // TODO(crbug.com/453627553): Re-enable the test.
+  if (@available(iOS 26.1, *)) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.1.");
+  }
+
   NSString* usernameValue = @"test-username";
   NSString* passwordValue = @"test-password";
 
@@ -782,6 +787,11 @@ void LoginOnUff() {
 // Tests that the typed credentials are correctly updated in the sign-in UFF
 // flow when there is already a credential stored for the corresponding email.
 - (void)testUpdateTypedCredentialInUff {
+  // TODO(crbug.com/453627553): Re-enable the test.
+  if (@available(iOS 26.1, *)) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.1.");
+  }
+
   NSString* usernameValue = @"test-username";
   NSString* passwordValue = @"test-password";
   NSString* passwordValueToBeReplaced = @"old-password";

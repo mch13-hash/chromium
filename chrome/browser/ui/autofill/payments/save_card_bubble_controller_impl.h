@@ -20,6 +20,7 @@
 #include "components/autofill/core/browser/payments/payments_autofill_client.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "ui/actions/action_id.h"
 
 namespace syncer {
 class SyncService;
@@ -159,6 +160,8 @@ class SaveCardBubbleControllerImpl
   int GetSaveSuccessAnimationStringId() const override;
 
   // BubbleControllerBase:
+  void OnBubbleDiscarded() override;
+  bool CanBeReshown() const override;
   BubbleType GetBubbleType() const override;
   base::WeakPtr<BubbleControllerBase> GetBubbleControllerBaseWeakPtr() override;
 
@@ -174,6 +177,10 @@ class SaveCardBubbleControllerImpl
   void OnVisibilityChanged(content::Visibility visibility) override;
   std::optional<PageActionIconType> GetPageActionIconType() override;
   void DoShowBubble() override;
+#if !BUILDFLAG(IS_ANDROID)
+  std::optional<actions::ActionId> GetActionIdForPageAction() override;
+  std::optional<std::u16string> GetPageActionTooltipText() override;
+#endif  // !BUILDFLAG(IS_ANDROID)
 
  private:
   friend class content::WebContentsUserData<SaveCardBubbleControllerImpl>;
@@ -215,6 +222,9 @@ class SaveCardBubbleControllerImpl
   // Hides the bubble if it currently being shown, and sets the bubble to
   // inactive, effectively ending the save card flow.
   void EndSaveCardPromptFlow();
+
+  // Logs metrics when the bubble is closed.
+  void LogBubbleCloseMetrics(PaymentsUiClosedReason reason);
 
   // Tied to the profile and outlive this object.
   const raw_ref<PaymentsDataManager> payments_data_manager_;

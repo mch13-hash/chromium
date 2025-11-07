@@ -170,6 +170,15 @@ def _GenerateAndroidManifest(manifest_paths, min_sdk_version,
     for node in extra_app_node:
       app_node.append(node)
 
+  # Remove FingerprintDialogActivity, since it is not used. A hack until
+  # https://crbug.com/457436186 is fixed in a better way.
+  for activity in app_node.findall('activity'):
+    if activity.get(
+        '{%s}name' %
+        manifest_utils.ANDROID_NAMESPACE) == ('androidx.biometric.internal.ui'
+                                              '.FingerprintDialogActivity'):
+      app_node.remove(activity)
+
   uses_sdk = manifest.find('./uses-sdk')
   if uses_sdk is None:
     uses_sdk = ElementTree.Element('uses-sdk')
@@ -192,8 +201,7 @@ def _WriteXmlFile(root, path):
             root, encoding='utf-8')).toprettyxml(indent='  '))
 
 
-def _RunLint(custom_lint_jar_path,
-             lint_jar_path,
+def _RunLint(lint_jar_path,
              backported_methods_path,
              config_path,
              manifest_paths,
@@ -245,8 +253,8 @@ def _RunLint(custom_lint_jar_path,
 
   cmd = build_utils.JavaCmd(xmx=lint_xmx) + [
       '-cp',
-      '{}:{}'.format(lint_jar_path, custom_lint_jar_path),
-      'org.chromium.build.CustomLint',
+      lint_jar_path,
+      'com.android.tools.lint.Main',
       '--sdk-home',
       android_sdk_root,
       '--jdk-home',
@@ -344,7 +352,6 @@ def _RunLint(custom_lint_jar_path,
     return build_utils.FilterLines(output, 'Manifest merger failed')
 
   start = time.time()
-  logging.debug('Lint command %s', ' '.join(cmd))
   failed = False
 
   if creating_baseline and not warnings_as_errors:
@@ -400,9 +407,6 @@ def _ParseArgs(argv):
   parser.add_argument('--lint-jar-path',
                       required=True,
                       help='Path to the lint jar.')
-  parser.add_argument('--custom-lint-jar-path',
-                      required=True,
-                      help='Path to our custom lint jar.')
   parser.add_argument('--backported-methods',
                       help='Path to backported methods file created by R8.')
   parser.add_argument('--cache-dir',
@@ -502,8 +506,7 @@ def main():
                                        use_build_server=args.use_build_server)):
     return
 
-  _RunLint(args.custom_lint_jar_path,
-           args.lint_jar_path,
+  _RunLint(args.lint_jar_path,
            args.backported_methods,
            args.config_path,
            args.manifest_paths,

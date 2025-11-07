@@ -41,7 +41,6 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RequiresRestart;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.AutofillUiUtils;
-import org.chromium.chrome.browser.autofill.PersonalDataManager.BnplIssuer;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.Iban;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
@@ -55,6 +54,9 @@ import org.chromium.chrome.test.util.ChromeRenderTestRule;
 import org.chromium.components.autofill.AutofillSuggestion;
 import org.chromium.components.autofill.LoyaltyCard;
 import org.chromium.components.autofill.SuggestionType;
+import org.chromium.components.autofill.payments.BnplIssuerContext;
+import org.chromium.components.autofill.payments.BnplIssuerTosDetail;
+import org.chromium.components.autofill.payments.LegalMessageLine;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetTestSupport;
 import org.chromium.ui.test.util.RenderTestRule.Component;
@@ -377,36 +379,87 @@ public class TouchToFillPaymentMethodRenderTest {
                     /* shouldDisplayTermsAvailable= */ false,
                     /* guid= */ "",
                     /* isLocalPaymentsMethod= */ false);
-    private static final BnplIssuer BNPL_ISSUER_AFFIRM_LINKED =
-            new BnplIssuer(
-                    /* displayName= */ "Affirm",
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_AFFIRM_LINKED =
+            new BnplIssuerContext(
                     /* iconId= */ R.drawable.affirm_linked,
-                    /* isLinked= */ true);
-    private static final BnplIssuer BNPL_ISSUER_AFFIRM_UNLINKED =
-            new BnplIssuer(
+                    /* issuerId= */ "affirm",
                     /* displayName= */ "Affirm",
+                    /* selectionText= */ "Monthly or 4 installments",
+                    /* isLinked= */ true,
+                    /* isEligible= */ true);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_AFFIRM_UNLINKED =
+            new BnplIssuerContext(
                     /* iconId= */ R.drawable.affirm_unlinked,
-                    /* isLinked= */ false);
-    private static final BnplIssuer BNPL_ISSUER_KLARNA_LINKED =
-            new BnplIssuer(
-                    /* displayName= */ "Klarna",
+                    /* issuerId= */ "affirm",
+                    /* displayName= */ "Affirm",
+                    /* selectionText= */ "Monthly or 4 installments",
+                    /* isLinked= */ false,
+                    /* isEligible= */ true);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_KLARNA_LINKED =
+            new BnplIssuerContext(
                     /* iconId= */ R.drawable.klarna_linked,
-                    /* isLinked= */ true);
-    private static final BnplIssuer BNPL_ISSUER_KLARNA_UNLINKED =
-            new BnplIssuer(
+                    /* issuerId= */ "klarna",
                     /* displayName= */ "Klarna",
+                    /* selectionText= */ "Pay in low monthly installments",
+                    /* isLinked= */ true,
+                    /* isEligible= */ true);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_KLARNA_UNLINKED =
+            new BnplIssuerContext(
                     /* iconId= */ R.drawable.klarna_unlinked,
-                    /* isLinked= */ false);
-    private static final BnplIssuer BNPL_ISSUER_ZIP_LINKED =
-            new BnplIssuer(
-                    /* displayName= */ "Zip",
+                    /* issuerId= */ "klarna",
+                    /* displayName= */ "Klarna",
+                    /* selectionText= */ "Pay in low monthly installments",
+                    /* isLinked= */ false,
+                    /* isEligible= */ true);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_ZIP_LINKED =
+            new BnplIssuerContext(
                     /* iconId= */ R.drawable.zip_linked,
-                    /* isLinked= */ true);
-    private static final BnplIssuer BNPL_ISSUER_ZIP_UNLINKED =
-            new BnplIssuer(
+                    /* issuerId= */ "zip",
                     /* displayName= */ "Zip",
+                    /* selectionText= */ "Pay in easy installments",
+                    /* isLinked= */ true,
+                    /* isEligible= */ true);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_ZIP_UNLINKED =
+            new BnplIssuerContext(
                     /* iconId= */ R.drawable.zip_unlinked,
-                    /* isLinked= */ false);
+                    /* issuerId= */ "zip",
+                    /* displayName= */ "Zip",
+                    /* selectionText= */ "Pay in easy installments",
+                    /* isLinked= */ false,
+                    /* isEligible= */ true);
+    private static final BnplIssuerContext
+            BNPL_ISSUER_CONTEXT_INELIGIBLE_NOT_SUPPORTED_BY_MERCHANT =
+                    new BnplIssuerContext(
+                            /* iconId= */ R.drawable.affirm_linked,
+                            /* issuerId= */ "affirm",
+                            /* displayName= */ "Affirm",
+                            /* selectionText= */ "Not supported by merchant",
+                            /* isLinked= */ true,
+                            /* isEligible= */ false);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_INELIGIBLE_CHECKOUT_AMOUNT_TOO_LOW =
+            new BnplIssuerContext(
+                    /* iconId= */ R.drawable.klarna_linked,
+                    /* issuerId= */ "klarna",
+                    /* displayName= */ "Klarna",
+                    /* selectionText= */ "Purchase must be over $50.00",
+                    /* isLinked= */ true,
+                    /* isEligible= */ false);
+    private static final BnplIssuerContext BNPL_ISSUER_CONTEXT_INELIGIBLE_CHECKOUT_AMOUNT_TOO_HIGH =
+            new BnplIssuerContext(
+                    /* iconId= */ R.drawable.zip_unlinked,
+                    /* issuerId= */ "zip",
+                    /* displayName= */ "Zip",
+                    /* selectionText= */ "Purchase must be under $10,000.00",
+                    /* isLinked= */ false,
+                    /* isEligible= */ false);
+    private static final BnplIssuerTosDetail BNPL_ISSUER_TOS_DETAIL =
+            new BnplIssuerTosDetail(
+                    /* headerIconDrawableId= */ R.drawable.bnpl_icon_generic,
+                    /* headerIconDarkDrawableId= */ R.drawable.bnpl_icon_generic,
+                    /* isLinkedIssuer= */ true,
+                    /* issuerName= */ "Affirm",
+                    /* legalMessageLines= */ Arrays.asList(
+                            new LegalMessageLine("Affirm legal message line")));
 
     private BottomSheetController mBottomSheetController;
     private TouchToFillPaymentMethodCoordinator mCoordinator;
@@ -732,9 +785,9 @@ public class TouchToFillPaymentMethodRenderTest {
                 () -> {
                     mCoordinator.showBnplIssuers(
                             List.of(
-                                    BNPL_ISSUER_AFFIRM_LINKED,
-                                    BNPL_ISSUER_KLARNA_LINKED,
-                                    BNPL_ISSUER_ZIP_LINKED));
+                                    BNPL_ISSUER_CONTEXT_AFFIRM_LINKED,
+                                    BNPL_ISSUER_CONTEXT_KLARNA_LINKED,
+                                    BNPL_ISSUER_CONTEXT_ZIP_LINKED));
                 });
         BottomSheetTestSupport.waitForOpen(mBottomSheetController);
 
@@ -751,9 +804,9 @@ public class TouchToFillPaymentMethodRenderTest {
                 () -> {
                     mCoordinator.showBnplIssuers(
                             List.of(
-                                    BNPL_ISSUER_AFFIRM_UNLINKED,
-                                    BNPL_ISSUER_KLARNA_UNLINKED,
-                                    BNPL_ISSUER_ZIP_UNLINKED));
+                                    BNPL_ISSUER_CONTEXT_AFFIRM_UNLINKED,
+                                    BNPL_ISSUER_CONTEXT_KLARNA_UNLINKED,
+                                    BNPL_ISSUER_CONTEXT_ZIP_UNLINKED));
                 });
         BottomSheetTestSupport.waitForOpen(mBottomSheetController);
 
@@ -761,6 +814,20 @@ public class TouchToFillPaymentMethodRenderTest {
         mRenderTestRule.render(
                 bottomSheetView,
                 "touch_to_fill_bnpl_issuer_selection_screen_with_unlinked_issuers");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
+    public void testShowsBnplIssuerTosScreen() throws IOException {
+        runOnUiThreadBlocking(
+                () -> {
+                    mCoordinator.showBnplIssuerTos(BNPL_ISSUER_TOS_DETAIL);
+                });
+        BottomSheetTestSupport.waitForOpen(mBottomSheetController);
+
+        View bottomSheetView = mActivityTestRule.getActivity().findViewById(R.id.bottom_sheet);
+        mRenderTestRule.render(bottomSheetView, "touch_to_fill_bnpl_issuer_tos_screen");
     }
 
     @Test

@@ -6,9 +6,11 @@
 
 #import "base/base64.h"
 #import "base/base64url.h"
+#import "base/check_deref.h"
 #import "base/metrics/histogram_functions.h"
 #import "base/notreached.h"
 #import "components/webauthn/core/browser/passkey_model.h"
+#import "components/webauthn/ios/passkey_java_script_feature.h"
 #import "ios/web/public/js_messaging/script_message.h"
 #import "ios/web/public/web_state.h"
 
@@ -34,6 +36,20 @@ void LogEvent(WebAuthenticationIOSContentAreaEvent event) {
   base::UmaHistogramEnumeration("WebAuthentication.IOS.ContentAreaEvent",
                                 event);
 }
+
+class [[maybe_unused, nodiscard]] ScopedAllowPasskeyCreationInfobar {
+ public:
+  ScopedAllowPasskeyCreationInfobar(IOSPasskeyClient* client)
+      : client_(client) {
+    client_->AllowPasskeyCreationInfobar(true);
+  }
+  ~ScopedAllowPasskeyCreationInfobar() {
+    client_->AllowPasskeyCreationInfobar(false);
+  }
+
+ private:
+  raw_ptr<IOSPasskeyClient> client_;
+};
 
 }  // namespace
 
@@ -72,8 +88,33 @@ void PasskeyTabHelper::HandleGetResolvedEvent(
 }
 
 PasskeyTabHelper::PasskeyTabHelper(web::WebState* web_state,
-                                   webauthn::PasskeyModel* passkey_model)
-    : passkey_model_(passkey_model) {
+                                   webauthn::PasskeyModel* passkey_model,
+                                   std::unique_ptr<IOSPasskeyClient> client)
+    : passkey_model_(CHECK_DEREF(passkey_model)), client_(std::move(client)) {
+  CHECK(client_);
   CHECK(web_state);
-  CHECK(passkey_model_);
+  web_state->AddObserver(this);
+
+  PasskeyJavaScriptFeature::GetInstance()->SetAllowModalLogin(
+      web_state, client_->IsModalLoginWithShimAllowed());
+}
+
+void PasskeyTabHelper::AddNewPasskey(
+    sync_pb::WebauthnCredentialSpecifics& passkey) {
+  ScopedAllowPasskeyCreationInfobar scopedAllowPasskeyCreationInfobar(
+      client_.get());
+  passkey_model_->CreatePasskey(passkey);
+}
+
+// WebStateObserver
+
+void PasskeyTabHelper::DidFinishNavigation(
+    web::WebState* web_state,
+    web::NavigationContext* navigation_context) {
+  PasskeyJavaScriptFeature::GetInstance()->SetAllowModalLogin(
+      web_state, client_->IsModalLoginWithShimAllowed());
+}
+
+void PasskeyTabHelper::WebStateDestroyed(web::WebState* web_state) {
+  web_state->RemoveObserver(this);
 }

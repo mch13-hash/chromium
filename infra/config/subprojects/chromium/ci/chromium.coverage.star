@@ -47,6 +47,9 @@ ci.defaults.set(
     cores = 32,
     ssd = True,
     execution_timeout = 20 * time.hour,
+    experiments = {
+        "chromium_tests.resultdb_module": 100,
+    },
     health_spec = health_spec.default(),
     priority = ci_constants.DEFAULT_FYI_PRIORITY,
     service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
@@ -284,6 +287,7 @@ coverage_builder(
             "emulator-4-cores",
             "linux-jammy",
             "x86-64",
+            "retry_only_failed_tests",
         ],
         per_test_modifications = {
             # Keep this same as android-10-x86-rel
@@ -303,6 +307,7 @@ coverage_builder(
                     shards = 2,
                 ),
             ),
+
             # Keep this same as android-10-x86-rel
             "chrome_public_test_apk": targets.mixin(
                 args = [
@@ -1219,6 +1224,9 @@ coverage_builder(
             short_name = "lnx-fuzz",
         ),
     ],
+    # TODO(crbug.com/449026537): Remove elevated timeout once performance
+    # improves.
+    execution_timeout = 32 * time.hour,
     notifies = ["chrome-fuzzing-core"],
     properties = {
         "collect_fuzz_coverage": True,
@@ -1271,6 +1279,9 @@ coverage_builder(
         ),
     ],
     contact_team_email = "chrome-fuzzing-core@google.com",
+    # TODO(crbug.com/449026537): Remove elevated timeout once performance
+    # improves.
+    execution_timeout = 24 * time.hour,
     notifies = ["chrome-fuzzing-core"],
     properties = {
         "collect_fuzz_coverage": True,

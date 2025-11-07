@@ -104,8 +104,8 @@ namespace {
 
 // Records memory dumps and responds to memory pressure signals for Graphite Viz
 // via a global object.
-class GraphiteVizMemoryAssistant
-    : public base::trace_event::MemoryDumpProvider {
+class GraphiteVizMemoryAssistant : public base::trace_event::MemoryDumpProvider,
+                                   public base::MemoryPressureListener {
  public:
   static GraphiteVizMemoryAssistant& GetInstance() {
     static base::NoDestructor<GraphiteVizMemoryAssistant> instance;
@@ -123,10 +123,9 @@ class GraphiteVizMemoryAssistant
       base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
           this, "GraphiteVizMemoryAssistant", std::move(task_runner));
 
-      memory_pressure_listener_.emplace(
+      memory_pressure_listener_registration_.emplace(
           FROM_HERE, base::MemoryPressureListenerTag::kSkiaOutputSurfaceImpl,
-          base::BindRepeating(&GraphiteVizMemoryAssistant::HandleMemoryPressure,
-                              base::Unretained(this)));
+          this);
     }
     num_clients_++;
   }
@@ -134,7 +133,7 @@ class GraphiteVizMemoryAssistant
   void RemoveClient() {
     num_clients_--;
     if (num_clients_ == 0) {
-      memory_pressure_listener_.reset();
+      memory_pressure_listener_registration_.reset();
       recorder_ = nullptr;
       cache_controller_ = nullptr;
       base::trace_event::MemoryDumpManager::GetInstance()
@@ -191,16 +190,16 @@ class GraphiteVizMemoryAssistant
     return true;
   }
 
-  void HandleMemoryPressure(
-      base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  void OnMemoryPressure(
+      base::MemoryPressureLevel memory_pressure_level) override {
     switch (memory_pressure_level) {
-      case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
+      case base::MEMORY_PRESSURE_LEVEL_NONE:
         return;
-      case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
+      case base::MEMORY_PRESSURE_LEVEL_MODERATE:
         // With moderate pressure, clear any unlocked resources.
         cache_controller_->CleanUpScratchResources();
         break;
-      case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
+      case base::MEMORY_PRESSURE_LEVEL_CRITICAL:
         cache_controller_->CleanUpAllResources();
         break;
     }
@@ -208,7 +207,8 @@ class GraphiteVizMemoryAssistant
 
   // NOTE: The implementation guarantees that the callback will always be called
   // on the thread that created the listener.
-  std::optional<base::AsyncMemoryPressureListener> memory_pressure_listener_;
+  std::optional<base::AsyncMemoryPressureListenerRegistration>
+      memory_pressure_listener_registration_;
 
   raw_ptr<skgpu::graphite::Recorder> recorder_ = nullptr;
   raw_ptr<gpu::raster::GraphiteCacheController> cache_controller_ = nullptr;
@@ -586,7 +586,6 @@ SkCanvas* SkiaOutputSurfaceImpl::BeginPaintCurrentFrame() {
 
 void SkiaOutputSurfaceImpl::MakePromiseSkImage(
     ImageContext* image_context,
-    const gfx::ColorSpace& color_space,
     bool force_rgbx) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(current_paint_);
@@ -620,10 +619,10 @@ void SkiaOutputSurfaceImpl::MakePromiseSkImage(
   auto format = image_context->format();
   if (format.is_single_plane() || format.PrefersExternalSampler()) {
     MakePromiseSkImageSinglePlane(image_context_impl, /*mipmapped=*/false,
-                                  color_space, force_rgbx);
+                                  force_rgbx);
   } else {
     DCHECK(!force_rgbx);
-    MakePromiseSkImageMultiPlane(image_context_impl, color_space);
+    MakePromiseSkImageMultiPlane(image_context_impl);
   }
 
   if (sync_token.HasData()) {
@@ -635,7 +634,6 @@ void SkiaOutputSurfaceImpl::MakePromiseSkImage(
 void SkiaOutputSurfaceImpl::MakePromiseSkImageSinglePlane(
     ImageContextImpl* image_context,
     bool mipmap,
-    const gfx::ColorSpace& color_space,
     bool force_rgbx) {
   CHECK(!image_context->has_image());
   auto format = image_context->format();
@@ -660,7 +658,7 @@ void SkiaOutputSurfaceImpl::MakePromiseSkImageSinglePlane(
         gr_context_type_, format, image_context->ycbcr_info(),
         /*plane_index=*/0, mipmap);
     SkColorInfo color_info(color_type, image_context->alpha_type(),
-                           image_context->color_space());
+                           image_context->GetSkColorSpace());
     skgpu::Origin origin = image_context->origin() == kTopLeft_GrSurfaceOrigin
                                ? skgpu::Origin::kTopLeft
                                : skgpu::Origin::kBottomLeft;
@@ -674,24 +672,25 @@ void SkiaOutputSurfaceImpl::MakePromiseSkImageSinglePlane(
     CHECK(gr_context_thread_safe_);
     GrBackendFormat backend_format = GetGrBackendFormatForTexture(
         format, /*plane_index=*/0, image_context->texture_target(),
-        image_context->ycbcr_info(), color_space);
+        image_context->ycbcr_info(), image_context->color_space());
     auto image = SkImages::PromiseTextureFrom(
         gr_context_thread_safe_, backend_format,
         gfx::SizeToSkISize(image_context->size()),
         mipmap ? skgpu::Mipmapped::kYes : skgpu::Mipmapped::kNo,
         image_context->origin(), color_type, image_context->alpha_type(),
-        image_context->color_space(), FulfillGanesh, CleanUp, fulfill);
+        image_context->GetSkColorSpace(), FulfillGanesh, CleanUp, fulfill);
     LOG_IF(ERROR, !image) << "Failed to create the promise sk image";
     image_context->SetImage(std::move(image), {backend_format});
   }
 }
 
 void SkiaOutputSurfaceImpl::MakePromiseSkImageMultiPlane(
-    ImageContextImpl* image_context,
-    const gfx::ColorSpace& color_space) {
+    ImageContextImpl* image_context) {
   CHECK(!image_context->has_image());
   auto format = image_context->format();
   CHECK(format.is_multi_plane());
+
+  const gfx::ColorSpace& color_space = image_context->color_space();
   // There should be no usages of RGB matrix for color space here.
   CHECK(color_space.GetMatrixID() != gfx::ColorSpace::MatrixID::RGB,
         base::NotFatalUntil::M139);
@@ -730,7 +729,7 @@ void SkiaOutputSurfaceImpl::MakePromiseSkImageMultiPlane(
         yuva_info, texture_infos, skgpu::Mipmapped::kNo);
     void* fulfill_array_ptr = std::move(fulfill_array).leak().data();
     auto image = SkImages::PromiseTextureFromYUVA(
-        graphite_recorder_, yuva_backend_info, image_context->color_space(),
+        graphite_recorder_, yuva_backend_info, image_context->GetSkColorSpace(),
         graphite_use_volatile_promise_images_, FulfillGraphite, CleanUpArray,
         ReleaseGraphite, fulfill_array_ptr, fulfill_ptrs.data());
     LOG_IF(ERROR, !image) << "Failed to create the yuv promise sk image";
@@ -755,7 +754,8 @@ void SkiaOutputSurfaceImpl::MakePromiseSkImageMultiPlane(
                                                kTopLeft_GrSurfaceOrigin);
     auto image = SkImages::PromiseTextureFromYUVA(
         gr_context_thread_safe_, yuva_backend_info,
-        image_context->color_space(), FulfillGanesh, CleanUp, fulfills.data());
+        image_context->GetSkColorSpace(), FulfillGanesh, CleanUp,
+        fulfills.data());
     LOG_IF(ERROR, !image) << "Failed to create the yuv promise sk image";
     image_context->SetImage(std::move(image), std::move(formats));
   }
@@ -845,7 +845,7 @@ SkCanvas* SkiaOutputSurfaceImpl::BeginPaintRenderPass(
     RenderPassAlphaType alpha_type,
     skgpu::Mipmapped mipmap,
     bool scanout_dcomp_surface,
-    sk_sp<SkColorSpace> color_space,
+    const gfx::ColorSpace& color_space,
     bool is_overlay,
     const gpu::Mailbox& mailbox) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -855,9 +855,9 @@ SkCanvas* SkiaOutputSurfaceImpl::BeginPaintRenderPass(
 
   SkColorType color_type = ToClosestSkColorType(format);
   if (graphite_recorder_) {
-    SkImageInfo image_info =
-        SkImageInfo::Make(gfx::SizeToSkISize(surface_size), color_type,
-                          static_cast<SkAlphaType>(alpha_type), color_space);
+    SkImageInfo image_info = SkImageInfo::Make(
+        gfx::SizeToSkISize(surface_size), color_type,
+        static_cast<SkAlphaType>(alpha_type), color_space.ToSkColorSpace());
     skgpu::graphite::TextureInfo texture_info = gpu::GraphiteBackendTextureInfo(
         gr_context_type_, format, /*readonly=*/false, /*plane_index=*/0,
         /*is_yuv_plane=*/false, mipmap == skgpu::Mipmapped::kYes,
@@ -873,7 +873,8 @@ SkCanvas* SkiaOutputSurfaceImpl::BeginPaintRenderPass(
     GrSurfaceCharacterization characterization =
         CreateGrSurfaceCharacterizationRenderPass(
             surface_size, color_type, static_cast<SkAlphaType>(alpha_type),
-            mipmap, std::move(color_space), is_overlay, scanout_dcomp_surface);
+            mipmap, color_space.ToSkColorSpace(), is_overlay,
+            scanout_dcomp_surface);
     if (!characterization.isValid()) {
       DLOG(ERROR) << "BeginPaintRenderPass: invalid GrSurfaceCharacterization";
       return nullptr;
@@ -982,21 +983,20 @@ sk_sp<SkImage> SkiaOutputSurfaceImpl::MakePromiseSkImageFromRenderPass(
     const gfx::Size& size,
     SharedImageFormat format,
     bool mipmap,
-    sk_sp<SkColorSpace> color_space,
+    const gfx::ColorSpace& color_space,
     const gpu::Mailbox& mailbox) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(current_paint_);
 
   auto& image_context = render_pass_image_cache_[id];
   if (!image_context) {
-    image_context = std::make_unique<ImageContextImpl>(mailbox, size, format,
-                                                       std::move(color_space));
+    image_context =
+        std::make_unique<ImageContextImpl>(mailbox, size, format, color_space);
   }
   if (!image_context->has_image()) {
     // NOTE: The ColorSpace parameter is relevant only for external sampling,
     // whereas RenderPasses always work with true single-planar formats.
-    MakePromiseSkImageSinglePlane(image_context.get(), mipmap,
-                                  gfx::ColorSpace(), false);
+    MakePromiseSkImageSinglePlane(image_context.get(), mipmap, false);
     if (!image_context->has_image()) {
       return nullptr;
     }
@@ -1054,7 +1054,6 @@ void SkiaOutputSurfaceImpl::CopyOutput(
             gpu::SharedImageInfo{
                 GetSharedImageFormatFor(request->result_format()),
                 geometry.result_selection.size(), color_space,
-                kTopLeft_GrSurfaceOrigin, kPremul_SkAlphaType,
                 CopyOutputResult::kDefaultSharedImageUsage, "CopyOutput"},
             gpu::kNullSurfaceHandle);
 

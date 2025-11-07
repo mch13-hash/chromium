@@ -127,6 +127,16 @@ MetricsRenderFrameObserver::MetricsRenderFrameObserver(
     render_frame->SetLoadFromMemoryCacheCallback(base::BindRepeating(
         &MetricsRenderFrameObserver::DidLoadResourceFromMemoryCache,
         weak_factory_.GetWeakPtr()));
+
+    render_frame->SetDidStartResponseCallback(
+        base::BindRepeating(&MetricsRenderFrameObserver::DidStartResponse,
+                            weak_factory_.GetWeakPtr()));
+    render_frame->SetDidCompleteResponseCallback(
+        base::BindRepeating(&MetricsRenderFrameObserver::DidCompleteResponse,
+                            weak_factory_.GetWeakPtr()));
+    render_frame->SetDidCancelResponseCallback(
+        base::BindRepeating(&MetricsRenderFrameObserver::DidCancelResponse,
+                            weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -930,6 +940,24 @@ MetricsRenderFrameObserver::Timing MetricsRenderFrameObserver::GetTiming()
 
   if (perf.UserTimingMarkInteractive().has_value()) {
     timing->user_timing_mark_interactive = perf.UserTimingMarkInteractive();
+  }
+
+  blink::WebLocalFrame* web_frame = render_frame()->GetWebFrame();
+  if (web_frame->Client()->IsForInitialWebUI()) {
+    if (!perf.FirstPaintAsMonotonicTime().is_null()) {
+      if (!timing->monotonic_paint_timing) {
+        timing->monotonic_paint_timing = mojom::MonotonicPaintTiming::New();
+      }
+      timing->monotonic_paint_timing->first_paint =
+          perf.FirstPaintAsMonotonicTime();
+    }
+    if (!perf.FirstContentfulPaintAsMonotonicTime().is_null()) {
+      if (!timing->monotonic_paint_timing) {
+        timing->monotonic_paint_timing = mojom::MonotonicPaintTiming::New();
+      }
+      timing->monotonic_paint_timing->first_contentful_paint =
+          perf.FirstContentfulPaintAsMonotonicTime();
+    }
   }
 
   return Timing(std::move(timing), monotonic_timing);

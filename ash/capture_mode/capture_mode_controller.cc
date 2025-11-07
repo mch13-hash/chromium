@@ -222,7 +222,6 @@ bool IsVideoFileExtensionSupported(const base::FilePath& video_file_path) {
 base::FilePath SelectFilePathForCapturedFile(
     const base::FilePath& current_path,
     const base::FilePath& fallback_path) {
-  // TODO(b/323146997): Revisit the behavior if enforced by policy.
   if (base::PathExists(current_path.DirName()))
     return current_path;
   DCHECK(base::PathExists(fallback_path.DirName()));
@@ -1537,15 +1536,15 @@ void CaptureModeController::ReturnToApp(const base::UnguessableToken& token,
 
 void CaptureModeController::SetSystemMediaDeviceStatus(
     crosapi::mojom::VideoConferenceMediaDevice device,
-    bool disabled,
+    bool enabled,
     SetSystemMediaDeviceStatusCallback callback) {
   switch (device) {
     case crosapi::mojom::VideoConferenceMediaDevice::kCamera:
-      is_camera_muted_ = disabled;
+      is_camera_muted_ = !enabled;
       std::move(callback).Run(true);
       return;
     case crosapi::mojom::VideoConferenceMediaDevice::kMicrophone:
-      is_microphone_muted_ = disabled;
+      is_microphone_muted_ = !enabled;
       std::move(callback).Run(true);
       return;
     case crosapi::mojom::VideoConferenceMediaDevice::kUnusedDefault:

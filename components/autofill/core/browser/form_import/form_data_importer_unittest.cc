@@ -33,6 +33,7 @@
 #include "base/uuid.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/autofill_field_test_api.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager_test_api.h"
@@ -210,19 +211,15 @@ FormData ConstructFormDateFromTypeValuePairs(
 std::unique_ptr<FormStructure> ConstructFormStructureFromFormData(
     const FormData& form,
     GeoIpCountryCode geo_country = GeoIpCountryCode("")) {
-  auto cached_form_structure =
-      std::make_unique<FormStructure>(test::WithoutValues(form));
-  const RegexPredictions regex_predictions =
-      DetermineRegexTypes(geo_country, LanguageCode(""),
-                          cached_form_structure->ToFormData(), nullptr);
-  regex_predictions.ApplyTo(cached_form_structure->fields());
-  cached_form_structure->RationalizeAndAssignSections(
-      geo_country, LanguageCode(""), nullptr);
-
   auto form_structure = std::make_unique<FormStructure>(form);
-  form_structure->RetrieveFromCache(
-      *cached_form_structure,
-      FormStructure::RetrieveFromCacheReason::kFormImport);
+  const RegexPredictions regex_predictions = DetermineRegexTypes(
+      geo_country, LanguageCode(""), form_structure->ToFormData(), nullptr);
+  regex_predictions.ApplyTo(form_structure->fields());
+  form_structure->RationalizeAndAssignSections(geo_country, LanguageCode(""),
+                                               nullptr);
+  for (size_t i = 0; i < form_structure->field_count(); ++i) {
+    test_api(*form_structure->field(i)).set_initial_value(u"");
+  }
   return form_structure;
 }
 
@@ -536,16 +533,16 @@ class FormDataImporterTest : public testing::Test {
   }
 
   void SetUp() override {
-    prefs_ = test::PrefServiceForTesting();
-
     client().set_test_strike_database(std::make_unique<TestStrikeDatabase>());
     test_api(address_data_manager()).set_auto_accept_address_imports(true);
-    personal_data_manager().SetPrefService(prefs_.get());
     personal_data_manager().SetSyncServiceForTest(&sync_service_);
 
     auto virtual_card_enrollment_manager =
         std::make_unique<MockVirtualCardEnrollmentManager>(
-            &payments_data_manager(), nullptr, &client());
+            &payments_data_manager(),
+            static_cast<payments::MultipleRequestPaymentsNetworkInterface*>(
+                nullptr),
+            &client());
     payments_client().set_virtual_card_enrollment_manager(
         std::move(virtual_card_enrollment_manager));
     auto credit_card_save_manager =
@@ -3760,11 +3757,15 @@ TEST_F(FormDataImporterTest,
                                   ukm_source_id());
 }
 
-// Test that in the case where the MandatoryReauthManager denotes we should
-// offer re-auth opt-in, we start the opt-in in credit card processing flow if
-// the card is not a new card.
+// Verifies the legacy behavior when
+// `kAutofillPrioritizeSaveCardOverMandatoryReauth` is disabled. Verifies that
+// when the conditions for offering mandatory re-auth are met, the re-auth
+// bubble is offered immediately and the save card flow is not attempted.
 TEST_F(FormDataImporterTest,
-       ProcessExtractedCreditCard_MandatoryReauthOffered) {
+       ProcessExtractedCreditCard_PrioritizeSaveCard_FlagOff) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      features::kAutofillPrioritizeSaveCardOverMandatoryReauth);
   CreditCard extracted_credit_card = test::GetCreditCard2();
   std::unique_ptr<FormStructure> form_structure =
       ConstructDefaultCreditCardFormStructure();
@@ -3775,6 +3776,8 @@ TEST_F(FormDataImporterTest,
       .set_credit_card_import_type(
           FormDataImporter::CreditCardImportType::kLocalCard);
 
+  EXPECT_CALL(credit_card_save_manager(), ProceedWithSavingIfApplicable)
+      .Times(0);
   EXPECT_CALL(reauth_manager(), ShouldOfferOptin).WillOnce(Return(true));
   EXPECT_CALL(reauth_manager(), StartOptInFlow);
 
@@ -3789,6 +3792,68 @@ TEST_F(FormDataImporterTest,
       test_api(form_data_importer())
           .payment_method_type_if_non_interactive_authentication_flow_completed()
           .has_value());
+}
+
+// Test that when `kAutofillPrioritizeSaveCardOverMandatoryReauth` is enabled,
+// the save card bubble is prioritized. If that bubble is shown, the mandatory
+// re-auth bubble is not offered.
+TEST_F(
+    FormDataImporterTest,
+    ProcessExtractedCreditCard_PrioritizeSaveCard_SaveSucceedsMandatoryReauthNotOffered) {
+  base::test::ScopedFeatureList feature_list(
+      features::kAutofillPrioritizeSaveCardOverMandatoryReauth);
+
+  CreditCard card = test::GetCreditCard();
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultCreditCardFormStructure();
+  test_api(form_data_importer())
+      .set_credit_card_import_type(
+          FormDataImporter::CreditCardImportType::kLocalCard);
+  form_data_importer()
+      .SetPaymentMethodTypeIfNonInteractiveAuthenticationFlowCompleted(
+          NonInteractivePaymentMethodType::kLocalCard);
+
+  EXPECT_CALL(credit_card_save_manager(), ProceedWithSavingIfApplicable)
+      .WillOnce(Return(true));
+  // Verify that the mandatory re-auth flow is never started.
+  EXPECT_CALL(reauth_manager(), ShouldOfferOptin).Times(0);
+  EXPECT_CALL(reauth_manager(), StartOptInFlow).Times(0);
+
+  test_api(form_data_importer())
+      .ProcessExtractedCreditCard(*form_structure, card,
+                                  /*is_credit_card_upstream_enabled=*/false,
+                                  ukm_source_id());
+}
+
+// Test that when `kAutofillPrioritizeSaveCardOverMandatoryReauth` is enabled,
+// offering the save card bubble is prioritized. If it fails, we offer the
+// mandatory re-auth bubble as a fallback.
+TEST_F(
+    FormDataImporterTest,
+    ProcessExtractedCreditCard_PrioritizeSaveCard_SaveCardFailsMandatoryReauthOffered) {
+  base::test::ScopedFeatureList feature_list(
+      features::kAutofillPrioritizeSaveCardOverMandatoryReauth);
+
+  CreditCard card = test::GetCreditCard();
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultCreditCardFormStructure();
+  test_api(form_data_importer())
+      .set_credit_card_import_type(
+          FormDataImporter::CreditCardImportType::kLocalCard);
+  form_data_importer()
+      .SetPaymentMethodTypeIfNonInteractiveAuthenticationFlowCompleted(
+          NonInteractivePaymentMethodType::kLocalCard);
+
+  EXPECT_CALL(credit_card_save_manager(), ProceedWithSavingIfApplicable)
+      .WillOnce(Return(false));
+  // As a fallback, the mandatory re-auth flow should be offered.
+  EXPECT_CALL(reauth_manager(), ShouldOfferOptin).WillOnce(Return(true));
+  EXPECT_CALL(reauth_manager(), StartOptInFlow).Times(1);
+
+  test_api(form_data_importer())
+      .ProcessExtractedCreditCard(*form_structure, card,
+                                  /*is_credit_card_upstream_enabled=*/false,
+                                  ukm_source_id());
 }
 
 // Test that in the case where the MandatoryReauthManager denotes we should

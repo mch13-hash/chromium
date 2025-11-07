@@ -6,7 +6,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/files/file_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/profiles/profile.h"
@@ -54,8 +53,6 @@ class ShortcutSubManagerTestBase : public WebAppTest {
       base::ScopedAllowBlockingForTesting allow_blocking;
       test_override_ = OsIntegrationTestOverrideImpl::OverrideForTesting();
     }
-    provider_ = FakeWebAppProvider::Get(profile());
-
     auto file_handler_manager =
         std::make_unique<WebAppFileHandlerManager>(profile());
     auto protocol_handler_manager =
@@ -64,7 +61,7 @@ class ShortcutSubManagerTestBase : public WebAppTest {
         profile(), std::move(file_handler_manager),
         std::move(protocol_handler_manager));
 
-    provider_->SetOsIntegrationManager(std::move(os_integration_manager));
+    fake_provider().SetOsIntegrationManager(std::move(os_integration_manager));
     test::AwaitStartWebAppProviderAndSubsystems(profile());
   }
 
@@ -92,7 +89,7 @@ class ShortcutSubManagerTestBase : public WebAppTest {
     }
     base::test::TestFuture<const webapps::AppId&, webapps::InstallResultCode>
         result;
-    provider().scheduler().InstallFromInfoWithParams(
+    fake_provider().scheduler().InstallFromInfoWithParams(
         std::move(info), /*overwrite_existing_manifest_fields=*/true,
         webapps::WebappInstallSource::OMNIBOX_INSTALL_ICON,
         result.GetCallback(), WebAppInstallParams());
@@ -107,7 +104,6 @@ class ShortcutSubManagerTestBase : public WebAppTest {
   }
 
  protected:
-  WebAppProvider& provider() { return *provider_; }
   SkBitmap CreateSolidColorIcon(int size, SkColor color) {
     SkBitmap bitmap;
     bitmap.allocN32Pixels(size, size);
@@ -116,7 +112,6 @@ class ShortcutSubManagerTestBase : public WebAppTest {
   }
 
  private:
-  raw_ptr<FakeWebAppProvider, DanglingUntriaged> provider_ = nullptr;
   std::unique_ptr<OsIntegrationTestOverrideImpl::BlockingRegistration>
       test_override_;
 };
@@ -148,7 +143,8 @@ TEST_P(ShortcutSubManagerConfigureTest, ConfigureAppInstall) {
   const webapps::AppId& app_id = InstallWebAppWithShortcuts(icon_map);
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   ASSERT_THAT(state.value().shortcut().title(), testing::Eq("Test App"));
@@ -175,7 +171,8 @@ TEST_P(ShortcutSubManagerConfigureTest, FallbackToManifestIconsNoTrusted) {
       InstallWebAppWithShortcuts(icon_map, /*skip_trusted_icons=*/true);
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   // Instead of the specific trusted icons of 2 sizes being used, the test will
@@ -205,7 +202,8 @@ TEST_P(ShortcutSubManagerConfigureTest, ConfigureAppUninstall) {
 
   test::UninstallAllWebApps(profile());
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_FALSE(state.has_value());
 }
 
@@ -250,20 +248,29 @@ class ShortcutSubManagerExecuteTest
     std::optional<SkColor> application_menu_icon_color =
         test_override->GetShortcutIconTopLeftColor(
             profile(), test_override->application_menu(), app_id, app_name);
-    EXPECT_TRUE(application_menu_icon_color.has_value());
+    if (!application_menu_icon_color) {
+      ADD_FAILURE() << "Could not get shortcut icon color";
+      return SK_ColorTRANSPARENT;
+    }
     return application_menu_icon_color.value();
 #elif BUILDFLAG(IS_MAC)
     std::optional<SkColor> icon_color =
         test_override->GetShortcutIconTopLeftColor(
             profile(), test_override->chrome_apps_folder(), app_id, app_name);
-    EXPECT_TRUE(icon_color.has_value());
+    if (!icon_color) {
+      ADD_FAILURE() << "Could not get shortcut icon color";
+      return SK_ColorTRANSPARENT;
+    }
     return icon_color.value();
 #elif BUILDFLAG(IS_LINUX)
     std::optional<SkColor> icon_color =
         test_override->GetShortcutIconTopLeftColor(
             profile(), test_override->desktop(), app_id, app_name,
             kLauncherIconSize);
-    EXPECT_TRUE(icon_color.has_value());
+    if (!icon_color) {
+      ADD_FAILURE() << "Could not get shortcut icon color";
+      return SK_ColorTRANSPARENT;
+    }
     return icon_color.value();
 #else
     NOTREACHED() << "Shortcuts not supported for other OS";
@@ -282,8 +289,8 @@ class ShortcutSubManagerExecuteTest
 
     base::test::TestFuture<const webapps::AppId&, webapps::InstallResultCode>
         update_future;
-    provider().install_finalizer().FinalizeUpdate(*updated_info,
-                                                  update_future.GetCallback());
+    fake_provider().install_finalizer().FinalizeUpdate(
+        *updated_info, update_future.GetCallback());
     bool success = update_future.Wait();
     if (!success) {
       return webapps::AppId();
@@ -305,7 +312,7 @@ class ShortcutSubManagerExecuteTest
     base::test::TestFuture<const webapps::AppId&, webapps::InstallResultCode>
         result;
     // InstallFromInfoNoIntegrationForTesting() does not trigger OS integration.
-    provider().scheduler().InstallFromInfoNoIntegrationForTesting(
+    fake_provider().scheduler().InstallFromInfoNoIntegrationForTesting(
         std::move(info), /*overwrite_existing_manifest_fields=*/true,
         webapps::WebappInstallSource::OMNIBOX_INSTALL_ICON,
         result.GetCallback());
@@ -333,20 +340,21 @@ TEST_P(ShortcutSubManagerExecuteTest, InstallAppVerifyCorrectShortcuts) {
       InstallWebAppWithShortcuts(std::move(icon_map));
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   if (HasShortcutsOsIntegration()) {
     EXPECT_TRUE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id,
-        provider().registrar_unsafe().GetAppShortName(app_id)));
+        fake_provider().registrar_unsafe().GetAppShortName(app_id)));
 
     // On all desktop platforms, the shortcut icon that is used for the
     // launcher is icon_size::k128, which should be GREEN as per the icon_map
     // being used above.
     EXPECT_THAT(
-        GetShortcutColor(app_id,
-                         provider().registrar_unsafe().GetAppShortName(app_id)),
+        GetShortcutColor(
+            app_id, fake_provider().registrar_unsafe().GetAppShortName(app_id)),
         testing::Eq(SK_ColorGREEN));
   }
 }
@@ -360,16 +368,17 @@ TEST_P(ShortcutSubManagerExecuteTest, UpdateAppVerifyCorrectShortcuts) {
       InstallWebAppWithShortcuts(std::move(icon_map));
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   if (HasShortcutsOsIntegration()) {
     EXPECT_TRUE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id,
-        provider().registrar_unsafe().GetAppShortName(app_id)));
+        fake_provider().registrar_unsafe().GetAppShortName(app_id)));
     EXPECT_THAT(
-        GetShortcutColor(app_id,
-                         provider().registrar_unsafe().GetAppShortName(app_id)),
+        GetShortcutColor(
+            app_id, fake_provider().registrar_unsafe().GetAppShortName(app_id)),
         testing::Eq(SK_ColorYELLOW));
   }
 
@@ -381,23 +390,19 @@ TEST_P(ShortcutSubManagerExecuteTest, UpdateAppVerifyCorrectShortcuts) {
   EXPECT_EQ(updated_app_id, app_id);
 
   auto updated_state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
           updated_app_id);
   ASSERT_TRUE(updated_state.has_value());
 
   if (HasShortcutsOsIntegration()) {
     // Verify shortcut changes for both name and color.
-// TODO(crbug.com/40261124): Enable once PList parsing code is added to
-// OsIntegrationTestOverride for Mac shortcut checking.
-#if !BUILDFLAG(IS_MAC)
     EXPECT_TRUE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id,
-        provider().registrar_unsafe().GetAppShortName(app_id)));
+        fake_provider().registrar_unsafe().GetAppShortName(app_id)));
     EXPECT_THAT(
-        GetShortcutColor(app_id,
-                         provider().registrar_unsafe().GetAppShortName(app_id)),
+        GetShortcutColor(
+            app_id, fake_provider().registrar_unsafe().GetAppShortName(app_id)),
         testing::Eq(SK_ColorBLUE));
-#endif  // !BUILDFLAG(IS_MAC)
   }
 }
 
@@ -409,48 +414,43 @@ TEST_P(ShortcutSubManagerExecuteTest,
   const webapps::AppId& app_id =
       InstallWebAppNoIntegration(std::move(icon_map));
 
-  std::string app_name = provider().registrar_unsafe().GetAppShortName(app_id);
+  std::string app_name =
+      fake_provider().registrar_unsafe().GetAppShortName(app_id);
 
   // Call synchronize with empty options to set up the current_states, but
   // without any shortcut locations defined.
   test::SynchronizeOsIntegration(profile(), app_id, SynchronizeOsOptions());
 
   auto os_integration_state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(os_integration_state.has_value());
   EXPECT_FALSE(os_integration_state->has_shortcut());
 
   if (HasShortcutsOsIntegration()) {
-// TODO(crbug.com/40261124): Enable once PList parsing code is added to
-// OsIntegrationTestOverride for Mac shortcut checking.
-#if !BUILDFLAG(IS_MAC)
     EXPECT_FALSE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id, app_name));
-#endif
   }
 
   // This should trigger the application to become fully installed.
   base::test::TestFuture<void> future;
-  provider().scheduler().SetUserDisplayMode(
+  fake_provider().scheduler().SetUserDisplayMode(
       app_id, mojom::UserDisplayMode::kStandalone, future.GetCallback());
   ASSERT_TRUE(future.Wait());
 
   os_integration_state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(os_integration_state.has_value());
   EXPECT_TRUE(os_integration_state->has_shortcut());
 
   if (HasShortcutsOsIntegration()) {
-// TODO(crbug.com/40261124): Enable once PList parsing code is added to
-// OsIntegrationTestOverride for Mac shortcut checking.
-#if !BUILDFLAG(IS_MAC)
     EXPECT_TRUE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id, app_name));
     EXPECT_THAT(
-        GetShortcutColor(app_id,
-                         provider().registrar_unsafe().GetAppShortName(app_id)),
+        GetShortcutColor(
+            app_id, fake_provider().registrar_unsafe().GetAppShortName(app_id)),
         testing::Eq(SK_ColorRED));
-#endif
   }
 
   // Mimic a 2nd installation with updated icons so that the update flow gets
@@ -463,21 +463,19 @@ TEST_P(ShortcutSubManagerExecuteTest,
   ASSERT_EQ(expected_app_id, app_id);
 
   os_integration_state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
           expected_app_id);
   ASSERT_TRUE(os_integration_state.has_value());
 
   // Shortcuts should be created now.
   if (HasShortcutsOsIntegration()) {
     EXPECT_TRUE(os_integration_state->has_shortcut());
-// TODO(crbug.com/40261124): Enable once PList parsing code is added to
-// OsIntegrationTestOverride for Mac shortcut checking.
 // TODO(crbug.com/339024222): The color doesn't correctly update to yellow on
 // windows.
-#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_WIN)
+#if !BUILDFLAG(IS_WIN)
     EXPECT_TRUE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), expected_app_id,
-        provider().registrar_unsafe().GetAppShortName(expected_app_id)));
+        fake_provider().registrar_unsafe().GetAppShortName(expected_app_id)));
     EXPECT_THAT(GetShortcutColor(expected_app_id, app_name),
                 testing::Eq(SK_ColorYELLOW));
 #endif
@@ -494,16 +492,17 @@ TEST_P(ShortcutSubManagerExecuteTest, UninstallAppRemovesShortcuts) {
       InstallWebAppWithShortcuts(std::move(icon_map));
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   if (HasShortcutsOsIntegration()) {
     EXPECT_TRUE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id,
-        provider().registrar_unsafe().GetAppShortName(app_id)));
+        fake_provider().registrar_unsafe().GetAppShortName(app_id)));
     EXPECT_THAT(
-        GetShortcutColor(app_id,
-                         provider().registrar_unsafe().GetAppShortName(app_id)),
+        GetShortcutColor(
+            app_id, fake_provider().registrar_unsafe().GetAppShortName(app_id)),
         testing::Eq(SK_ColorRED));
   }
 
@@ -511,7 +510,7 @@ TEST_P(ShortcutSubManagerExecuteTest, UninstallAppRemovesShortcuts) {
   if (HasShortcutsOsIntegration()) {
     EXPECT_FALSE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id,
-        provider().registrar_unsafe().GetAppShortName(app_id)));
+        fake_provider().registrar_unsafe().GetAppShortName(app_id)));
   }
 }
 
@@ -524,10 +523,11 @@ TEST_P(ShortcutSubManagerExecuteTest, ForceUnregisterAppInRegistry) {
   const webapps::AppId& app_id =
       InstallWebAppWithShortcuts(std::move(icon_map));
   const std::string& app_name =
-      provider().registrar_unsafe().GetAppShortName(app_id);
+      fake_provider().registrar_unsafe().GetAppShortName(app_id);
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   if (HasShortcutsOsIntegration()) {
@@ -554,10 +554,11 @@ TEST_P(ShortcutSubManagerExecuteTest, ForceUnregisterAppNotInRegistry) {
   const webapps::AppId& app_id =
       InstallWebAppWithShortcuts(std::move(icon_map));
   const std::string& app_name =
-      provider().registrar_unsafe().GetAppShortName(app_id);
+      fake_provider().registrar_unsafe().GetAppShortName(app_id);
 
   auto state =
-      provider().registrar_unsafe().GetAppCurrentOsIntegrationState(app_id);
+      fake_provider().registrar_unsafe().GetAppCurrentOsIntegrationState(
+          app_id);
   ASSERT_TRUE(state.has_value());
 
   if (HasShortcutsOsIntegration()) {
@@ -570,7 +571,7 @@ TEST_P(ShortcutSubManagerExecuteTest, ForceUnregisterAppNotInRegistry) {
     EXPECT_FALSE(OsIntegrationTestOverrideImpl::Get()->IsShortcutCreated(
         profile(), app_id, app_name));
   }
-  EXPECT_FALSE(provider().registrar_unsafe().IsInRegistrar(app_id));
+  EXPECT_FALSE(fake_provider().registrar_unsafe().IsInRegistrar(app_id));
 
   // Force unregister shouldn't change anything.
   SynchronizeOsOptions options;

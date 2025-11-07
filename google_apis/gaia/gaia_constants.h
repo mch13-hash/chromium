@@ -50,6 +50,7 @@ COMPONENT_EXPORT(GOOGLE_APIS) extern const char kAuditRecordingOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kClearCutOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kFCMOAuthScope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kTachyonOAuthScope[];
+COMPONENT_EXPORT(GOOGLE_APIS) extern const char kSchoolToolsAuthScope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kPhotosOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kCastBackdropOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS)
@@ -62,10 +63,12 @@ COMPONENT_EXPORT(GOOGLE_APIS) extern const char kKidFamilyReadonlyOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kPaymentsOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kCryptAuthOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDriveOAuth2Scope[];
+COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDriveAppsOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS)
 extern const char kExperimentsAndConfigsOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kClientChannelOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDriveReadOnlyOAuth2Scope[];
+COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDriveAppsReadonlyOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kAssistantOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS)
 extern const char kNearbyDevicesOAuth2Scope[];

@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.ui.web_app_header;
 
 import android.app.Activity;
+import android.content.res.Resources;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.SystemClock;
@@ -52,6 +53,7 @@ import org.chromium.ui.widget.ChromeImageButton;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 /**
  * Root component to interact with web app header. This coordinator lazily initializes web app
@@ -99,7 +101,9 @@ public class WebAppHeaderLayoutCoordinator
     private final boolean mIsTWA;
     private final ObservableSupplierImpl<MenuButtonState> mMenuButtonStateSupplier =
             new ObservableSupplierImpl<>();
-    private @Nullable View mMenuButtonView;
+    private @Nullable View mMenuButtonContainer;
+    private final @Nullable String mClientPackageName;
+    private @Nullable ChromeImageButton mToggleButtonView;
 
     /**
      * Creates an instance of {@link WebAppHeaderLayoutCoordinator}.
@@ -122,7 +126,8 @@ public class WebAppHeaderLayoutCoordinator
             BrowserStateBrowserControlsVisibilityDelegate
                     browserStateBrowserControlsVisibilityDelegate,
             WindowAndroid activityWindowAndroid,
-            Runnable requestRenderRunnable) {
+            Runnable requestRenderRunnable,
+            @Nullable String clientPackageName) {
         assert browserServicesIntentDataProvider.isWebApkActivity()
                 || browserServicesIntentDataProvider.isTrustedWebActivity();
 
@@ -150,6 +155,8 @@ public class WebAppHeaderLayoutCoordinator
         buttonState.lightBadgeIcon = R.drawable.badge_update_light;
         buttonState.adaptiveBadgeIcon = R.drawable.badge_update;
         mMenuButtonStateSupplier.set(buttonState);
+
+        mClientPackageName = clientPackageName;
 
         mViewStub = viewStub;
         mViewStub.setLayoutResource(R.layout.web_app_header_layout);
@@ -203,7 +210,8 @@ public class WebAppHeaderLayoutCoordinator
                         headerMinHeight,
                         headerButtonHeight,
                         mDisplayMode,
-                        mSetHeaderAsOverlayCallback);
+                        mSetHeaderAsOverlayCallback,
+                        mClientPackageName);
         PropertyModelChangeProcessor.create(model, mView, WebAppHeaderLayoutViewBinder::bind);
 
         // Initial visibility state must be initialized after mediator is initialized.
@@ -214,6 +222,42 @@ public class WebAppHeaderLayoutCoordinator
         if (mDisplayMode == DisplayMode.MINIMAL_UI) {
             initMinUiControls();
         }
+
+        if (mDisplayMode == DisplayMode.WINDOW_CONTROLS_OVERLAY) {
+            initWCOControls();
+        }
+    }
+
+    private void initWCOControls() {
+        assert mView != null;
+        assert mMediator != null;
+
+        mToggleButtonView = mView.findViewById(R.id.wco_toggle_button);
+        mToggleButtonView.setVisibility(View.VISIBLE);
+        syncToggleButtonView();
+        mToggleButtonView.setOnClickListener(
+                v -> {
+                    assert mMediator != null;
+                    mMediator.setUserToggleHeaderAsOverlay(
+                            !mMediator.getUserToggleHeaderAsOverlay());
+                    syncToggleButtonView();
+                });
+        mToggleButtonView.setForegroundTintList(mThemeColorProvider.getTint());
+    }
+
+    private void syncToggleButtonView() {
+        assert mView != null;
+        assert mMediator != null;
+        assert mToggleButtonView != null;
+
+        Resources resources = mView.getContext().getResources();
+        int level =
+                mMediator.getUserToggleHeaderAsOverlay()
+                        ? resources.getInteger(
+                                R.integer.window_controls_overlay_toggle_level_disable)
+                        : resources.getInteger(
+                                R.integer.window_controls_overlay_toggle_level_enable);
+        mToggleButtonView.getDrawable().setLevel(level);
     }
 
     private void initMinUiControls() {
@@ -252,10 +296,11 @@ public class WebAppHeaderLayoutCoordinator
                         /* isWebApp= */ true);
 
         if (mIsTWA && ChromeFeatureList.sAndroidWebAppMenuButton.isEnabled()) {
-            View webAppMenuButton = mView.findViewById(R.id.web_app_menu_button_wrapper);
-            webAppMenuButton.setVisibility(View.VISIBLE);
-            mMenuButtonView = mView.findViewById(R.id.web_app_menu_button);
+            mMenuButtonContainer = mView.findViewById(R.id.web_app_menu_button_wrapper);
+            mMenuButtonContainer.setVisibility(View.VISIBLE);
 
+            // TODO(crbug.com/453007852): When ObservableSupplier<E> extends Supplier<@Nullable E>,
+            // remove cast to Supplier<@Nullable MenuButtonState>,
             mMenuButtonCoordinator =
                     new MenuButtonCoordinator(
                             mActivity,
@@ -268,7 +313,7 @@ public class WebAppHeaderLayoutCoordinator
                             /* isInOverviewModeSupplier= */ () -> false,
                             mThemeColorProvider,
                             mIncognitoStateProvider,
-                            mMenuButtonStateSupplier,
+                            (Supplier<@Nullable MenuButtonState>) mMenuButtonStateSupplier,
                             /* onMenuButtonClicked= */ () -> {},
                             R.id.menu_button_wrapper,
                             /* visibilityDelegate= */ null);
@@ -293,8 +338,8 @@ public class WebAppHeaderLayoutCoordinator
         }
         if (mMenuButtonCoordinator != null) {
             mMenuButtonCoordinator.setVisibility(mShowButtons);
-            if (mMenuButtonView != null) {
-                mMenuButtonView.setVisibility(mShowButtons ? View.VISIBLE : View.GONE);
+            if (mMenuButtonContainer != null) {
+                mMenuButtonContainer.setVisibility(mShowButtons ? View.VISIBLE : View.GONE);
             }
         }
         logControlsVisibilityChange(wasShowingButtons);
@@ -332,7 +377,16 @@ public class WebAppHeaderLayoutCoordinator
         }
 
         if (mMenuButtonCoordinator != null && mMenuButtonCoordinator.isVisible()) {
-            areas.add(mMenuButtonCoordinator.getHitRect());
+            assert mView != null;
+            Rect rect = mMenuButtonCoordinator.getHitRect();
+            View menuDescendent = mView.findViewById(R.id.menu_button_wrapper);
+            mView.offsetDescendantRectToMyCoords(menuDescendent, rect);
+            areas.add(rect);
+        }
+        if (mToggleButtonView != null && mToggleButtonView.getVisibility() == View.VISIBLE) {
+            final var rect = new Rect();
+            mToggleButtonView.getHitRect(rect);
+            areas.add(rect);
         }
 
         return areas;
@@ -463,6 +517,14 @@ public class WebAppHeaderLayoutCoordinator
     @Override
     public void onAndroidControlsVisibilityChanged(int visibility) {
         if (mMediator == null) return;
-        mMediator.setBrowserControlsVisible(visibility == View.VISIBLE);
+        boolean isVisible = visibility == View.VISIBLE;
+        if (mToggleButtonView != null) {
+            if (isVisible) {
+                mToggleButtonView.setVisibility(View.GONE);
+            } else {
+                mToggleButtonView.setVisibility(View.VISIBLE);
+            }
+        }
+        mMediator.setBrowserControlsVisible(isVisible);
     }
 }

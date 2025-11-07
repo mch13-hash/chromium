@@ -55,6 +55,13 @@ BASE_FEATURE(kSkipResetServiceWorkerURLLoaderFactories,
 
 BASE_FEATURE(kEnableWebHidInWebView, base::FEATURE_ENABLED_BY_DEFAULT);
 
+#if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
+// Disabled by default because on first-run we don't have a Finch seed yet, so
+// we want to default to the safe behavior of no extensions.
+BASE_FEATURE(kEnableExtensionsForCorpDesktopAndroid,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
+
 BASE_FEATURE(kExtensionDisableUnsupportedDeveloper,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -102,8 +109,7 @@ BASE_FEATURE(kSafeBrowsingCrxAllowlistAutoDisable,
 BASE_FEATURE(kSafeBrowsingCrxAllowlistShowWarnings,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kStructuredCloningForMV3Messaging,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kStructuredCloningForMessaging, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTelemetryExtensionPendingApprovalApi,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -155,8 +161,7 @@ BASE_FEATURE(kDebuggerAPIRestrictedToDevMode,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kExtensionBrowserNamespaceAlternative,
-             "ExtensionBrowserNamespaceAlternative",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kOptimizeServiceWorkerStartRequests,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -168,7 +173,11 @@ BASE_FEATURE(kContentVerifyJobUseJobVersionForHashing,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kRuntimeOnMessageWebExtensionPolyfillSupport,
-             "RuntimeOnMessageWebExtensionPolyfillSupport",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kEnableShouldShowPromotion, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kEnableWebRequestCollapsedListeners,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace extensions_features

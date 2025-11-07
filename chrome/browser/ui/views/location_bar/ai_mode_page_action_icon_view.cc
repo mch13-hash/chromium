@@ -5,16 +5,22 @@
 #include "chrome/browser/ui/views/location_bar/ai_mode_page_action_icon_view.h"
 
 #include "base/check.h"
+#include "base/functional/bind.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/omnibox/ai_mode_page_action_controller.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
+#include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/search/omnibox_utils.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 #include "chrome/grit/branded_strings.h"
+#include "components/omnibox/browser/omnibox_pref_names.h"
 #include "components/omnibox/browser/vector_icons.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
@@ -24,7 +30,6 @@
 #include "ui/gfx/vector_icon_types.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/bubble/bubble_dialog_delegate_view.h"
-#include "ui/views/focus/focus_manager.h"
 #include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/view_class_properties.h"
 
@@ -41,6 +46,12 @@ AiModePageActionIconView::AiModePageActionIconView(
       browser_(browser) {
   CHECK(browser_);
   image_container_view()->SetFlipCanvasOnPaintForRTLUI(false);
+
+  pref_registrar_ = std::make_unique<PrefChangeRegistrar>();
+  pref_registrar_->Init(browser_->GetProfile()->GetPrefs());
+  pref_registrar_->Add(omnibox::kShowAiModeOmniboxButton,
+                       base::BindRepeating(&AiModePageActionIconView::Update,
+                                           base::Unretained(this)));
 
   SetProperty(views::kElementIdentifierKey, kAiModePageActionIconElementId);
 
@@ -59,9 +70,10 @@ AiModePageActionIconView::~AiModePageActionIconView() = default;
 
 void AiModePageActionIconView::OnExecuting(
     PageActionIconView::ExecuteSource source) {
-  OmniboxView* omnibox_view = GetOmniboxView();
-  CHECK(omnibox_view);
-  omnibox::AiModePageActionController::OpenAiMode(*omnibox_view,
+  OmniboxController* omnibox_controller =
+      search::GetOmniboxController(GetWebContents());
+  CHECK(omnibox_controller);
+  omnibox::AiModePageActionController::OpenAiMode(*omnibox_controller,
                                                   /*via_keyboard=*/false);
 }
 
@@ -85,9 +97,10 @@ const gfx::VectorIcon& AiModePageActionIconView::GetVectorIcon() const {
 // platform-specific bugs.
 bool AiModePageActionIconView::OnKeyPressed(const ui::KeyEvent& event) {
   if (event.key_code() == ui::VKEY_RETURN) {
-    OmniboxView* omnibox_view = GetOmniboxView();
-    CHECK(omnibox_view);
-    omnibox::AiModePageActionController::OpenAiMode(*omnibox_view,
+    OmniboxController* omnibox_controller =
+        search::GetOmniboxController(GetWebContents());
+    CHECK(omnibox_controller);
+    omnibox::AiModePageActionController::OpenAiMode(*omnibox_controller,
                                                     /*via_keyboard=*/true);
     return true;
   }
@@ -102,32 +115,29 @@ void AiModePageActionIconView::ExecuteWithKeyboardSourceForTesting() {
 
 void AiModePageActionIconView::UpdateImpl() {
   Profile* profile = browser_->GetProfile();
+  bool enabled =
+      profile->GetPrefs()->GetBoolean(omnibox::kShowAiModeOmniboxButton);
   views::View* location_bar_view =
       views::ElementTrackerViews::GetInstance()->GetFirstMatchingView(
           kLocationBarElementId,
           views::ElementTrackerViews::GetContextForView(this));
-  OmniboxView* omnibox_view = GetOmniboxView();
-  if (!profile || !location_bar_view || !omnibox_view) {
+  if (!profile || !location_bar_view) {
     return;
   }
 
+  LocationBarView* location_bar =
+      static_cast<LocationBarView*>(location_bar_view);
   const bool is_visible =
-      omnibox::AiModePageActionController::ShouldShowPageAction(
-          profile, *location_bar_view, *omnibox_view);
+      enabled && omnibox::AiModePageActionController::ShouldShowPageAction(
+                     profile, *location_bar);
   if (is_visible) {
-    omnibox::AiModePageActionController::NotifyOmniboxTriggeredFeatureService(
-        *omnibox_view);
+    if (auto* omnibox_controller = location_bar->GetOmniboxController()) {
+      omnibox::AiModePageActionController::NotifyOmniboxTriggeredFeatureService(
+          *omnibox_controller);
+    }
   }
   SetVisible(is_visible);
   ResetSlideAnimation(true);
-}
-
-OmniboxView* AiModePageActionIconView::GetOmniboxView() {
-  auto* web_contents = GetWebContents();
-  if (!web_contents) {
-    return nullptr;
-  }
-  return search::GetOmniboxView(web_contents);
 }
 
 BEGIN_METADATA(AiModePageActionIconView)

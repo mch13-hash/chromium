@@ -30,17 +30,34 @@ final class SigninPromoViewBinder {
         if (key == SigninPromoProperties.PROFILE_DATA) {
             DisplayableProfileData profileData = model.get(SigninPromoProperties.PROFILE_DATA);
             if (profileData == null) {
-                view.getImage().setImageResource(R.drawable.chrome_sync_logo);
-                setImageSize(context, view, R.dimen.signin_promo_cold_state_image_size);
+                if (seamlessSigninPromoType == SigninFeatureMap.SeamlessSigninPromoType.COMPACT) {
+                    view.getSelectedAccountView().setVisibility(View.GONE);
+                } else {
+                    view.getImage().setImageResource(R.drawable.chrome_sync_logo);
+                    // TODO(crbug.com/456378546): move this logic to SigninPromoCoordinator
+                    setImageSize(
+                            context,
+                            view,
+                            seamlessSigninPromoType
+                                            == SigninFeatureMap.SeamlessSigninPromoType.TWO_BUTTONS
+                                    ? R.dimen.seamless_signin_promo_cold_state_image_size
+                                    : R.dimen.signin_promo_cold_state_image_size);
+                }
             } else {
                 Drawable accountImage = profileData.getImage();
                 view.getImage().setImageDrawable(accountImage);
-                setImageSize(context, view, R.dimen.sync_promo_account_image_size);
+                // TODO(crbug.com/456378546): move this logic to SigninPromoCoordinator
+                int imageDim =
+                        seamlessSigninPromoType == SigninFeatureMap.SeamlessSigninPromoType.COMPACT
+                                ? R.dimen.seamless_signin_promo_account_image_size_compact
+                                : R.dimen.sync_promo_account_image_size;
+                setImageSize(context, view, imageDim);
                 if (seamlessSigninPromoType == SigninFeatureMap.SeamlessSigninPromoType.COMPACT) {
                     TextView accountTextPrimary = view.findViewById(R.id.account_text_primary);
                     TextView accountTextSecondary = view.findViewById(R.id.account_text_secondary);
                     accountTextPrimary.setText(profileData.getFullName());
                     accountTextSecondary.setText(profileData.getAccountEmail());
+                    view.getSelectedAccountView().setVisibility(View.VISIBLE);
                 }
             }
         } else if (key == SigninPromoProperties.ON_PRIMARY_BUTTON_CLICKED) {
